@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Sidebar() {
@@ -22,6 +22,28 @@ export default function Sidebar() {
         >
           <LayoutDashboard className="w-5 h-5 mr-3" />
           Panel Principal
+        </NavLink>
+        <NavLink
+          to="/management"
+          className={({ isActive }) =>
+            `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+              isActive ? 'bg-gray-100' : ''
+            }`
+          }
+        >
+          <KanbanSquare className="w-5 h-5 mr-3" />
+          Gestión
+        </NavLink>
+        <NavLink
+          to="/projects"
+          className={({ isActive }) =>
+            `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+              isActive ? 'bg-gray-100' : ''
+            }`
+          }
+        >
+          <FolderOpen className="w-5 h-5 mr-3" />
+          Proyectos
         </NavLink>
         <NavLink
           to="/tasks"
