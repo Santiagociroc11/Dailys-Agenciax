@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { format, isWithinInterval, parseISO } from 'date-fns';
+import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 interface Task {
@@ -46,6 +46,76 @@ interface Project {
   name: string;
 }
 
+// Función para calcular y formatear el tiempo restante o pasado
+function getTimeIndicator(dateStr: string | null, isStartDate: boolean): { text: string; color: string } {
+  if (!dateStr) return { text: "", color: "" };
+  
+  const today = new Date();
+  // Comparamos solo fechas sin tiempo
+  const todayWithoutTime = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const date = new Date(dateStr);
+  const dateWithoutTime = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = differenceInDays(dateWithoutTime, todayWithoutTime);
+  
+  // Para fechas de inicio
+  if (isStartDate) {
+    // Si la fecha es hoy
+    if (diffDays === 0) {
+      return { 
+        text: "Inicia hoy", 
+        color: "text-green-600 font-medium" 
+      };
+    }
+    // Si la fecha de inicio ya pasó
+    else if (isBefore(dateWithoutTime, todayWithoutTime)) {
+      const daysPassed = Math.abs(diffDays);
+      return { 
+        text: `Iniciada hace ${daysPassed} día${daysPassed !== 1 ? 's' : ''}`, 
+        color: "text-blue-600"
+      };
+    } 
+    // Si la fecha de inicio es en el futuro
+    else {
+      return { 
+        text: `Inicia en ${diffDays} día${diffDays !== 1 ? 's' : ''}`, 
+        color: "text-gray-600" 
+      };
+    }
+  } 
+  // Para fechas de fin
+  else {
+    // Si la fecha es hoy
+    if (diffDays === 0) {
+      return { 
+        text: "Vence hoy", 
+        color: "text-yellow-600 font-medium" 
+      };
+    }
+    // Si la fecha límite ya pasó (atrasada)
+    else if (isBefore(dateWithoutTime, todayWithoutTime)) {
+      const daysLate = Math.abs(diffDays);
+      return { 
+        text: `Atrasada por ${daysLate} día${daysLate !== 1 ? 's' : ''}`, 
+        color: "text-red-600 font-medium" 
+      };
+    } 
+    // Si vence en menos de 3 días
+    else if (diffDays <= 3) {
+      return { 
+        text: `Vence en ${diffDays} día${diffDays !== 1 ? 's' : ''}`, 
+        color: "text-yellow-600" 
+      };
+    } 
+    // Si la fecha límite es en el futuro (más de 3 días)
+    else {
+      return { 
+        text: `Vence en ${diffDays} día${diffDays !== 1 ? 's' : ''}`, 
+        color: "text-gray-600" 
+      };
+    }
+  }
+}
+
 export default function UserProjectView() {
   const { projectId } = useParams();
   const { user } = useAuth();
@@ -60,6 +130,7 @@ export default function UserProjectView() {
   const [error, setError] = useState<string | null>(null);
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
   const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [sortBy, setSortBy] = useState<'deadline' | 'priority' | 'duration'>('deadline');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
@@ -454,9 +525,15 @@ export default function UserProjectView() {
     );
   }
   
+  function handleSaveButton() {
+    if (selectedTasks.length === 0) return;
+    setShowConfirmModal(true);
+  }
+  
   async function handleSaveSelection() {
     if (!user || selectedTasks.length === 0) return;
     
+    setShowConfirmModal(false);
     setSaving(true);
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
@@ -680,16 +757,34 @@ export default function UserProjectView() {
                       {task.description || '-'}
                     </div>
                     <div className="text-sm text-gray-700">
-                      {task.start_date ? 
-                        format(new Date(task.start_date), 'dd/MM/yyyy') : 
+                      {task.start_date ? (
+                        <>
+                          <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
+                          {/* Indicador de tiempo para fecha de inicio */}
+                          {getTimeIndicator(task.start_date, true).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
+                              {getTimeIndicator(task.start_date, true).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
                         <span className="text-gray-400">-</span>
-                      }
+                      )}
                     </div>
                     <div className="text-sm text-gray-700">
-                      {task.deadline ? 
-                        format(new Date(task.deadline), 'dd/MM/yyyy') : 
+                      {task.deadline ? (
+                        <>
+                          <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
+                          {/* Indicador de tiempo para fecha de fin */}
+                          {getTimeIndicator(task.deadline, false).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
+                              {getTimeIndicator(task.deadline, false).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
                         <span className="text-gray-400">-</span>
-                      }
+                      )}
                     </div>
                     <div className="text-sm font-medium">
                       {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
@@ -712,7 +807,7 @@ export default function UserProjectView() {
               <p className="font-bold text-lg mt-1">{totalEstimatedDuration} HORA{totalEstimatedDuration !== 1 ? 'S' : ''}</p>
             </div>
             <button
-              onClick={handleSaveSelection}
+              onClick={handleSaveButton}
               disabled={selectedTasks.length === 0 || saving}
               className="bg-yellow-500 text-white px-6 py-2 rounded-md font-medium 
                         hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 
@@ -727,6 +822,102 @@ export default function UserProjectView() {
       {activeTab === 'gestion' && (
         <div className="py-6 text-center text-gray-500">
           <p>Funcionalidad de gestión en desarrollo...</p>
+        </div>
+      )}
+
+      {/* Modal de confirmación de guardar tareas */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-medium">Confirmar asignación de tareas</h3>
+              <button 
+                onClick={() => setShowConfirmModal(false)}
+                className="text-gray-400 hover:text-gray-500 focus:outline-none"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="px-6 py-4">
+              <p className="mb-4 text-gray-700">Estás a punto de asignar estas {selectedTasks.length} tareas para el día de hoy ({format(new Date(), 'dd/MM/yyyy')}). ¿Deseas continuar?</p>
+              
+              <div className="mb-4 p-3 bg-gray-50 rounded-md max-h-60 overflow-y-auto">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de tareas seleccionadas:</h4>
+                <ul className="divide-y divide-gray-200">
+                  {selectedTasks.map(taskId => {
+                    const task = taskItems.find(t => t.id === taskId);
+                    if (!task) return null;
+                    
+                    return (
+                      <li key={taskId} className="py-2">
+                        <div className="flex items-start">
+                          <div className="flex-shrink-0">
+                            {task.type === 'subtask' ? (
+                              <span className="inline-block w-6 h-6 rounded-full bg-indigo-100 text-indigo-800 text-xs font-medium flex items-center justify-center">
+                                S
+                              </span>
+                            ) : (
+                              <span className="inline-block w-6 h-6 rounded-full bg-blue-100 text-blue-800 text-xs font-medium flex items-center justify-center">
+                                T
+                              </span>
+                            )}
+                          </div>
+                          <div className="ml-3">
+                            <p className="text-sm font-medium text-gray-900">{task.title}</p>
+                            {task.type === 'subtask' && task.subtask_title && (
+                              <p className="text-xs text-gray-500">
+                                Tarea principal: {task.subtask_title}
+                              </p>
+                            )}
+                            <div className="mt-1 flex items-center space-x-2">
+                              {task.deadline && (
+                                <span className="text-xs text-gray-500">
+                                  Vence: {format(new Date(task.deadline), 'dd/MM/yyyy')}
+                                </span>
+                              )}
+                              <span className="text-xs text-gray-500">
+                                Duración: {Math.round((task.estimated_duration / 60) * 100) / 100} h
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+              
+              <div className="bg-yellow-50 p-3 rounded-md mb-4">
+                <div className="flex items-center">
+                  <svg className="h-5 w-5 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm font-medium text-yellow-800">
+                    Tiempo total estimado: {totalEstimatedDuration} hora{totalEstimatedDuration !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveSelection}
+                disabled={saving}
+                className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Guardando...' : 'Confirmar y guardar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -805,25 +996,39 @@ export default function UserProjectView() {
                 </p>
               </div>
               
-              {/* Fechas */}
+              {/* Fechas con indicadores */}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-1">Fecha de inicio:</h4>
-                  <p className="text-gray-600">
-                    {selectedTaskDetails.start_date ? 
-                      format(new Date(selectedTaskDetails.start_date), 'dd/MM/yyyy') : 
-                      'No especificada'
-                    }
-                  </p>
+                  {selectedTaskDetails.start_date ? (
+                    <div>
+                      <p className="text-gray-600">
+                        {format(new Date(selectedTaskDetails.start_date), 'dd/MM/yyyy')}
+                      </p>
+                      {/* Indicador de tiempo */}
+                      <p className={`text-xs mt-1 ${getTimeIndicator(selectedTaskDetails.start_date, true).color}`}>
+                        {getTimeIndicator(selectedTaskDetails.start_date, true).text}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500">No especificada</p>
+                  )}
                 </div>
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-1">Fecha límite:</h4>
-                  <p className="text-gray-600">
-                    {selectedTaskDetails.deadline ? 
-                      format(new Date(selectedTaskDetails.deadline), 'dd/MM/yyyy') : 
-                      'No especificada'
-                    }
-                  </p>
+                  {selectedTaskDetails.deadline ? (
+                    <div>
+                      <p className="text-gray-600">
+                        {format(new Date(selectedTaskDetails.deadline), 'dd/MM/yyyy')}
+                      </p>
+                      {/* Indicador de tiempo */}
+                      <p className={`text-xs mt-1 ${getTimeIndicator(selectedTaskDetails.deadline, false).color}`}>
+                        {getTimeIndicator(selectedTaskDetails.deadline, false).text}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500">No especificada</p>
+                  )}
                 </div>
               </div>
               
