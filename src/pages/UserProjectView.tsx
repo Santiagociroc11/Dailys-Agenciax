@@ -123,7 +123,9 @@ export default function UserProjectView() {
   const [activeTab, setActiveTab] = useState<'asignacion' | 'gestion'>('asignacion');
   const [project, setProject] = useState<Project | null>(null);
   const [taskItems, setTaskItems] = useState<Task[]>([]);
+  const [assignedTaskItems, setAssignedTaskItems] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAssigned, setLoadingAssigned] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [totalEstimatedDuration, setTotalEstimatedDuration] = useState(0);
@@ -133,13 +135,22 @@ export default function UserProjectView() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [sortBy, setSortBy] = useState<'deadline' | 'priority' | 'duration'>('deadline');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [dailyTasksIds, setDailyTasksIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (projectId) {
       fetchProject();
-      fetchProjectTasksAndSubtasks();
+      fetchTodaysDailyTasks();
     }
   }, [projectId]);
+
+  useEffect(() => {
+    if (projectId && dailyTasksIds !== undefined) {
+      // Una vez que sabemos qué tareas están asignadas hoy, cargamos ambas listas
+      fetchProjectTasksAndSubtasks();
+      fetchAssignedTasks();
+    }
+  }, [projectId, dailyTasksIds]);
 
   useEffect(() => {
     // Calculate total duration of selected tasks
@@ -204,6 +215,43 @@ export default function UserProjectView() {
       setProject(data);
     } catch (error) {
       console.error('Error fetching project:', error);
+    }
+  }
+
+  // Función para cargar las tareas asignadas para hoy del usuario actual
+  async function fetchTodaysDailyTasks() {
+    if (!user) return;
+    
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      
+      // Verificar si hay registro de tareas para hoy
+      const { data, error } = await supabase
+        .from('daily_tasks')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .single();
+      
+      if (error) {
+        if (error.code === 'PGRST116') { // No data found
+          setDailyTasksIds([]);
+        } else if (error.code === '42P01') { // Relation does not exist
+          console.error('La tabla daily_tasks no existe.');
+          setDailyTasksIds([]);
+        } else {
+          console.error('Error al cargar tareas diarias:', error);
+          setDailyTasksIds([]);
+        }
+      } else if (data) {
+        // Guardar los IDs de tareas ya asignadas para hoy
+        setDailyTasksIds(data.tasks || []);
+      } else {
+        setDailyTasksIds([]);
+      }
+    } catch (error) {
+      console.error('Error al cargar tareas diarias:', error);
+      setDailyTasksIds([]);
     }
   }
 
@@ -426,14 +474,19 @@ export default function UserProjectView() {
         type: 'task'
       }));
       
-      // 12. Combinar y ordenar por fecha límite y prioridad
-      const allTasks = [...tasksAsTaskItems, ...subtasksAsTaskItems];
+      // 12. Combinar y filtrar tareas que YA están asignadas
+      const allTasksWithoutAssigned = [...tasksAsTaskItems, ...subtasksAsTaskItems].filter(task => {
+        if (task.type === 'subtask' && task.original_id) {
+          return !dailyTasksIds.includes(task.original_id);
+        }
+        return !dailyTasksIds.includes(task.id);
+      });
       
       // Log para depuración
       console.log('Detalles de las tareas a mostrar:', {
         tasksWithoutSubtasks: tasksWithoutSubtasksItems.length,
         subtareas: subtasksAsTaskItems.length,
-        total: allTasks.length,
+        total: allTasksWithoutAssigned.length,
         tasksQueryInfo: {
           project_id: projectId,
           user_id: user.id,
@@ -442,7 +495,7 @@ export default function UserProjectView() {
       });
       
       // Ordenar según el criterio actual
-      const sortedTasks = [...allTasks].sort((a, b) => {
+      const sortedTasks = [...allTasksWithoutAssigned].sort((a, b) => {
         if (sortBy === 'deadline') {
           const dateA = a.deadline ? new Date(a.deadline) : new Date(9999, 11, 31);
           const dateB = b.deadline ? new Date(b.deadline) : new Date(9999, 11, 31);
@@ -540,58 +593,239 @@ export default function UserProjectView() {
       
       // Convertir IDs de subtareas a sus originales para guardar en la BD
       const tasksToSave = selectedTasks.map(taskId => {
-        // Si es una subtarea, extraer el ID original
+        // Si es una subtarea, guardamos con el prefijo subtask- para poder diferenciarlo después
         if (taskId.startsWith('subtask-')) {
-          const task = taskItems.find(t => t.id === taskId);
-          return task?.original_id || '';
+          return taskId; // Mantenemos el prefijo subtask- para identificarlo correctamente
         }
         return taskId;
       }).filter(id => id !== '');
       
-      // Check if there's already a record for today
-      const { data: existingData, error: fetchError } = await supabase
-        .from('daily_tasks')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('date', today)
-        .single();
-      
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError;
-      }
-      
-      if (existingData) {
-        // Update existing record
-        const { error: updateError } = await supabase
+      try {
+        // Check if there's already a record for today
+        const { data: existingData, error: fetchError } = await supabase
           .from('daily_tasks')
-          .update({
-            tasks: tasksToSave,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingData.id);
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .single();
+        
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          // Si el error no es "No rows found", podría ser un problema con la tabla
+          if (fetchError.code === '42P01') { // Código para "relation does not exist"
+            console.error('La tabla daily_tasks no existe. Por favor, crea la tabla primero.');
+            alert('La funcionalidad de tareas diarias no está disponible en este momento. Se está trabajando en ello.');
+            setSaving(false);
+            return;
+          }
+          throw fetchError;
+        }
+        
+        let updatedTaskIds: string[] = [];
+        
+        if (existingData) {
+          // Combinar las tareas existentes con las nuevas
+          updatedTaskIds = [...new Set([...existingData.tasks, ...tasksToSave])];
           
-        if (updateError) throw updateError;
-      } else {
-        // Create new record
-        const { error: insertError } = await supabase
-          .from('daily_tasks')
-          .insert([{
-            user_id: user.id,
-            date: today,
-            tasks: tasksToSave,
-            created_at: new Date().toISOString()
-          }]);
+          // Update existing record
+          const { error: updateError } = await supabase
+            .from('daily_tasks')
+            .update({
+              tasks: updatedTaskIds,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingData.id);
+            
+          if (updateError) throw updateError;
+        } else {
+          updatedTaskIds = tasksToSave;
           
-        if (insertError) throw insertError;
+          // Create new record
+          const { error: insertError } = await supabase
+            .from('daily_tasks')
+            .insert([{
+              user_id: user.id,
+              date: today,
+              tasks: tasksToSave,
+              created_at: new Date().toISOString()
+            }]);
+            
+          if (insertError) throw insertError;
+        }
+        
+        console.log("Tareas guardadas:", updatedTaskIds);
+        
+        // Actualizar la lista de tareas diarias
+        setDailyTasksIds(updatedTaskIds);
+        
+        // Limpiar las tareas seleccionadas
+        setSelectedTasks([]);
+        
+        // Cambiar a la pestaña de gestión
+        setActiveTab('gestion');
+        
+        // Actualizar ambas listas de tareas
+        await fetchProjectTasksAndSubtasks();
+        await fetchAssignedTasks();
+        
+        // Mostrar mensaje de éxito
+        alert('Tareas asignadas correctamente');
+      } catch (dbError: any) {
+        if (dbError.code === '42P01') { // Código para "relation does not exist"
+          console.error('La tabla daily_tasks no existe. Por favor, crea la tabla primero.');
+          alert('La funcionalidad de tareas diarias no está disponible en este momento. Se está trabajando en ello.');
+          setSaving(false);
+          return;
+        }
+        throw dbError;
       }
-      
-      // Navigate to daily tasks view
-      navigate('/user/daily');
     } catch (error) {
       console.error('Error saving daily tasks:', error);
       alert('Error al guardar las tareas. Por favor, intenta de nuevo.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Función para actualizar el estado de una tarea asignada
+  async function handleUpdateTaskStatus(taskId: string, newStatus: string) {
+    if (!user || !taskId) return;
+    
+    try {
+      // Determinar si es tarea o subtarea
+      const isSubtask = taskId.startsWith('subtask-');
+      const originalId = isSubtask ? taskId.replace('subtask-', '') : taskId;
+      const table = isSubtask ? 'subtasks' : 'tasks';
+      
+      // Actualizar el estado en la base de datos
+      const { error } = await supabase
+        .from(table)
+        .update({ status: newStatus })
+        .eq('id', originalId);
+        
+      if (error) throw error;
+      
+      // Actualizar el estado local
+      setAssignedTaskItems(prev => 
+        prev.map(task => 
+          task.id === taskId 
+            ? { ...task, status: newStatus } 
+            : task
+        )
+      );
+      
+      // Mensaje de confirmación
+      alert(`Estado actualizado a: ${newStatus}`);
+    } catch (error) {
+      console.error('Error al actualizar estado:', error);
+      alert('Error al actualizar el estado. Por favor, intenta de nuevo.');
+    }
+  }
+
+  // Función para cargar las tareas asignadas para hoy
+  async function fetchAssignedTasks() {
+    if (!user || !projectId) {
+      setAssignedTaskItems([]);
+      setLoadingAssigned(false);
+      return;
+    }
+    
+    if (!dailyTasksIds || dailyTasksIds.length === 0) {
+      setAssignedTaskItems([]);
+      setLoadingAssigned(false);
+      return;
+    }
+    
+    setLoadingAssigned(true);
+    
+    try {
+      // Obtener detalles de tareas y subtareas ya asignadas
+      const normalTaskIds = [];
+      const subtaskIds = [];
+      
+      for (const id of dailyTasksIds) {
+        if (id.startsWith('subtask-')) {
+          subtaskIds.push(id.replace('subtask-', ''));
+        } else {
+          normalTaskIds.push(id);
+        }
+      }
+      
+      console.log("IDs buscando - Tareas:", normalTaskIds);
+      console.log("IDs buscando - Subtareas:", subtaskIds);
+      
+      // Array para todas las tareas asignadas
+      let allAssignedItems: Task[] = [];
+      
+      // Obtener detalles de tareas normales
+      if (normalTaskIds.length > 0) {
+        const { data: taskData, error: taskError } = await supabase
+          .from('tasks')
+          .select('*')
+          .in('id', normalTaskIds);
+          
+        if (taskError) {
+          console.error('Error al cargar tareas asignadas:', taskError);
+        } else if (taskData && taskData.length > 0) {
+          const formattedTasks = taskData.map(task => ({
+            id: task.id,
+            original_id: task.id,
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            estimated_duration: task.estimated_duration,
+            start_date: task.start_date,
+            deadline: task.deadline,
+            status: task.status,
+            is_sequential: task.is_sequential,
+            project_id: task.project_id,
+            type: 'task' as 'task' | 'subtask'  // Type assertion para evitar errores
+          }));
+          
+          allAssignedItems = [...allAssignedItems, ...formattedTasks];
+        }
+      }
+      
+      // Obtener detalles de subtareas
+      if (subtaskIds.length > 0) {
+        const { data: subtaskData, error: subtaskError } = await supabase
+          .from('subtasks')
+          .select(`
+            *,
+            tasks (
+              id, title, is_sequential, project_id
+            )
+          `)
+          .in('id', subtaskIds);
+          
+        if (subtaskError) {
+          console.error('Error al cargar subtareas asignadas:', subtaskError);
+        } else if (subtaskData && subtaskData.length > 0) {
+          const formattedSubtasks = subtaskData.map(subtask => ({
+            id: `subtask-${subtask.id}`,
+            original_id: subtask.id,
+            title: subtask.title,
+            subtask_title: subtask.tasks?.title || "Tarea principal",
+            description: subtask.description,
+            priority: 'medium' as 'low' | 'medium' | 'high',  // Type assertion
+            estimated_duration: subtask.estimated_duration,
+            start_date: subtask.start_date || '',
+            deadline: subtask.deadline || '',
+            status: subtask.status,
+            is_sequential: false,
+            project_id: subtask.tasks?.project_id || '',
+            type: 'subtask' as 'task' | 'subtask'  // Type assertion
+          }));
+          
+          allAssignedItems = [...allAssignedItems, ...formattedSubtasks];
+        }
+      }
+      
+      console.log("Tareas asignadas cargadas:", allAssignedItems.length);
+      setAssignedTaskItems(allAssignedItems);
+    } catch (error) {
+      console.error('Error al cargar tareas asignadas:', error);
+    } finally {
+      setLoadingAssigned(false);
     }
   }
 
@@ -820,8 +1054,162 @@ export default function UserProjectView() {
       )}
 
       {activeTab === 'gestion' && (
-        <div className="py-6 text-center text-gray-500">
-          <p>Funcionalidad de gestión en desarrollo...</p>
+        <div>
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold">GESTIÓN DE TAREAS ASIGNADAS</h2>
+            <p className="text-sm text-gray-600 mt-1">Administra las tareas que has asignado para trabajar hoy</p>
+          </div>
+
+          {/* Task list container para tareas asignadas */}
+          <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+            {/* Task list header */}
+            <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+              <div>ACTIVIDAD</div>
+              <div>DESCRIPCION</div>
+              <div>INICIO</div>
+              <div>FIN</div>
+              <div>DURACIÓN</div>
+              <div>ESTADO</div>
+              <div>ACCIONES</div>
+            </div>
+
+            {/* Task list */}
+            <div className="divide-y divide-gray-200">
+              {loadingAssigned ? (
+                <div className="py-8 text-center text-gray-500 bg-white">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                  <p>Cargando tareas asignadas...</p>
+                </div>
+              ) : assignedTaskItems.length > 0 ? (
+                assignedTaskItems.map((task) => (
+                  <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                    <div className="font-medium">
+                      {task.type === 'subtask' ? (
+                        <div>
+                          <div className="text-sm text-gray-700 font-medium mb-1">
+                            <span className="inline-block mr-2">T.P:</span>
+                            {task.subtask_title || "Sin tarea principal"}
+                          </div>
+                          <div 
+                            className="cursor-pointer hover:text-indigo-600 mb-1"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div 
+                            className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-600 truncate">
+                      {task.description || '-'}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.start_date ? (
+                        <>
+                          <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
+                          {/* Indicador de tiempo para fecha de inicio */}
+                          {getTimeIndicator(task.start_date, true).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
+                              {getTimeIndicator(task.start_date, true).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.deadline ? (
+                        <>
+                          <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
+                          {/* Indicador de tiempo para fecha de fin */}
+                          {getTimeIndicator(task.deadline, false).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
+                              {getTimeIndicator(task.deadline, false).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium">
+                      {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
+                    </div>
+                    <div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                        task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                        task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {task.status === 'pending' ? 'Pendiente' :
+                         task.status === 'in_progress' ? 'En progreso' :
+                         task.status === 'completed' ? 'Completada' :
+                         task.status}
+                      </span>
+                    </div>
+                    <div>
+                      <select
+                        className="text-sm border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                        value={task.status}
+                        onChange={(e) => handleUpdateTaskStatus(task.id, e.target.value)}
+                      >
+                        <option value="pending">Pendiente</option>
+                        <option value="in_progress">En progreso</option>
+                        <option value="completed">Completada</option>
+                      </select>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center bg-white">
+                  <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
+                  <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Resumen de tiempos */}
+          {assignedTaskItems.length > 0 && (
+            <div className="mt-6 p-4 bg-white rounded-md shadow-sm border border-gray-200">
+              <h3 className="text-lg font-medium mb-3">Resumen de trabajo</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-sm text-gray-600">Total de tareas</p>
+                  <p className="text-xl font-bold">{assignedTaskItems.length}</p>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-sm text-gray-600">Tareas completadas</p>
+                  <p className="text-xl font-bold">
+                    {assignedTaskItems.filter(t => t.status === 'completed').length}
+                  </p>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-sm text-gray-600">Duración total</p>
+                  <p className="text-xl font-bold">
+                    {Math.round((assignedTaskItems.reduce((acc, t) => acc + t.estimated_duration, 0) / 60) * 100) / 100} HORAS
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
