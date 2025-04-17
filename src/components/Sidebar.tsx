@@ -54,7 +54,7 @@ export default function Sidebar() {
           }
         >
           <CheckSquare className="w-5 h-5 mr-3" />
-          {isAdmin ? 'Gestionar Tareas' : 'Mis Tareas'}
+          {isAdmin ? 'Tareas' : 'Mis Tareas'}
         </NavLink>
         {isAdmin && (
           <NavLink

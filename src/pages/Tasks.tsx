@@ -40,6 +40,7 @@ interface Subtask {
 interface User {
   id: string;
   email: string;
+  assigned_projects?: string[];
 }
 
 interface NewTask {
@@ -110,7 +111,7 @@ function Tasks() {
       try {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
-          .select('id, email');
+          .select('id, email, assigned_projects');
 
         if (usersError) throw usersError;
         setUsers(usersData || []);
@@ -213,6 +214,19 @@ function Tasks() {
     }
   }, [newTask.subtasks]);
 
+  // Función para obtener los usuarios disponibles para un proyecto específico
+  function getAvailableUsers(projectId: string | null): User[] {
+    if (!projectId) return users;
+    
+    // El creador del proyecto
+    const projectCreatorId = projects.find(p => p.id === projectId)?.created_by;
+    
+    // Usuarios que tienen asignado este proyecto en su array de assigned_projects
+    return users.filter(u => 
+      u.assigned_projects?.includes(projectId) || 
+      u.id === projectCreatorId
+    );
+  }
 
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
@@ -904,7 +918,7 @@ function Tasks() {
                                     {subtask.status === 'completed' ? 'Completada' : 
                                      subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                                   </span>
-                                )}
+                                    )}
                                   </div>
                                 </div>
                         </div>
@@ -1065,13 +1079,13 @@ function Tasks() {
                     Asignar a
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {users.map((user) => (
+                    {getAvailableUsers(newTask.project_id).map((user) => (
                       <div key={user.id} className="flex items-center space-x-2">
                         <input
                           type="checkbox"
                           id={`assign-${user.id}`}
                           checked={newTask.assigned_to.includes(user.id)}
-                      onChange={(e) => {
+                          onChange={(e) => {
                             if (e.target.checked) {
                               setNewTask({
                                 ...newTask,
@@ -1087,8 +1101,8 @@ function Tasks() {
                         />
                         <label htmlFor={`assign-${user.id}`} className="text-sm text-gray-700">
                           {user.email}
-                  </label>
-                </div>
+                        </label>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -1186,7 +1200,7 @@ function Tasks() {
                               className="w-full p-2 border rounded-md"
                             >
                               <option value="">Seleccionar usuario</option>
-                              {users.map((user) => (
+                              {getAvailableUsers(newTask.project_id).map((user) => (
                                 <option key={user.id} value={user.id}>
                                   {user.email}
                                 </option>
@@ -1585,7 +1599,7 @@ function Tasks() {
                                           className="w-full p-1 text-sm border rounded-md"
                                         >
                                           <option value="">Sin asignar</option>
-                                          {users.map((user) => (
+                                          {getAvailableUsers(selectedTask?.project_id || null).map((user) => (
                                             <option key={user.id} value={user.id}>
                                               {user.email}
                                             </option>
@@ -1882,7 +1896,7 @@ function Tasks() {
                         disabled={!isAdmin}
                       >
                         <option value="">Sin asignar</option>
-                        {users.map((user) => (
+                        {getAvailableUsers(tasks.find(t => t.id === selectedSubtask?.task_id)?.project_id || null).map((user) => (
                           <option key={user.id} value={user.id}>
                             {user.email}
                           </option>

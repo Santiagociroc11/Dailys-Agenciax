@@ -44,7 +44,7 @@ interface User {
 
 // Define the column statuses
 const columns = [
-  { id: 'pending', name: 'POR ASIGNAR' },
+  { id: 'pending', name: 'POR ASIGNAR AL DIA' },
   { id: 'assigned', name: 'ASIGNADA' },
   { id: 'blocked', name: 'BLOQUEADA' },
   { id: 'completed', name: 'COMPLETADA' },

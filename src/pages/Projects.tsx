@@ -14,6 +14,7 @@ interface Project {
   deadline: string;
   created_at: string;
   created_by: string;
+  restricted_access?: boolean;
 }
 
 interface Task {
@@ -30,6 +31,7 @@ interface Task {
 interface User {
   id: string;
   email: string;
+  assigned_projects?: string[];
 }
 
 function Projects() {
@@ -37,6 +39,8 @@ function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Record<string, Task[]>>({});
   const [users, setUsers] = useState<User[]>([]);
+  const [projectUsers, setProjectUsers] = useState<Record<string, string[]>>({});
+  const [userProjectAssignments, setUserProjectAssignments] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -48,6 +52,7 @@ function Projects() {
     description: '',
     start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    involved_users: [] as string[]
   });
   const [error, setError] = useState('');
 
@@ -56,23 +61,30 @@ function Projects() {
   }, []);
   
   useEffect(() => {
-    async function fetchUsers() {
-      try {
-        const { data: usersData, error: usersError } = await supabase
-          .from('users')
-          .select('id, email');
-
-        if (usersError) throw usersError;
-        setUsers(usersData || []);
-      } catch (error) {
-        console.error('Error al cargar usuarios:', error);
-      }
-    }
-
-    if (isAdmin) {
-      fetchUsers();
-    }
+    fetchUsers();
   }, [isAdmin]);
+
+  async function fetchUsers() {
+    if (!isAdmin) return;
+    
+    try {
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select('id, email, assigned_projects');
+
+      if (usersError) throw usersError;
+      setUsers(usersData || []);
+      
+      // Crear un mapa de usuario -> proyectos asignados
+      const projectAssignments: Record<string, string[]> = {};
+      usersData?.forEach(user => {
+        projectAssignments[user.id] = user.assigned_projects || [];
+      });
+      setUserProjectAssignments(projectAssignments);
+    } catch (error) {
+      console.error('Error al cargar usuarios:', error);
+    }
+  }
 
   async function fetchProjects() {
     try {
@@ -87,6 +99,7 @@ function Projects() {
       // Fetch tasks for each project
       for (const project of (data || [])) {
         fetchProjectTasks(project.id);
+        fetchProjectUsers(project.id);
       }
       
     } catch (error) {
@@ -114,17 +127,53 @@ function Projects() {
     }
   }
 
+  async function fetchProjectUsers(projectId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('project_users')
+        .select('user_id')
+        .eq('project_id', projectId);
+      
+      if (error) throw error;
+      
+      setProjectUsers(prev => ({
+        ...prev,
+        [projectId]: data?.map(item => item.user_id) || []
+      }));
+    } catch (error) {
+      console.error(`Error al cargar usuarios del proyecto ${projectId}:`, error);
+    }
+  }
+
+  // Función para obtener los usuarios que tienen acceso a un proyecto
+  function getUsersWithAccessToProject(projectId: string): User[] {
+    return users.filter(u => 
+      userProjectAssignments[u.id]?.includes(projectId) || 
+      projects.find(p => p.id === projectId)?.created_by === u.id
+    );
+  }
+
   async function handleCreateProject(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
     setError('');
 
+    // Validar que se hayan seleccionado usuarios
+    if (newProject.involved_users.length === 0) {
+      setError('Debes seleccionar al menos un usuario involucrado en el proyecto.');
+      return;
+    }
+
     try {
+      // Create the project
       const { data, error } = await supabase
         .from('projects')
         .insert([
           {
-            ...newProject,
+            name: newProject.name,
+            description: newProject.description,
+            start_date: newProject.start_date,
+            deadline: newProject.deadline,
             created_by: user.id,
           },
         ])
@@ -132,13 +181,53 @@ function Projects() {
 
       if (error) throw error;
 
+      // Añadir usuarios involucrados (ahora es obligatorio)
+      if (data && data[0]) {
+        const projectId = data[0].id;
+        
+        // Always include the creator
+        const uniqueUsers = [...new Set([...newProject.involved_users, user.id])];
+        
+        for (const userId of uniqueUsers) {
+          // Obtener proyectos actuales del usuario
+          const { data: userData, error: getUserError } = await supabase
+            .from('users')
+            .select('assigned_projects')
+            .eq('id', userId)
+            .single();
+            
+          if (getUserError) {
+            console.error("Error al obtener usuario:", getUserError);
+            continue;
+          }
+          
+          const currentProjects = userData.assigned_projects || [];
+          
+          // Añadir el nuevo proyecto si no está ya asignado
+          if (!currentProjects.includes(projectId)) {
+            const { error: updateError } = await supabase
+              .from('users')
+              .update({ 
+                assigned_projects: [...currentProjects, projectId] 
+              })
+              .eq('id', userId);
+              
+            if (updateError) {
+              console.error("Error al actualizar usuario:", updateError);
+            }
+          }
+        }
+      }
+
       await fetchProjects();
+      await fetchUsers(); // Actualizar los usuarios para tener los assigned_projects actualizados
       setShowModal(false);
       setNewProject({
         name: '',
         description: '',
         start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
         deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        involved_users: []
       });
     } catch (error) {
       console.error('Error al crear el proyecto:', error);
@@ -149,14 +238,21 @@ function Projects() {
   async function handleUpdateProject() {
     if (!selectedProject || !editedProject) return;
     
+    // Validar que se hayan seleccionado usuarios
+    if (editedProject.involved_users.length === 0) {
+      setError('Debes seleccionar al menos un usuario involucrado en el proyecto.');
+      return;
+    }
+    
     try {
+      // Update project basic info
       const { error } = await supabase
         .from('projects')
         .update({
           name: editedProject.name,
           description: editedProject.description,
           start_date: editedProject.start_date,
-          deadline: editedProject.deadline,
+          deadline: editedProject.deadline
         })
         .eq('id', selectedProject.id);
       
@@ -165,7 +261,67 @@ function Projects() {
         throw error;
       }
       
+      // Handle project users assignments
+      // 1. Obtener todos los usuarios que actualmente tienen este proyecto
+      const usersWithAccess = users.filter(u => 
+        userProjectAssignments[u.id]?.includes(selectedProject.id)
+      );
+      
+      // 2. Para cada usuario que ahora debería tener acceso (siempre incluir al creador)
+      const uniqueInvolvedUsers = [...new Set([...editedProject.involved_users, selectedProject.created_by])];
+      
+      for (const userId of uniqueInvolvedUsers) {
+        if (!userProjectAssignments[userId]?.includes(selectedProject.id)) {
+          // Agregar el proyecto al usuario si no lo tiene
+          const { data: userData, error: getUserError } = await supabase
+            .from('users')
+            .select('assigned_projects')
+            .eq('id', userId)
+            .single();
+            
+          if (getUserError) {
+            console.error("Error al obtener usuario:", getUserError);
+            continue;
+          }
+          
+          const currentProjects = userData.assigned_projects || [];
+          
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ 
+              assigned_projects: [...currentProjects, selectedProject.id] 
+            })
+            .eq('id', userId);
+            
+          if (updateError) {
+            console.error("Error al actualizar usuario:", updateError);
+          }
+        }
+      }
+      
+      // 3. Para cada usuario que actualmente tiene acceso
+      for (const userWithAccess of usersWithAccess) {
+        // Si ya no debe tener acceso, quitar el proyecto (excepto el creador)
+        if (!uniqueInvolvedUsers.includes(userWithAccess.id)) { 
+          
+          const currentProjects = userProjectAssignments[userWithAccess.id] || [];
+          const updatedProjects = currentProjects.filter(id => id !== selectedProject.id);
+          
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ 
+              assigned_projects: updatedProjects 
+            })
+            .eq('id', userWithAccess.id);
+            
+          if (updateError) {
+            console.error("Error al actualizar usuario:", updateError);
+          }
+        }
+      }
+      
       await fetchProjects();
+      await fetchUsers(); // Actualizar los usuarios para tener los assigned_projects actualizados
       setShowDetailModal(false);
       setEditMode(false);
     } catch (error) {
@@ -275,8 +431,10 @@ function Projects() {
                       setEditedProject({
                         name: project.name,
                         description: project.description || '',
-                        start_date: project.start_date,
-                        deadline: project.deadline,
+                        start_date: project.start_date ? project.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        deadline: project.deadline ? project.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        restricted_access: project.restricted_access || false,
+                        involved_users: projectUsers[project.id] || []
                       });
                       setShowDetailModal(true);
                     }}
@@ -330,6 +488,10 @@ function Projects() {
                   <div className="flex items-center text-sm text-gray-500">
                     <Users className="w-4 h-4 mr-2" />
                     <span>Creado por: {users.find(u => u.id === project.created_by)?.email || 'Desconocido'}</span>
+                  </div>
+                  <div className="flex items-center text-sm text-gray-500">
+                    <Users className="w-4 h-4 mr-2" />
+                    <span>Involucrados: {getUsersWithAccessToProject(project.id).length || 1} usuarios</span>
                   </div>
                 </div>
                 
@@ -459,6 +621,43 @@ function Projects() {
                       required
                     />
                   </div>
+                </div>
+                <div className="mt-3 border-t pt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                    <span className="mr-1">Usuarios involucrados:</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <div className="max-h-40 overflow-y-auto border rounded-md p-2">
+                    {users.map((u) => (
+                      <div key={u.id} className="flex items-center py-1">
+                        <input
+                          type="checkbox"
+                          id={`user-${u.id}`}
+                          checked={newProject.involved_users.includes(u.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewProject({
+                                ...newProject,
+                                involved_users: [...newProject.involved_users, u.id]
+                              });
+                            } else {
+                              setNewProject({
+                                ...newProject,
+                                involved_users: newProject.involved_users.filter(id => id !== u.id)
+                              });
+                            }
+                          }}
+                          className="mr-2"
+                        />
+                        <label htmlFor={`user-${u.id}`} className="text-sm">
+                          {u.email}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Nota: Tú serás incluido automáticamente como involucrado.
+                  </p>
                 </div>
               </div>
               <div className="mt-6 flex justify-end space-x-3">
@@ -590,6 +789,69 @@ function Projects() {
                     )}
                   </div>
                 </div>
+                
+                {isAdmin && editMode && (
+                  <div className="mt-3 border-t pt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                      <span className="mr-1">Usuarios involucrados:</span>
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <div className="max-h-40 overflow-y-auto border rounded-md p-2">
+                      {users.map((u) => (
+                        <div key={u.id} className="flex items-center py-1">
+                          <input
+                            type="checkbox"
+                            id={`edit-user-${u.id}`}
+                            checked={editedProject.involved_users?.includes(u.id) || u.id === selectedProject.created_by}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditedProject({
+                                  ...editedProject,
+                                  involved_users: [...(editedProject.involved_users || []), u.id]
+                                });
+                              } else {
+                                if (u.id !== selectedProject.created_by) {
+                                  setEditedProject({
+                                    ...editedProject,
+                                    involved_users: (editedProject.involved_users || []).filter(id => id !== u.id)
+                                  });
+                                }
+                              }
+                            }}
+                            className="mr-2"
+                            disabled={u.id === selectedProject.created_by} // El creador siempre está involucrado
+                          />
+                          <label htmlFor={`edit-user-${u.id}`} className="text-sm">
+                            {u.email}
+                            {u.id === selectedProject.created_by ? " (Creador)" : ""}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Nota: El creador del proyecto está incluido automáticamente como involucrado.
+                    </p>
+                  </div>
+                )}
+                
+                {!editMode && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Usuarios involucrados</h3>
+                    <div className="bg-gray-50 p-3 rounded-md">
+                      {getUsersWithAccessToProject(selectedProject.id).length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {getUsersWithAccessToProject(selectedProject.id).map(usr => (
+                            <span key={usr.id} className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs">
+                              {usr.email} {usr.id === selectedProject.created_by ? "(Creador)" : ""}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">Solo el creador tiene acceso a este proyecto.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 
                 {!editMode && (
                   <>
@@ -754,8 +1016,10 @@ function Projects() {
                         setEditedProject({
                           name: selectedProject.name,
                           description: selectedProject.description || '',
-                          start_date: selectedProject.start_date,
-                          deadline: selectedProject.deadline,
+                          start_date: selectedProject.start_date ? selectedProject.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                          deadline: selectedProject.deadline ? selectedProject.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                          restricted_access: selectedProject.restricted_access || false,
+                          involved_users: selectedProject.restricted_access ? projectUsers[selectedProject.id] || [] : []
                         });
                       }}
                       className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
