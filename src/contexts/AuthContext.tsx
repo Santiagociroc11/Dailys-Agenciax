@@ -53,7 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));
-    navigate('/dashboard');
+    
+    // Redirect based on user role
+    if (userData.role === 'admin') {
+      navigate('/dashboard');
+    } else {
+      navigate('/user');
+    }
   };
 
   const signUp = async (name: string, email: string, password: string) => {
@@ -82,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      navigate('/dashboard');
+      navigate('/user');
     }
   };
 
