@@ -8,6 +8,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  phone?: string;
 }
 
 export default function Users() {
@@ -15,7 +16,14 @@ export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', isAdmin: false });
+  const [newUser, setNewUser] = useState({ 
+    name: '', 
+    email: '', 
+    password: '', 
+    isAdmin: false,
+    countryCode: '+34', 
+    phone: '' 
+  });
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -26,7 +34,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role');
+        .select('id, name, email, role, phone');
 
       if (error) throw error;
 
@@ -43,13 +51,16 @@ export default function Users() {
     setError('');
 
     try {
+      const fullPhone = newUser.phone ? `${newUser.countryCode}${newUser.phone}` : null;
+      
       const { data, error } = await supabase
         .from('users')
         .insert([{
           name: newUser.name,
           email: newUser.email,
           password: newUser.password,
-          role: newUser.isAdmin ? 'admin' : 'user'
+          role: newUser.isAdmin ? 'admin' : 'user',
+          phone: fullPhone
         }])
         .select()
         .single();
@@ -58,7 +69,14 @@ export default function Users() {
 
       await fetchUsers();
       setShowModal(false);
-      setNewUser({ name: '', email: '', password: '', isAdmin: false });
+      setNewUser({ 
+        name: '', 
+        email: '', 
+        password: '', 
+        isAdmin: false,
+        countryCode: '+34',
+        phone: '' 
+      });
     } catch (error) {
       console.error('Error al crear usuario:', error);
       setError('Error al crear el usuario. Por favor, inténtalo de nuevo.');
@@ -114,6 +132,9 @@ export default function Users() {
                 Correo
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Teléfono
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Rol
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -132,6 +153,9 @@ export default function Users() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {user.email}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {user.phone || '-'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -200,6 +224,36 @@ export default function Users() {
                     className="w-full p-2 border rounded-md"
                     required
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Teléfono
+                  </label>
+                  <div className="flex">
+                    <select
+                      value={newUser.countryCode}
+                      onChange={(e) => setNewUser({ ...newUser, countryCode: e.target.value })}
+                      className="w-24 p-2 border rounded-l-md bg-gray-50"
+                    >
+                      <option value="+34">+34 🇪🇸</option>
+                      <option value="+1">+1 🇺🇸</option>
+                      <option value="+44">+44 🇬🇧</option>
+                      <option value="+33">+33 🇫🇷</option>
+                      <option value="+49">+49 🇩🇪</option>
+                      <option value="+52">+52 🇲🇽</option>
+                      <option value="+57">+57 🇨🇴</option>
+                      <option value="+54">+54 🇦🇷</option>
+                      <option value="+56">+56 🇨🇱</option>
+                      <option value="+51">+51 🇵🇪</option>
+                    </select>
+                    <input
+                      type="tel"
+                      value={newUser.phone}
+                      onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
+                      className="flex-1 p-2 border-y border-r rounded-r-md"
+                      placeholder="600123456"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

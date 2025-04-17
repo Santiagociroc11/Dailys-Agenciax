@@ -329,17 +329,97 @@ function Management() {
                 {getGroupTitle(groupId)}
               </h3>
               <div className="grid grid-cols-7 gap-4">
-                {columns.map(column => (
-                  <div key={column.id} className="bg-gray-50 rounded-lg p-2 min-h-[300px]">
-                    <h4 className="font-medium text-center py-2 border-b mb-2">{column.name}</h4>
-                    <div className="space-y-2">
-                      {/* Tasks in this column */}
-                      {group.tasks
-                        .filter(task => task.status === column.id)
-                        .map(task => (
+                {columns.map(column => {
+                  // Get all subtasks for this column
+                  const columnSubtasks = group.subtasks.filter(subtask => subtask.status === column.id);
+                  
+                  // Get task IDs that have subtasks
+                  const tasksWithSubtasks = new Set(columnSubtasks.map(subtask => subtask.task_id));
+                  
+                  // Get tasks for this column that don't have subtasks
+                  const tasksWithoutSubtasks = group.tasks
+                    .filter(task => task.status === column.id && !tasksWithSubtasks.has(task.id));
+                  
+                  return (
+                    <div 
+                      key={column.id} 
+                      className="bg-gray-50 rounded-lg p-2 min-h-[300px]"
+                      data-column-id={column.id}
+                    >
+                      <h4 className="font-medium text-center py-2 border-b mb-2">{column.name}</h4>
+                      <div className="space-y-2">
+                        {/* Subtasks in this column */}
+                        {columnSubtasks.map(subtask => {
+                          const parentTask = tasks.find(t => t.id === subtask.task_id);
+                          return (
+                            <div 
+                              key={subtask.id}
+                              className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-emerald-500 cursor-pointer"
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData('text/plain', JSON.stringify({
+                                  id: subtask.id,
+                                  type: 'subtask'
+                                }));
+                              }}
+                              onClick={() => {
+                                // Navigate to subtask details (could be implemented later)
+                                console.log("Navegar a detalles de subtarea:", subtask.id);
+                              }}
+                            >
+                              {parentTask && (
+                                <div className="mb-2 pb-2 border-b border-gray-100">
+                                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center">
+                                    <FolderOpen className="w-3 h-3 mr-1" />
+                                    {parentTask.title}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <h5 className="font-medium text-gray-800">{subtask.title}</h5>
+                                <span className={`text-xs px-2 py-1 rounded-full ${
+                                  parentTask?.priority === 'high' ? 'bg-red-100 text-red-800' :
+                                  parentTask?.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-green-100 text-green-800'
+                                }`}>
+                                  {parentTask?.priority === 'high' ? 'Alta' :
+                                   parentTask?.priority === 'medium' ? 'Media' : 'Baja'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-3 flex flex-wrap gap-2">
+                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
+                                  <Clock className="w-3 h-3 mr-1" />
+                                  <span>{subtask.estimated_duration} min</span>
+                                </div>
+                                {subtask.deadline && (
+                                  <div className="flex items-center bg-gray-50 rounded px-2 py-1">
+                                    <Calendar className="w-3 h-3 mr-1" />
+                                    <span>{new Date(subtask.deadline).toLocaleDateString()}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
+                                  <Users className="w-3 h-3 mr-1" />
+                                  <span className="truncate max-w-[120px]">
+                                    {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignado'}
+                                  </span>
+                                </div>
+                                {parentTask && parentTask.project_id && (
+                                  <div className="flex items-center mt-1 text-indigo-600">
+                                    <span className="truncate max-w-[150px]">
+                                      {projects.find(p => p.id === parentTask.project_id)?.name || 'Proyecto'}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        
+                        {/* Tasks without subtasks in this column */}
+                        {tasksWithoutSubtasks.map(task => (
                           <div 
                             key={task.id}
-                            className="bg-white p-3 rounded shadow-sm border-l-4 border-indigo-500 cursor-pointer"
+                            className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
                             draggable
                             onDragStart={(e) => {
                               e.dataTransfer.setData('text/plain', JSON.stringify({
@@ -353,29 +433,29 @@ function Management() {
                             }}
                           >
                             <div className="flex justify-between items-start">
-                              <h5 className="font-medium">{task.title}</h5>
-                              <span className={`text-xs px-2 py-1 rounded ${
+                              <h5 className="font-medium text-gray-800">{task.title}</h5>
+                              <span className={`text-xs px-2 py-1 rounded-full ${
                                 task.priority === 'high' ? 'bg-red-100 text-red-800' :
                                 task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
                                 'bg-green-100 text-green-800'
                               }`}>
                                 {task.priority === 'high' ? 'Alta' :
-                                 task.priority === 'medium' ? 'Media' : 'Baja'}
+                                  task.priority === 'medium' ? 'Media' : 'Baja'}
                               </span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              <div className="flex items-center">
+                            <div className="text-xs text-gray-500 mt-3 flex flex-wrap gap-2">
+                              <div className="flex items-center bg-gray-50 rounded px-2 py-1">
                                 <Clock className="w-3 h-3 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
-                              <div className="flex items-center mt-1">
+                              <div className="flex items-center bg-gray-50 rounded px-2 py-1">
                                 <Calendar className="w-3 h-3 mr-1" />
                                 <span>{new Date(task.deadline).toLocaleDateString()}</span>
                               </div>
                               {task.project_id && (
-                                <div className="flex items-center mt-1">
+                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
                                   <FolderOpen className="w-3 h-3 mr-1" />
-                                  <span>
+                                  <span className="truncate max-w-[120px]">
                                     {projects.find(p => p.id === task.project_id)?.name || 'Proyecto'}
                                   </span>
                                 </div>
@@ -383,60 +463,10 @@ function Management() {
                             </div>
                           </div>
                         ))}
-                      
-                      {/* Subtasks in this column */}
-                      {group.subtasks
-                        .filter(subtask => subtask.status === column.id)
-                        .map(subtask => {
-                          const parentTask = tasks.find(t => t.id === subtask.task_id);
-                          return (
-                            <div 
-                              key={subtask.id}
-                              className="bg-white p-3 rounded shadow-sm border-l-4 border-emerald-500 cursor-pointer"
-                              draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer.setData('text/plain', JSON.stringify({
-                                  id: subtask.id,
-                                  type: 'subtask'
-                                }));
-                              }}
-                              onClick={() => {
-                                // Navigate to subtask details (could be implemented later)
-                                console.log("Navegar a detalles de subtarea:", subtask.id);
-                              }}
-                            >
-                              <div className="flex flex-col">
-                                <h5 className="font-medium">{subtask.title}</h5>
-                                {parentTask && (
-                                  <span className="text-xs text-gray-500">
-                                    Parte de: {parentTask.title}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                <div className="flex items-center">
-                                  <Clock className="w-3 h-3 mr-1" />
-                                  <span>{subtask.estimated_duration} min</span>
-                                </div>
-                                {subtask.deadline && (
-                                  <div className="flex items-center mt-1">
-                                    <Calendar className="w-3 h-3 mr-1" />
-                                    <span>{new Date(subtask.deadline).toLocaleDateString()}</span>
-                                  </div>
-                                )}
-                                <div className="flex items-center mt-1">
-                                  <Users className="w-3 h-3 mr-1" />
-                                  <span>
-                                    {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignado'}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
@@ -643,11 +673,13 @@ function Management() {
               
               try {
                 const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-                const dropColumn = e.target.closest('[data-column-id]');
+                const dropColumn = (e.target as Element).closest('[data-column-id]');
                 
                 if (dropColumn) {
                   const newStatus = dropColumn.getAttribute('data-column-id');
-                  handleStatusChange(data.id, newStatus, data.type === 'subtask');
+                  if (newStatus) {
+                    handleStatusChange(data.id, newStatus, data.type === 'subtask');
+                  }
                 }
               } catch (error) {
                 console.error('Error al procesar el drop:', error);
