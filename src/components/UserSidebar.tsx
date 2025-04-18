@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { FolderOpen, LogOut, CheckSquare } from 'lucide-react';
+import { FolderOpen, LogOut, CheckSquare, Calendar } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -55,17 +55,7 @@ export default function UserSidebar() {
         <h1 className="text-2xl font-bold text-gray-800">USUARIO</h1>
       </div>
       <nav className="mt-6">
-        <NavLink
-          to="/user/daily"
-          className={({ isActive }) =>
-            `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
-              isActive ? 'bg-gray-100' : ''
-            }`
-          }
-        >
-          <CheckSquare className="w-5 h-5 mr-3" />
-          Tareas del Día
-        </NavLink>
+
         
         <div className="px-6 py-3">
           <div className="flex items-center text-gray-700">

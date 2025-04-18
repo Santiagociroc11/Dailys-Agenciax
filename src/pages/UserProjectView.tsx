@@ -225,30 +225,28 @@ export default function UserProjectView() {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
       
-      // Verificar si hay registro de tareas para hoy
+      // Consultar task_work_assignments en lugar de daily_tasks
       const { data, error } = await supabase
-        .from('daily_tasks')
-        .select('*')
+        .from('task_work_assignments')
+        .select('task_id, task_type')
         .eq('user_id', user.id)
-        .eq('date', today)
-        .single();
+        .eq('date', today);
       
       if (error) {
-        if (error.code === 'PGRST116') { // No data found
-          setDailyTasksIds([]);
-        } else if (error.code === '42P01') { // Relation does not exist
-          console.error('La tabla daily_tasks no existe.');
-          setDailyTasksIds([]);
-        } else {
-          console.error('Error al cargar tareas diarias:', error);
-          setDailyTasksIds([]);
-        }
-      } else if (data) {
-        // Guardar los IDs de tareas ya asignadas para hoy
-        setDailyTasksIds(data.tasks || []);
-      } else {
+        console.error('Error al cargar tareas diarias:', error);
         setDailyTasksIds([]);
+        return;
       }
+      
+      // Convertir al formato que espera la aplicación (mantiene compatibilidad con el código existente)
+      const formattedIds = data.map(item => {
+        if (item.task_type === 'subtask') {
+          return `subtask-${item.task_id}`;
+        }
+        return item.task_id;
+      });
+      
+      setDailyTasksIds(formattedIds || []);
     } catch (error) {
       console.error('Error al cargar tareas diarias:', error);
       setDailyTasksIds([]);
@@ -287,7 +285,7 @@ export default function UserProjectView() {
         .select('*')
         .eq('project_id', projectId)
         .contains('assigned_users', [user.id])
-        .not('status', 'in', '(approved)')  // Excluir tareas aprobadas
+        .eq('status', 'pending')           // SOLO tareas en estado pendiente
         .order('deadline', { ascending: true });
         
       if (taskError) {
@@ -296,7 +294,13 @@ export default function UserProjectView() {
         throw taskError;
       }
       
-      console.log('Tareas cargadas:', taskData);
+      console.log('Tareas pendientes cargadas:', taskData?.length);
+      console.log('Detalle de tareas pendientes:', taskData?.map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        deadline: t.deadline
+      })));
       
       // 3. Obtener todas las subtareas del proyecto
       const { data: allSubtasksData, error: allSubtasksError } = await supabase
@@ -328,7 +332,7 @@ export default function UserProjectView() {
         `)
         .eq('assigned_to', user.id)
         .eq('tasks.project_id', projectId)
-        .not('status', 'in', '(completed, approved)')  // Excluir subtareas completadas y aprobadas
+        .eq('status', 'pending')           // SOLO subtareas en estado pendiente
         .order('sequence_order', { ascending: true });
         
       if (subtaskError) {
@@ -337,11 +341,13 @@ export default function UserProjectView() {
         throw subtaskError;
       }
       
-      // Log detallado para analizar estructura
-      console.log('Detalle completo de la primera subtarea:', subtaskData && subtaskData.length > 0 ? 
-        JSON.stringify(subtaskData[0], null, 2) : 'No hay subtareas');
-      
-      console.log('Subtareas cargadas:', subtaskData);
+      console.log('Subtareas pendientes cargadas:', subtaskData?.length);
+      console.log('Detalle de subtareas pendientes:', subtaskData?.map(s => ({
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        task_id: s.task_id
+      })));
 
       // Si no hay datos, terminar aquí
       if (!allTasksData?.length) {
@@ -578,106 +584,127 @@ export default function UserProjectView() {
     );
   }
   
-  function handleSaveButton() {
-    if (selectedTasks.length === 0) return;
+  function handleShowConfirmModal() {
+    if (selectedTasks.length === 0) {
+      alert('Por favor, selecciona al menos una tarea para asignar');
+      return;
+    }
     setShowConfirmModal(true);
   }
-  
-  async function handleSaveSelection() {
-    if (!user || selectedTasks.length === 0) return;
-    
+
+  function handleConfirmSave() {
+    handleSaveSelectedTasks();
     setShowConfirmModal(false);
+  }
+  
+  async function handleSaveSelectedTasks() {
+    if (selectedTasks.length === 0) {
+      alert('Por favor, selecciona al menos una tarea para asignar');
+      return;
+    }
+    
+    if (!user || !projectId) {
+      alert('Información de usuario o proyecto no disponible');
+      return;
+    }
+    
     setSaving(true);
+    
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
       
-      // Convertir IDs de subtareas a sus originales para guardar en la BD
-      const tasksToSave = selectedTasks.map(taskId => {
-        // Si es una subtarea, guardamos con el prefijo subtask- para poder diferenciarlo después
-        if (taskId.startsWith('subtask-')) {
-          return taskId; // Mantenemos el prefijo subtask- para identificarlo correctamente
-        }
-        return taskId;
-      }).filter(id => id !== '');
+      // Array para guardar IDs que necesitarán actualización de estado
+      const taskIdsToUpdate: string[] = [];
+      const subtaskIdsToUpdate: string[] = [];
       
-      try {
-        // Check if there's already a record for today
-        const { data: existingData, error: fetchError } = await supabase
-          .from('daily_tasks')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('date', today)
-          .single();
+      // Generar las entradas para task_work_assignments
+      const tasksToSave = selectedTasks.map(taskId => {
+        const task = taskItems.find(t => t.id === taskId);
+        if (!task) return null;
         
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          // Si el error no es "No rows found", podría ser un problema con la tabla
-          if (fetchError.code === '42P01') { // Código para "relation does not exist"
-            console.error('La tabla daily_tasks no existe. Por favor, crea la tabla primero.');
-            alert('La funcionalidad de tareas diarias no está disponible en este momento. Se está trabajando en ello.');
-            setSaving(false);
-            return;
-          }
-          throw fetchError;
-        }
+        const isSubtask = task.type === 'subtask';
+        const originalId = isSubtask ? task.id.replace('subtask-', '') : task.id;
         
-        let updatedTaskIds: string[] = [];
-        
-        if (existingData) {
-          // Combinar las tareas existentes con las nuevas
-          updatedTaskIds = [...new Set([...existingData.tasks, ...tasksToSave])];
-          
-          // Update existing record
-          const { error: updateError } = await supabase
-            .from('daily_tasks')
-            .update({
-              tasks: updatedTaskIds,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', existingData.id);
-            
-          if (updateError) throw updateError;
+        // Guardar ID para actualización de estado
+        if (isSubtask) {
+          subtaskIdsToUpdate.push(originalId);
         } else {
-          updatedTaskIds = tasksToSave;
-          
-          // Create new record
-          const { error: insertError } = await supabase
-            .from('daily_tasks')
-            .insert([{
-              user_id: user.id,
-              date: today,
-              tasks: tasksToSave,
-              created_at: new Date().toISOString()
-            }]);
-            
-          if (insertError) throw insertError;
+          taskIdsToUpdate.push(originalId);
         }
         
-        console.log("Tareas guardadas:", updatedTaskIds);
+        return {
+          user_id: user.id,
+          date: today,
+          task_id: originalId,
+          task_type: isSubtask ? 'subtask' : 'task',
+          project_id: task.project_id,
+          estimated_duration: task.estimated_duration,
+          status: isSubtask ? 'in_progress' : 'assigned', // Asignar estado según el tipo
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      }).filter(task => task !== null);
+      
+      // Insertar en task_work_assignments
+      const { error } = await supabase
+        .from('task_work_assignments')
+        .upsert(tasksToSave, { 
+          onConflict: 'user_id,date,task_id,task_type',
+          ignoreDuplicates: false // actualizar si ya existe
+        });
         
-        // Actualizar la lista de tareas diarias
-        setDailyTasksIds(updatedTaskIds);
-        
-        // Limpiar las tareas seleccionadas
-        setSelectedTasks([]);
-        
-        // Cambiar a la pestaña de gestión
-        setActiveTab('gestion');
-        
-        // Actualizar ambas listas de tareas
-        await fetchProjectTasksAndSubtasks();
-        await fetchAssignedTasks();
-        
-        // Mostrar mensaje de éxito
-        alert('Tareas asignadas correctamente');
-      } catch (dbError: any) {
-        if (dbError.code === '42P01') { // Código para "relation does not exist"
-          console.error('La tabla daily_tasks no existe. Por favor, crea la tabla primero.');
-          alert('La funcionalidad de tareas diarias no está disponible en este momento. Se está trabajando en ello.');
-          setSaving(false);
-          return;
-        }
-        throw dbError;
+      if (error) {
+        console.error('Error al guardar tareas:', error);
+        throw error;
       }
+      
+      console.log("Tareas guardadas:", tasksToSave.length);
+      
+      // Actualizar estado de tareas principales a "assigned"
+      if (taskIdsToUpdate.length > 0) {
+        const { data: updatedTasks, error: updateTaskError } = await supabase
+          .from('tasks')
+          .update({ status: 'assigned' })
+          .in('id', taskIdsToUpdate)
+          .select('id, title, status');
+          
+        if (updateTaskError) {
+          console.error('Error al actualizar estado de tareas:', updateTaskError);
+        } else {
+          console.log(`${updatedTasks?.length || 0} tareas actualizadas a estado 'assigned':`, updatedTasks);
+        }
+      }
+      
+      // Actualizar estado de subtareas a "in_progress"
+      if (subtaskIdsToUpdate.length > 0) {
+        const { data: updatedSubtasks, error: updateSubtaskError } = await supabase
+          .from('subtasks')
+          .update({ status: 'in_progress' })
+          .in('id', subtaskIdsToUpdate)
+          .select('id, title, status');
+          
+        if (updateSubtaskError) {
+          console.error('Error al actualizar estado de subtareas:', updateSubtaskError);
+        } else {
+          console.log(`${updatedSubtasks?.length || 0} subtareas actualizadas a estado 'in_progress':`, updatedSubtasks);
+        }
+      }
+      
+      // Recargar los IDs de las tareas asignadas
+      await fetchTodaysDailyTasks();
+      
+      // Limpiar las tareas seleccionadas
+      setSelectedTasks([]);
+      
+      // Cambiar a la pestaña de gestión
+      setActiveTab('gestion');
+      
+      // Actualizar ambas listas de tareas
+      await fetchProjectTasksAndSubtasks();
+      await fetchAssignedTasks();
+      
+      // Mostrar mensaje de éxito
+      alert('Tareas asignadas correctamente');
     } catch (error) {
       console.error('Error saving daily tasks:', error);
       alert('Error al guardar las tareas. Por favor, intenta de nuevo.');
@@ -696,13 +723,33 @@ export default function UserProjectView() {
       const originalId = isSubtask ? taskId.replace('subtask-', '') : taskId;
       const table = isSubtask ? 'subtasks' : 'tasks';
       
-      // Actualizar el estado en la base de datos
-      const { error } = await supabase
+      // Actualizar el estado en la tabla de tareas/subtareas
+      const { error: taskUpdateError } = await supabase
         .from(table)
         .update({ status: newStatus })
         .eq('id', originalId);
         
-      if (error) throw error;
+      if (taskUpdateError) throw taskUpdateError;
+      
+      // También actualizar en task_work_assignments
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const taskType = isSubtask ? 'subtask' : 'task';
+      
+      const { error: assignmentUpdateError } = await supabase
+        .from('task_work_assignments')
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+          ...(newStatus === 'completed' ? { end_time: new Date().toISOString() } : {})
+        })
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .eq('task_id', originalId)
+        .eq('task_type', taskType);
+      
+      if (assignmentUpdateError) {
+        console.error('Error al actualizar estado en asignaciones:', assignmentUpdateError);
+      }
       
       // Actualizar el estado local
       setAssignedTaskItems(prev => 
@@ -738,23 +785,37 @@ export default function UserProjectView() {
     setLoadingAssigned(true);
     
     try {
-      // Obtener detalles de tareas y subtareas ya asignadas
-      const normalTaskIds = [];
-      const subtaskIds = [];
+      const today = format(new Date(), 'yyyy-MM-dd');
       
-      for (const id of dailyTasksIds) {
-        if (id.startsWith('subtask-')) {
-          subtaskIds.push(id.replace('subtask-', ''));
-        } else {
-          normalTaskIds.push(id);
-        }
+      // Obtener asignaciones desde task_work_assignments
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('task_work_assignments')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .eq('project_id', projectId);
+        
+      if (assignmentsError) {
+        console.error('Error al cargar asignaciones:', assignmentsError);
+        setAssignedTaskItems([]);
+        setLoadingAssigned(false);
+        return;
       }
-      
-      console.log("IDs buscando - Tareas:", normalTaskIds);
-      console.log("IDs buscando - Subtareas:", subtaskIds);
       
       // Array para todas las tareas asignadas
       let allAssignedItems: Task[] = [];
+      
+      // IDs de tareas y subtareas
+      const normalTaskIds = assignments
+        .filter(a => a.task_type === 'task')
+        .map(a => a.task_id);
+        
+      const subtaskIds = assignments
+        .filter(a => a.task_type === 'subtask')
+        .map(a => a.task_id);
+      
+      console.log("IDs buscando - Tareas:", normalTaskIds);
+      console.log("IDs buscando - Subtareas:", subtaskIds);
       
       // Obtener detalles de tareas normales
       if (normalTaskIds.length > 0) {
@@ -766,20 +827,27 @@ export default function UserProjectView() {
         if (taskError) {
           console.error('Error al cargar tareas asignadas:', taskError);
         } else if (taskData && taskData.length > 0) {
-          const formattedTasks = taskData.map(task => ({
-            id: task.id,
-            original_id: task.id,
-            title: task.title,
-            description: task.description,
-            priority: task.priority,
-            estimated_duration: task.estimated_duration,
-            start_date: task.start_date,
-            deadline: task.deadline,
-            status: task.status,
-            is_sequential: task.is_sequential,
-            project_id: task.project_id,
-            type: 'task' as 'task' | 'subtask'  // Type assertion para evitar errores
-          }));
+          const formattedTasks = taskData.map(task => {
+            // Buscar la asignación correspondiente para obtener status actualizado
+            const assignment = assignments.find(a => 
+              a.task_id === task.id && a.task_type === 'task'
+            );
+            
+            return {
+              id: task.id,
+              original_id: task.id,
+              title: task.title,
+              description: task.description,
+              priority: task.priority,
+              estimated_duration: task.estimated_duration,
+              start_date: task.start_date,
+              deadline: task.deadline,
+              status: assignment?.status || task.status, // Priorizar estado de la asignación
+              is_sequential: task.is_sequential,
+              project_id: task.project_id,
+              type: 'task' as 'task' | 'subtask'  // Type assertion para evitar errores
+            };
+          });
           
           allAssignedItems = [...allAssignedItems, ...formattedTasks];
         }
@@ -800,21 +868,28 @@ export default function UserProjectView() {
         if (subtaskError) {
           console.error('Error al cargar subtareas asignadas:', subtaskError);
         } else if (subtaskData && subtaskData.length > 0) {
-          const formattedSubtasks = subtaskData.map(subtask => ({
-            id: `subtask-${subtask.id}`,
-            original_id: subtask.id,
-            title: subtask.title,
-            subtask_title: subtask.tasks?.title || "Tarea principal",
-            description: subtask.description,
-            priority: 'medium' as 'low' | 'medium' | 'high',  // Type assertion
-            estimated_duration: subtask.estimated_duration,
-            start_date: subtask.start_date || '',
-            deadline: subtask.deadline || '',
-            status: subtask.status,
-            is_sequential: false,
-            project_id: subtask.tasks?.project_id || '',
-            type: 'subtask' as 'task' | 'subtask'  // Type assertion
-          }));
+          const formattedSubtasks = subtaskData.map(subtask => {
+            // Buscar la asignación correspondiente para obtener status actualizado
+            const assignment = assignments.find(a => 
+              a.task_id === subtask.id && a.task_type === 'subtask'
+            );
+            
+            return {
+              id: `subtask-${subtask.id}`,
+              original_id: subtask.id,
+              title: subtask.title,
+              subtask_title: subtask.tasks?.title || "Tarea principal",
+              description: subtask.description,
+              priority: 'medium' as 'low' | 'medium' | 'high',  // Type assertion
+              estimated_duration: subtask.estimated_duration,
+              start_date: subtask.start_date || '',
+              deadline: subtask.deadline || '',
+              status: assignment?.status || subtask.status, // Priorizar estado de la asignación
+              is_sequential: false,
+              project_id: subtask.tasks?.project_id || '',
+              type: 'subtask' as 'task' | 'subtask'  // Type assertion
+            };
+          });
           
           allAssignedItems = [...allAssignedItems, ...formattedSubtasks];
         }
@@ -1041,7 +1116,7 @@ export default function UserProjectView() {
               <p className="font-bold text-lg mt-1">{totalEstimatedDuration} HORA{totalEstimatedDuration !== 1 ? 'S' : ''}</p>
             </div>
             <button
-              onClick={handleSaveButton}
+              onClick={handleShowConfirmModal}
               disabled={selectedTasks.length === 0 || saving}
               className="bg-yellow-500 text-white px-6 py-2 rounded-md font-medium 
                         hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 
@@ -1298,7 +1373,7 @@ export default function UserProjectView() {
                 Cancelar
               </button>
               <button
-                onClick={handleSaveSelection}
+                onClick={handleConfirmSave}
                 disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
               >

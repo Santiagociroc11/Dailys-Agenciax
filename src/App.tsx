@@ -9,7 +9,6 @@ import Users from './pages/Users';
 import Projects from './pages/Projects';
 import Management from './pages/Management';
 import UserProjectView from './pages/UserProjectView';
-import UserDailyTasks from './pages/UserDailyTasks';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
@@ -65,9 +64,7 @@ function App() {
               <UserLayout />
             </UserRoute>
           }>
-            <Route index element={<UserDailyTasks />} />
             <Route path="projects/:projectId" element={<UserProjectView />} />
-            <Route path="daily" element={<UserDailyTasks />} />
           </Route>
         </Routes>
       </AuthProvider>
