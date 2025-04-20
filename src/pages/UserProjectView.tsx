@@ -261,6 +261,9 @@ export default function UserProjectView() {
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('completed');
   const [statusDetails, setStatusDetails] = useState<string>('');
+  const [actualDuration, setActualDuration] = useState<number>(0);
+  const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours'>('minutes');
+  const [durationReason, setDurationReason] = useState<string>('');
   const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1448,9 +1451,16 @@ export default function UserProjectView() {
   // Añadir función para manejar el modal de estado antes de la función fetchAssignedTasks()
   // Función para abrir el modal de actualización de estado
   function handleOpenStatusModal(taskId: string) {
+    // Encontrar la tarea seleccionada para obtener la duración estimada
+    const selectedTask = [...assignedTaskItems, ...delayedTaskItems].find(task => task.id === taskId);
+    const estimatedDuration = selectedTask ? selectedTask.estimated_duration : 0;
+    
     setSelectedTaskId(taskId);
     setSelectedStatus('completed');
     setStatusDetails('');
+    setActualDuration(estimatedDuration); // Inicializar con la duración estimada
+    setDurationUnit('minutes'); // Por defecto en minutos
+    setDurationReason('');
     setStatusError(null);
     setShowStatusModal(true);
   }
@@ -1466,6 +1476,16 @@ export default function UserProjectView() {
       setStatusError('Por favor, detalla los entregables o resultados de esta tarea');
       return;
     }
+
+    if (selectedStatus === 'completed' && actualDuration <= 0) {
+      setStatusError('Por favor, indica el tiempo real que te tomó completar la tarea');
+      return;
+    }
+
+    // Convertir la duración a minutos para guardar en la base de datos
+    const durationInMinutes = durationUnit === 'hours' 
+      ? Math.round(actualDuration * 60) 
+      : actualDuration;
 
     if (selectedStatus === 'blocked' && !statusDetails.trim()) {
       setStatusError('Por favor, explica el motivo del bloqueo');
@@ -1494,13 +1514,28 @@ export default function UserProjectView() {
       const today = format(new Date(), 'yyyy-MM-dd');
       const taskType = isSubtask ? 'subtask' : 'task';
 
+      // Crear un objeto con toda la metadata que queremos guardar
+      const metadata = {
+        entregables: statusDetails,
+        ...(selectedStatus === 'completed' ? {
+          duracion_real: durationInMinutes,
+          unidad_original: durationUnit,
+          razon_duracion: durationReason
+        } : {
+          razon_bloqueo: statusDetails
+        })
+      };
+
       const { error: assignmentUpdateError } = await supabase
         .from('task_work_assignments')
         .update({
           status: selectedStatus,
           updated_at: new Date().toISOString(),
-          notes: statusDetails,
-          ...(selectedStatus === 'completed' ? { end_time: new Date().toISOString() } : {})
+          notes: JSON.stringify(metadata), // Guardar toda la información en notes como JSON
+          ...(selectedStatus === 'completed' ? { 
+            end_time: new Date().toISOString(),
+            actual_duration: durationInMinutes  // Guardar la duración real en minutos
+          } : {})
         })
         .eq('user_id', user?.id)
         .eq('date', today)
@@ -2498,6 +2533,53 @@ export default function UserProjectView() {
                     : 'Detalla qué necesitas o quién debe proveer lo necesario para desbloquear esta tarea.'}
                 </p>
               </div>
+
+              {selectedStatus === 'completed' && (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ¿Cuánto tiempo te tomó realmente completar esta tarea?
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        className="flex-1 p-2 border border-gray-300 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        value={actualDuration}
+                        onChange={(e) => setActualDuration(parseFloat(e.target.value) || 0)}
+                      />
+                      <select
+                        className="p-2 border border-gray-300 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        value={durationUnit}
+                        onChange={(e) => setDurationUnit(e.target.value as 'minutes' | 'hours')}
+                      >
+                        <option value="minutes">Minutos</option>
+                        <option value="hours">Horas</option>
+                      </select>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Registra el tiempo real que te tomó completar la tarea.
+                    </p>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ¿Por qué la duración real es diferente a la estimada?
+                    </label>
+                    <textarea
+                      className="w-full p-2 border border-gray-300 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                      rows={2}
+                      placeholder="Explica brevemente los factores que afectaron el tiempo de realización"
+                      value={durationReason}
+                      onChange={(e) => setDurationReason(e.target.value)}
+                    ></textarea>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Esta información es importante para mejorar futuras estimaciones.
+                    </p>
+                  </div>
+                </>
+              )}
 
               {statusError && (
                 <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
