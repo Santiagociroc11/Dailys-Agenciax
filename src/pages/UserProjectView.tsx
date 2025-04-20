@@ -1540,11 +1540,10 @@ export default function UserProjectView() {
           .update({
             status: selectedStatus,
             updated_at: new Date().toISOString(),
-            notes: JSON.stringify(metadata),
+            notes: metadata,              // SIN JSON.stringify
             ...(selectedStatus === 'completed'
               ? { end_time: new Date().toISOString(), actual_duration: durationMin }
-              : {}
-            )
+              : {})
           })
           .eq('user_id', user!.id)
           .eq('date', today)
