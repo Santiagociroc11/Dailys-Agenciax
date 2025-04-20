@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { Toaster } from 'react-hot-toast';        // ← importamos Toaster
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import UserLayout from './components/UserLayout';
 import Dashboard from './pages/Dashboard';
@@ -12,27 +13,19 @@ import UserProjectView from './pages/UserProjectView';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
-import { useAuth } from './contexts/AuthContext';
 
 // Route guard for admin routes
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAdmin, loading } = useAuth();
-  
   if (loading) return <div>Loading...</div>;
-  
-  if (!isAdmin) {
-    return <Navigate to="/user" replace />;
-  }
-  
+  if (!isAdmin) return <Navigate to="/user" replace />;
   return <>{children}</>;
 };
 
 // Route guard for user routes
 const UserRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAdmin, loading } = useAuth();
-  
+  const { loading } = useAuth();
   if (loading) return <div>Loading...</div>;
-  
   return <>{children}</>;
 };
 
@@ -40,11 +33,25 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        {/* 1️⃣ Monta el contenedor de toasts aquí, una sola vez */}
+        <Toaster
+          position="top-right"
+          reverseOrder={false}
+          toastOptions={{
+            duration: 3000,
+            // opcional: styling global
+            style: {
+              padding: '8px 16px',
+              fontSize: '14px',
+            },
+          }}
+        />
+
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
+
           {/* Admin routes */}
           <Route path="/" element={
             <AdminRoute>
@@ -57,7 +64,7 @@ function App() {
             <Route path="tasks" element={<Tasks />} />
             <Route path="users" element={<Users />} />
           </Route>
-          
+
           {/* User routes */}
           <Route path="/user" element={
             <UserRoute>
