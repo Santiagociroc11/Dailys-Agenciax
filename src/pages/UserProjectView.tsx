@@ -941,7 +941,7 @@ export default function UserProjectView() {
 
   function handleShowConfirmModal() {
     if (selectedTasks.length === 0) {
-      alert('Por favor, selecciona al menos una tarea para asignar');
+      toast.error('Por favor, selecciona al menos una tarea para asignar');
       return;
     }
     setShowConfirmModal(true);
@@ -954,12 +954,12 @@ export default function UserProjectView() {
 
   async function handleSaveSelectedTasks() {
     if (selectedTasks.length === 0) {
-      alert('Por favor, selecciona al menos una tarea para asignar');
+      toast.error('Por favor, selecciona al menos una tarea para asignar');
       return;
     }
 
     if (!user || !projectId) {
-      alert('Información de usuario o proyecto no disponible');
+      toast.error('Información de usuario o proyecto no disponible');
       return;
     }
 
@@ -1101,10 +1101,10 @@ export default function UserProjectView() {
       await fetchAssignedTasks();
 
       // Mostrar mensaje de éxito
-      alert('Tareas asignadas correctamente');
+      toast.success('Tareas asignadas correctamente');
     } catch (error) {
       console.error('Error saving daily tasks:', error);
-      alert('Error al guardar las tareas. Por favor, intenta de nuevo.');
+      toast.error('Error al guardar las tareas. Por favor, intenta de nuevo.');
     } finally {
       setSaving(false);
     }
@@ -1222,10 +1222,10 @@ export default function UserProjectView() {
       );
 
       // Mensaje de confirmación
-      alert(`Estado actualizado a: ${newStatus}`);
+      toast.success(`Estado actualizado a: ${newStatus}`);
     } catch (error) {
       console.error('Error al actualizar estado:', error);
-      alert('Error al actualizar el estado. Por favor, intenta de nuevo.');
+      toast.error('Error al actualizar el estado. Por favor, intenta de nuevo.');
     }
   }
 
