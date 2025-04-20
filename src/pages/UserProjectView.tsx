@@ -33,6 +33,9 @@ interface TaskNotes {
   unidad_original?: 'minutes' | 'hours';
   razon_duracion?: string;
   razon_bloqueo?: string;
+  returned_feedback?: string;  // Retroalimentación al devolver una tarea
+  returned_at?: string;        // Fecha de devolución
+  returned_by?: string;        // Usuario que devolvió la tarea
   [key: string]: any; // Para permitir otras propiedades
 }
 
@@ -174,7 +177,7 @@ function SubtaskSequenceDisplay({
                   <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  Asignada a: &nbsp;<span className="font-medium text-blue-600">{subtaskUsers[nextSubtask.assigned_to] || 'Usuario'}</span>
+                  Asignada a: &nbsp;<span className="font-medium text-blue-600">{subtaskUsers[previousSubtask.assigned_to] || 'Usuario'}</span>
                 </div>
               )}
             </div>
@@ -215,12 +218,7 @@ function SubtaskSequenceDisplay({
                   <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  Asignada a: &nbsp;
-                  <span className="font-medium text-blue-600">
-                    {nextSubtask && nextSubtask.assigned_to ?
-                      (subtaskUsers && subtaskUsers[nextSubtask.assigned_to] ? subtaskUsers[nextSubtask.assigned_to] : 'Usuario')
-                      : 'Usuario'}
-                  </span>
+                  Asignada a: &nbsp;<span className="font-medium text-blue-600">{nextSubtask?.assigned_to ? subtaskUsers[nextSubtask.assigned_to] || 'Usuario' : 'No asignado'}</span>
                 </div>
               )}
             </div>
@@ -234,57 +232,69 @@ function SubtaskSequenceDisplay({
 }
 
 export default function UserProjectView() {
+  const { user } = useAuth();
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  
+  // Estados para datos principales
   const [project, setProject] = useState<Project | null>(null);
-  const [loadingProject, setLoadingProject] = useState(true);
-  const [activeTab, setActiveTab] = useState('asignacion');
   const [taskItems, setTaskItems] = useState<Task[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [assignedTaskItems, setAssignedTaskItems] = useState<Task[]>([]);
   const [delayedTaskItems, setDelayedTaskItems] = useState<Task[]>([]);
+  const [returnedTaskItems, setReturnedTaskItems] = useState<Task[]>([]);  // Lista para tareas devueltas
   const [completedTaskItems, setCompletedTaskItems] = useState<Task[]>([]);
+  const [dailyTasksIds, setDailyTasksIds] = useState<string[] | null>(null);
+  
+  // Estados para UI
+  const [activeTab, setActiveTab] = useState('asignacion');
   const [activeGestionSubTab, setActiveGestionSubTab] = useState('pendientes');
-  const [loadingTasks, setLoadingTasks] = useState(true);
-  const [loadingAssigned, setLoadingAssigned] = useState(true);
-  const [loadingCompleted, setLoadingCompleted] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [subtaskUsers, setSubtaskUsers] = useState<Record<string, string>>({});
-  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-  const [previousSubtask, setPreviousSubtask] = useState<Subtask | null>(null);
-  const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
-  const [dailyTasksIds, setDailyTasksIds] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
-  const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
-  const [tasksWithSubtasks, setTasksWithSubtasks] = useState<Record<string, Subtask[]>>({});
+  const [sortBy, setSortBy] = useState<'deadline' | 'priority' | 'duration'>('deadline');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  
+  // Estados para carga
+  const [loading, setLoading] = useState(true);
+  const [isDataInitialized, setIsDataInitialized] = useState(false);
+  const [isFiltering, setIsFiltering] = useState(false);
+  const [loadingAssigned, setLoadingAssigned] = useState(false);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
+  
+  // Estados para cálculos
   const [totalEstimatedDuration, setTotalEstimatedDuration] = useState(0);
   const [totalAssignedTime, setTotalAssignedTime] = useState(0);
   const [totalDelayedTime, setTotalDelayedTime] = useState(0);
   const [totalDelayedDays, setTotalDelayedDays] = useState(0);
-
-  // Variables que faltaban
-  const [sortBy, setSortBy] = useState<'deadline' | 'priority' | 'duration'>('deadline');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [isFiltering, setIsFiltering] = useState(false);
-  const [isDataInitialized, setIsDataInitialized] = useState(false);
-
-  // Nuevos estados para el modal de cambio de estado
+  
+  // Estados para modales
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showReturnedFeedbackModal, setShowReturnedFeedbackModal] = useState(false);
+  const [selectedReturnedTask, setSelectedReturnedTask] = useState<Task | null>(null);
+  
+  // Estados para detalles de tareas y subtareas
+  const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
+  const [previousSubtask, setPreviousSubtask] = useState<Subtask | null>(null);
+  const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
+  const [subtaskUsers, setSubtaskUsers] = useState<Record<string, string>>({});
+  
+  // Estados para actualización de estado
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('completed');
-  const [statusDetails, setStatusDetails] = useState<string>('');
+  const [statusDetails, setStatusDetails] = useState('');
   const [actualDuration, setActualDuration] = useState<number>(0);
   const [durationUnit, setDurationUnit] = useState<'minutes' | 'hours'>('minutes');
-  const [durationReason, setDurationReason] = useState<string>('');
+  const [durationReason, setDurationReason] = useState('');
   const [statusError, setStatusError] = useState<string | null>(null);
+  
+  // Estado para guardar
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (projectId) {
       // Resetear estados importantes al cambiar de proyecto
-      setLoadingProject(true);
+      setLoading(true);
       setError(null);
       setTaskItems([]);
 
@@ -300,7 +310,7 @@ export default function UserProjectView() {
           console.error('Error cargando tareas diarias:', error);
           // Si falla, asegurar que podamos continuar
           setDailyTasksIds([]);
-          setLoadingProject(false);
+          setLoading(false);
         }
       };
       loadData();
@@ -309,7 +319,7 @@ export default function UserProjectView() {
 
   useEffect(() => {
     if (projectId && dailyTasksIds !== undefined) {
-      console.log('🔄 [DEBUG] dailyTasksIds actualizados:', dailyTasksIds.length);
+      console.log('🔄 [DEBUG] dailyTasksIds actualizados:', dailyTasksIds?.length || 0);
 
       // Activar explícitamente el estado de filtrado desde el inicio
       setIsFiltering(true);
@@ -393,7 +403,7 @@ export default function UserProjectView() {
 
       // Realizar una última comprobación para asegurar que solo mostramos las tareas que deberían estar visibles
       // Esta es una segunda capa de verificación para evitar parpadeos
-      const dailyTasksSet = new Set(dailyTasksIds);
+      const dailyTasksSet = new Set(dailyTasksIds || []);
 
       // Verificar si hay alguna tarea que debería estar filtrada pero se está mostrando
       const shouldFilter = taskItems.some(task => {
@@ -768,7 +778,7 @@ export default function UserProjectView() {
           : task.id;
 
         // Verificar si esta tarea ya está asignada hoy
-        const isAlreadyAssigned = dailyTasksIds.includes(idToCompare);
+        const isAlreadyAssigned = dailyTasksIds?.includes(idToCompare) || false;
 
         // SUPER IMPORTANTE: log detallado para depuración
         console.log(`🔍 [DEBUG] Verificando tarea: ${task.title} (${idToCompare})`, {
@@ -1283,6 +1293,7 @@ export default function UserProjectView() {
     if (!user || !projectId) {
       setAssignedTaskItems([]);
       setDelayedTaskItems([]);
+      setReturnedTaskItems([]);
       setLoadingAssigned(false);
       return;
     }
@@ -1290,6 +1301,7 @@ export default function UserProjectView() {
     if (!dailyTasksIds || dailyTasksIds.length === 0) {
       setAssignedTaskItems([]);
       setDelayedTaskItems([]);
+      setReturnedTaskItems([]);
       setLoadingAssigned(false);
       return;
     }
@@ -1299,38 +1311,24 @@ export default function UserProjectView() {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
 
-      // Obtener asignaciones desde task_work_assignments
+      // 1. Primero, obtener todas las asignaciones de trabajo desde task_work_assignments
       const { data: assignments, error: assignmentsError } = await supabase
         .from('task_work_assignments')
         .select('*')
         .eq('user_id', user.id)
         .eq('project_id', projectId)
-        .not('status', 'eq', 'completed'); // Excluir explícitamente las tareas completadas
+        .not('status', 'eq', 'completed'); // Excluir las tareas completadas
 
       if (assignmentsError) {
         console.error('Error al cargar asignaciones:', assignmentsError);
         setAssignedTaskItems([]);
         setDelayedTaskItems([]);
+        setReturnedTaskItems([]);
         setLoadingAssigned(false);
         return;
       }
 
-      console.log('📋 [DEBUG] Asignaciones en task_work_assignments:', {
-        fecha: today,
-        total: assignments.length,
-        asignaciones: assignments
-      });
-
-      // Array para todas las tareas asignadas
-      let allAssignedItems: Task[] = [];
-      let todayAssignedItems: Task[] = [];
-      let delayedAssignedItems: Task[] = [];
-      let totalPendingTime = 0;
-      let totalDelayTime = 0;
-      let totalDelayDays = 0;
-      let delayCount = 0;
-
-      // IDs de tareas y subtareas
+      // 2. Obtener IDs de tareas y subtareas
       const normalTaskIds = assignments
         .filter(a => a.task_type === 'task')
         .map(a => a.task_id);
@@ -1339,8 +1337,69 @@ export default function UserProjectView() {
         .filter(a => a.task_type === 'subtask')
         .map(a => a.task_id);
 
-      console.log("IDs buscando - Tareas:", normalTaskIds);
-      console.log("IDs buscando - Subtareas:", subtaskIds);
+      // 3. Buscar tareas devueltas en la tabla tasks
+      const { data: returnedTasks, error: returnedTasksError } = await supabase
+        .from('tasks')
+        .select('*')
+        .in('id', normalTaskIds)
+        .eq('status', 'returned');
+
+      if (returnedTasksError) {
+        console.error('Error al cargar tareas devueltas:', returnedTasksError);
+      }
+
+      // 4. Buscar subtareas devueltas en la tabla subtasks
+      const { data: returnedSubtasks, error: returnedSubtasksError } = await supabase
+        .from('subtasks')
+        .select(`
+          *,
+          tasks (
+            id, title, is_sequential, project_id
+          )
+        `)
+        .in('id', subtaskIds)
+        .eq('status', 'returned');
+
+      if (returnedSubtasksError) {
+        console.error('Error al cargar subtareas devueltas:', returnedSubtasksError);
+      }
+
+      // 5. Crear un mapa de tareas/subtareas devueltas para fácil acceso
+      const returnedItemsMap = new Map();
+      
+      // Mapear tareas devueltas
+      returnedTasks?.forEach(task => {
+        returnedItemsMap.set(task.id, {
+          status: 'returned',
+          notes: task.notes
+        });
+      });
+      
+      // Mapear subtareas devueltas
+      returnedSubtasks?.forEach(subtask => {
+        returnedItemsMap.set(subtask.id, {
+          status: 'returned',
+          notes: subtask.notes
+        });
+      });
+
+      console.log('🔍 [DEBUG] Tareas devueltas encontradas:', {
+        tareas: returnedTasks?.length || 0,
+        subtareas: returnedSubtasks?.length || 0,
+        total: returnedItemsMap.size
+      });
+
+      // Array para todas las tareas asignadas
+      let allAssignedItems: Task[] = [];
+      let todayAssignedItems: Task[] = [];
+      let delayedAssignedItems: Task[] = [];
+      let returnedItems: Task[] = []; // Nueva lista para tareas devueltas
+      let totalPendingTime = 0;
+      let totalDelayTime = 0;
+      let totalDelayDays = 0;
+      let delayCount = 0;
+
+      // ... resto del código como antes para obtener detalles de tareas normales ...
 
       // Obtener detalles de tareas normales
       if (normalTaskIds.length > 0) {
@@ -1359,6 +1418,15 @@ export default function UserProjectView() {
               a.task_id === task.id && a.task_type === 'task'
             );
 
+            // Verificar si esta tarea está en la lista de devueltas
+            const returnedInfo = returnedItemsMap.get(task.id);
+            
+            // Usar el estado de la tarea si está devuelta, de lo contrario usar el estado de la asignación
+            const taskStatus = returnedInfo ? 'returned' : (assignment?.status || task.status);
+            
+            // Usar las notas de la tarea si está devuelta
+            const taskNotes = returnedInfo ? returnedInfo.notes : assignment?.notes;
+
             const formattedTask: Task = {
               id: task.id,
               original_id: task.id,
@@ -1368,22 +1436,27 @@ export default function UserProjectView() {
               estimated_duration: task.estimated_duration,
               start_date: task.start_date,
               deadline: task.deadline,
-              status: assignment?.status || task.status, // Priorizar estado de la asignación
+              status: taskStatus, // Usar el estado actualizado
               is_sequential: task.is_sequential,
               project_id: task.project_id,
               type: 'task',
               assignment_date: assignment?.date || today,
+              notes: taskNotes || null
             };
 
             // Calcular duración estimada en horas
             const durationHours = Math.round((task.estimated_duration / 60) * 100) / 100;
 
-            // Si no está completada, sumar al tiempo pendiente total
+            // Clasificar según el estado
             if (formattedTask.status !== 'completed' && formattedTask.status !== 'approved') {
               totalPendingTime += durationHours;
 
-              // Clasificar si es de hoy o retrasada
-              if (assignment?.date === today) {
+              // Priorizar las tareas devueltas
+              if (formattedTask.status === 'returned') {
+                returnedItems.push(formattedTask);
+              }
+              // Después clasificar por fecha
+              else if (assignment?.date === today) {
                 todayAssignedItems.push(formattedTask);
               } else if (assignment?.date) {
                 // Es una tarea retrasada
@@ -1429,6 +1502,15 @@ export default function UserProjectView() {
               a.task_id === subtask.id && a.task_type === 'subtask'
             );
 
+            // Verificar si esta subtarea está en la lista de devueltas
+            const returnedInfo = returnedItemsMap.get(subtask.id);
+            
+            // Usar el estado de la subtarea si está devuelta, de lo contrario usar el estado de la asignación
+            const subtaskStatus = returnedInfo ? 'returned' : (assignment?.status || subtask.status);
+            
+            // Usar las notas de la subtarea si está devuelta
+            const subtaskNotes = returnedInfo ? returnedInfo.notes : assignment?.notes;
+
             const formattedSubtask: Task = {
               id: `subtask-${subtask.id}`,
               original_id: subtask.id,
@@ -1439,22 +1521,27 @@ export default function UserProjectView() {
               estimated_duration: subtask.estimated_duration,
               start_date: subtask.start_date || '',
               deadline: subtask.deadline || '',
-              status: assignment?.status || subtask.status, // Priorizar estado de la asignación
+              status: subtaskStatus, // Usar el estado actualizado
               is_sequential: false,
               project_id: subtask.tasks?.project_id || '',
               type: 'subtask',
               assignment_date: assignment?.date || today,
+              notes: subtaskNotes || null
             };
 
             // Calcular duración estimada en horas
             const durationHours = Math.round((subtask.estimated_duration / 60) * 100) / 100;
 
-            // Si no está completada, sumar al tiempo pendiente total
+            // Clasificar según el estado
             if (formattedSubtask.status !== 'completed' && formattedSubtask.status !== 'approved') {
               totalPendingTime += durationHours;
 
-              // Clasificar si es de hoy o retrasada
-              if (assignment?.date === today) {
+              // Priorizar las tareas devueltas
+              if (formattedSubtask.status === 'returned') {
+                returnedItems.push(formattedSubtask);
+              }
+              // Después clasificar por fecha
+              else if (assignment?.date === today) {
                 todayAssignedItems.push(formattedSubtask);
               } else if (assignment?.date) {
                 // Es una subtarea retrasada
@@ -1481,14 +1568,14 @@ export default function UserProjectView() {
       // Calcular el promedio de días de retraso
       const avgDelayDays = delayCount > 0 ? Math.round(totalDelayDays / delayCount) : 0;
 
-      console.log("Tareas asignadas cargadas:", allAssignedItems.length);
-      console.log("Tiempo pendiente total:", totalPendingTime, "horas");
+      console.log("Tareas devueltas:", returnedItems.length);
       console.log("Tareas de hoy:", todayAssignedItems.length);
       console.log("Tareas retrasadas:", delayedAssignedItems.length, "con", avgDelayDays, "días promedio");
 
       // Actualizar estados
       setAssignedTaskItems(todayAssignedItems);
       setDelayedTaskItems(delayedAssignedItems);
+      setReturnedTaskItems(returnedItems);
       setTotalAssignedTime(totalPendingTime);
       setTotalDelayedTime(totalDelayTime);
       setTotalDelayedDays(avgDelayDays);
@@ -1593,6 +1680,7 @@ export default function UserProjectView() {
       newStatus: selectedStatus,
       isInPendingList: assignedTaskItems.some(t => t.id === selectedTaskId),
       isInDelayedList: delayedTaskItems.some(t => t.id === selectedTaskId),
+      isInReturnedList: returnedTaskItems.some(t => t.id === selectedTaskId),
       isInCompletedList: completedTaskItems.some(t => t.id === selectedTaskId)
     });
 
@@ -1618,12 +1706,19 @@ export default function UserProjectView() {
     };
 
     try {
-      // 4️⃣ Lanza ambas actualizaciones en paralelo
-      const [taskRes, assignRes] = await Promise.all([
+      // 4️⃣ Actualizar tanto la tabla de tasks/subtasks como task_work_assignments
+      // Esto es especialmente importante para las tareas devueltas
+      const promises = [
+        // Actualizar la tabla de tasks o subtasks
         supabase
           .from(table)
-          .update({ status: selectedStatus, notes: statusDetails })
+          .update({ 
+            status: selectedStatus, 
+            notes: typeof metadata === 'string' ? metadata : JSON.stringify(metadata) 
+          })
           .eq('id', originalId),
+        
+        // Actualizar la asignación en task_work_assignments
         supabase
           .from('task_work_assignments')
           .update({
@@ -1635,14 +1730,17 @@ export default function UserProjectView() {
               : {})
           })
           .eq('user_id', user!.id)
-          .eq('date', today)
           .eq('task_id', originalId)
           .eq('task_type', taskType)
           .select()
-      ]);
+      ];
 
-      if (taskRes.error || assignRes.error)
+      // Ejecutar todas las actualizaciones en paralelo
+      const [taskRes, assignRes] = await Promise.all(promises);
+
+      if (taskRes.error || assignRes.error) {
         throw taskRes.error || assignRes.error;
+      }
 
       console.log('✅ [SUBMIT STATUS] Actualizaciones de BD completadas:', {
         taskId: selectedTaskId,
@@ -1661,38 +1759,52 @@ export default function UserProjectView() {
       }
 
       // 6️⃣ Refrescar estado local
+      // Determinar de qué lista proviene la tarea
+      const isInReturned = returnedTaskItems.some(t => t.id === selectedTaskId);
+      const isInAssigned = assignedTaskItems.some(t => t.id === selectedTaskId);
+      const isInDelayed = delayedTaskItems.some(t => t.id === selectedTaskId);
+
       if (selectedStatus === 'completed') {
-        // Si la tarea se marcó como completada, removerla de las listas de pendientes
-        setAssignedTaskItems(prev => 
-          prev.filter(t => t.id !== selectedTaskId)
-        );
-        setDelayedTaskItems(prev => 
-          prev.filter(t => t.id !== selectedTaskId)
-        );
+        // Si la tarea se marcó como completada, removerla de todas las listas de pendientes
+        if (isInReturned) {
+          setReturnedTaskItems(prev => prev.filter(t => t.id !== selectedTaskId));
+        }
+        if (isInAssigned) {
+          setAssignedTaskItems(prev => prev.filter(t => t.id !== selectedTaskId));
+        }
+        if (isInDelayed) {
+          setDelayedTaskItems(prev => prev.filter(t => t.id !== selectedTaskId));
+        }
         
         // Recargar las tareas completadas para incluir la nueva
         fetchCompletedTasks();
       } else {
-        // Si se marcó con otro estado, solo actualizar el estado en las listas actuales
-        setAssignedTaskItems(prev =>
-          prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: statusDetails } : t)
-        );
-        setDelayedTaskItems(prev =>
-          prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: statusDetails } : t)
-        );
+        // Si se marcó con otro estado, actualizar el estado en la lista correspondiente
+        if (isInReturned) {
+          setReturnedTaskItems(prev =>
+            prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)
+          );
+        }
+        if (isInAssigned) {
+      setAssignedTaskItems(prev => prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)
+      );
+        }
+        if (isInDelayed) {
+      setDelayedTaskItems(prev =>
+            prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)
+      );
+        }
       }
       
       console.log('✅ [SUBMIT STATUS] Estado local actualizado correctamente');
       setShowStatusModal(false);
       
       // Toast de éxito
-      toast.success(
-        `Tarea ${selectedStatus === 'completed' ? 'completada' : 'bloqueada'} correctamente`
-      );
+      toast.success(`Tarea ${selectedStatus === 'completed' ? 'completada' : 'actualizada'} con éxito!`);
 
     } catch (error) {
-      console.error('Error al actualizar estado:', error);
-      toast.error('Error al actualizar el estado. Por favor, intenta de nuevo.');
+      console.error('❌ [SUBMIT STATUS] Error:', error);
+      setStatusError('Error al actualizar el estado. Inténtalo de nuevo.');
     }
   }
 
@@ -1845,11 +1957,12 @@ export default function UserProjectView() {
   function removeCompletedFromPendingLists(completedTasks: Task[]) {
     const completedIds = new Set(completedTasks.map(task => task.id));
     
-    // Verificar si hay tareas en la lista de pendientes que ya están en completadas
+    // Verificar si hay tareas en las listas de pendientes que ya están en completadas
     const duplicatesInAssigned = assignedTaskItems.filter(task => completedIds.has(task.id));
     const duplicatesInDelayed = delayedTaskItems.filter(task => completedIds.has(task.id));
+    const duplicatesInReturned = returnedTaskItems.filter(task => completedIds.has(task.id));
     
-    if (duplicatesInAssigned.length > 0 || duplicatesInDelayed.length > 0) {
+    if (duplicatesInAssigned.length > 0 || duplicatesInDelayed.length > 0 || duplicatesInReturned.length > 0) {
       console.log('🧹 [CLEAN] Eliminando tareas completadas de listas pendientes:', {
         enAsignadas: duplicatesInAssigned.map(t => t.id),
         enRetrasadas: duplicatesInDelayed.map(t => t.id)
@@ -1859,6 +1972,226 @@ export default function UserProjectView() {
       setAssignedTaskItems(prev => prev.filter(task => !completedIds.has(task.id)));
       setDelayedTaskItems(prev => prev.filter(task => !completedIds.has(task.id)));
     }
+  }
+
+  const handleDailyTasksChange = (newDailyTasksIds: string[]) => {
+    console.log('🔄 [DEBUG] dailyTasksIds actualizados:', newDailyTasksIds?.length || 0);
+    setDailyTasksIds(newDailyTasksIds);
+  };
+
+  // Función para ver la retroalimentación de una tarea devuelta
+  async function handleViewReturnedFeedback(task: Task) {
+    setSelectedReturnedTask(task);
+    
+    try {
+      console.log('🔍 [DEBUG] Obteniendo datos de retroalimentación para:', task.id);
+      
+      // Crear un objeto para las notas actualizadas
+      let updatedNotes: TaskNotes = {};
+      
+      // Si la tarea ya tiene notas como objeto, usarlas como base
+      if (task.notes && typeof task.notes === 'object') {
+        updatedNotes = { ...task.notes };
+      }
+      
+      if (task.type === 'subtask' && task.original_id) {
+        // Si es una subtarea, obtener datos adicionales de la tabla subtasks
+        const { data, error } = await supabase
+          .from('subtasks')
+          .select('*')
+          .eq('id', task.original_id)
+          .single();
+        
+        if (error) {
+          console.error('Error al obtener datos de retroalimentación de subtask:', error);
+        } else if (data) {
+          console.log('✅ [DEBUG] Datos de retroalimentación obtenidos de subtask:', data);
+          
+          // Verifica si feedback está disponible y es un objeto
+          if (data.feedback) {
+            let feedbackData = data.feedback;
+            
+            // Si feedback es un string pero parece JSON, intenta parsearlo
+            if (typeof data.feedback === 'string' && 
+               (data.feedback.startsWith('{') || data.feedback.startsWith('['))) {
+              try {
+                feedbackData = JSON.parse(data.feedback);
+                console.log('Feedback parseado correctamente:', feedbackData);
+              } catch (parseError) {
+                console.error('Error al parsear feedback JSON:', parseError);
+                // Usar como string simple si falla el parseo
+                feedbackData = { feedback: data.feedback };
+              }
+            } else if (typeof data.feedback === 'object') {
+              // Ya es un objeto, usarlo como está
+              console.log('Feedback ya es un objeto:', feedbackData);
+            } else {
+              // Es un string simple, crear un objeto con él
+              feedbackData = { feedback: data.feedback };
+            }
+            
+            // Extraer los datos del feedback
+            if (typeof feedbackData === 'object') {
+              if (feedbackData.feedback) {
+                updatedNotes.returned_feedback = feedbackData.feedback;
+              }
+              if (feedbackData.reviewed_at) {
+                updatedNotes.returned_at = feedbackData.reviewed_at;
+              }
+              if (feedbackData.reviewed_by) {
+                updatedNotes.returned_by = feedbackData.reviewed_by;
+              }
+            }
+          }
+          
+          // También revisar campos específicos si existen
+          if (data.returned_feedback) {
+            updatedNotes.returned_feedback = data.returned_feedback;
+          }
+          if (data.returned_at) {
+            updatedNotes.returned_at = data.returned_at;
+          }
+          if (data.returned_by) {
+            updatedNotes.returned_by = data.returned_by;
+          }
+          
+          // También revisar el campo 'notes'
+          if (data.notes) {
+            let notesObj = data.notes;
+            
+            // Si es un string que parece JSON, intentar parsearlo
+            if (typeof data.notes === 'string' && 
+               (data.notes.startsWith('{') || data.notes.startsWith('['))) {
+              try {
+                notesObj = JSON.parse(data.notes);
+              } catch (parseError) {
+                console.error('Error al parsear notes JSON:', parseError);
+                // Usar como string simple si falla
+                notesObj = { notes: data.notes };
+              }
+            }
+            
+            // Si ahora es un objeto, extraer la información
+            if (typeof notesObj === 'object') {
+              if (notesObj.returned_feedback) {
+                updatedNotes.returned_feedback = notesObj.returned_feedback;
+              }
+              if (notesObj.returned_at) {
+                updatedNotes.returned_at = notesObj.returned_at;
+              }
+              if (notesObj.returned_by) {
+                updatedNotes.returned_by = notesObj.returned_by;
+              }
+            }
+          }
+        }
+      } else {
+        // Lógica similar para tareas normales
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', task.original_id || task.id)
+          .single();
+        
+        if (error) {
+          console.error('Error al obtener datos de retroalimentación de task:', error);
+        } else if (data) {
+          console.log('✅ [DEBUG] Datos de retroalimentación obtenidos de task:', data);
+          
+          // Verifica si feedback está disponible y es un objeto
+          if (data.feedback) {
+            let feedbackData = data.feedback;
+            
+            // Si feedback es un string pero parece JSON, intenta parsearlo
+            if (typeof data.feedback === 'string' && 
+               (data.feedback.startsWith('{') || data.feedback.startsWith('['))) {
+              try {
+                feedbackData = JSON.parse(data.feedback);
+                console.log('Feedback parseado correctamente:', feedbackData);
+              } catch (parseError) {
+                console.error('Error al parsear feedback JSON:', parseError);
+                // Usar como string simple si falla el parseo
+                feedbackData = { feedback: data.feedback };
+              }
+            } else if (typeof data.feedback === 'object') {
+              // Ya es un objeto, usarlo como está
+              console.log('Feedback ya es un objeto:', feedbackData);
+            } else {
+              // Es un string simple, crear un objeto con él
+              feedbackData = { feedback: data.feedback };
+            }
+            
+            // Extraer los datos del feedback
+            if (typeof feedbackData === 'object') {
+              if (feedbackData.feedback) {
+                updatedNotes.returned_feedback = feedbackData.feedback;
+              }
+              if (feedbackData.reviewed_at) {
+                updatedNotes.returned_at = feedbackData.reviewed_at;
+              }
+              if (feedbackData.reviewed_by) {
+                updatedNotes.returned_by = feedbackData.reviewed_by;
+              }
+            }
+          }
+          
+          // También revisar campos específicos si existen
+          if (data.returned_feedback) {
+            updatedNotes.returned_feedback = data.returned_feedback;
+          }
+          if (data.returned_at) {
+            updatedNotes.returned_at = data.returned_at;
+          }
+          if (data.returned_by) {
+            updatedNotes.returned_by = data.returned_by;
+          }
+          
+          // También revisar el campo 'notes'
+          if (data.notes) {
+            let notesObj = data.notes;
+            
+            // Si es un string que parece JSON, intentar parsearlo
+            if (typeof data.notes === 'string' && 
+               (data.notes.startsWith('{') || data.notes.startsWith('['))) {
+              try {
+                notesObj = JSON.parse(data.notes);
+              } catch (parseError) {
+                console.error('Error al parsear notes JSON:', parseError);
+                // Usar como string simple si falla
+                notesObj = { notes: data.notes };
+              }
+            }
+            
+            // Si ahora es un objeto, extraer la información
+            if (typeof notesObj === 'object') {
+              if (notesObj.returned_feedback) {
+                updatedNotes.returned_feedback = notesObj.returned_feedback;
+              }
+              if (notesObj.returned_at) {
+                updatedNotes.returned_at = notesObj.returned_at;
+              }
+              if (notesObj.returned_by) {
+                updatedNotes.returned_by = notesObj.returned_by;
+              }
+            }
+          }
+        }
+      }
+      
+      // Debug de las notas actualizadas antes de guardarlas
+      console.log('📝 [DEBUG] Notas actualizadas para mostrar:', updatedNotes);
+      
+      // Actualizar la tarea seleccionada con las notas actualizadas
+      setSelectedReturnedTask({
+        ...task,
+        notes: updatedNotes
+      });
+    } catch (error) {
+      console.error('Error al procesar datos de retroalimentación:', error);
+    }
+    
+    // Mostrar el modal
+    setShowReturnedFeedbackModal(true);
   }
 
   return (
@@ -2145,168 +2478,167 @@ export default function UserProjectView() {
 
           {activeGestionSubTab === 'pendientes' && (
             <>
-              {/* Sección de tareas retrasadas (Urgentes) */}
-              {delayedTaskItems.length > 0 && (
+              {/* Sección de tareas devueltas (ATENCIÓN INMEDIATA) */}
+              {returnedTaskItems.length > 0 && (
                 <div className="mb-6">
                   <div className="flex items-center mb-2">
-                    <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
-                    <h3 className="text-lg font-semibold text-red-700">URGENTE: Tareas Retrasadas</h3>
+                    <div className="w-4 h-4 bg-orange-500 rounded-full mr-2"></div>
+                    <h3 className="text-lg font-semibold text-orange-700">ATENCIÓN INMEDIATA: Tareas Devueltas</h3>
                   </div>
 
-                  <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
+                  <div className="bg-orange-50 rounded-md shadow-sm border border-orange-200 overflow-hidden mb-6">
                     {/* Task list header */}
-                    <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
+                    <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-orange-300 font-medium text-orange-800 bg-orange-100">
                       <div>ACTIVIDAD</div>
                       <div>DESCRIPCION</div>
                       <div>INICIO</div>
                       <div>FIN</div>
                       <div>DURACIÓN</div>
                       <div>ESTADO</div>
-                      <div>RETRASO</div>
+                      <div>DEVOLUCIÓN</div>
                       <div>ACCIONES</div>
                     </div>
 
-                    {/* Task list for delayed tasks */}
-                    <div className="divide-y divide-red-200">
-                      {delayedTaskItems.map((task) => {
-                        // Calcular días de retraso
-                        const assignmentDate = task.assignment_date ? parseISO(task.assignment_date) : new Date();
-                        const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
-
-                        return (
-                          <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
-                            <div className="font-medium">
-                              {task.type === 'subtask' ? (
-                                <div>
-                                  <div className="text-sm text-gray-700 font-medium mb-1">
-                                    <span className="inline-block mr-2">T.P:</span>
-                                    {task.subtask_title || "Sin tarea principal"}
-                                  </div>
-                                  <div
-                                    className="cursor-pointer hover:text-indigo-600 mb-1"
-                                    onClick={() => handleViewTaskDetails(task)}
-                                  >
-                                    {task.title}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                    {getPriorityBadge(task.priority)}
-                                  </div>
+                    {/* Task list for returned tasks */}
+                    <div className="divide-y divide-orange-200">
+                      {returnedTaskItems.map((task) => (
+                        <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-orange-50 px-3">
+                          <div className="font-medium">
+                            {task.type === 'subtask' ? (
+                              <div>
+                                <div className="text-sm text-gray-700 font-medium mb-1">
+                                  <span className="inline-block mr-2">T.P:</span>
+                                  {task.subtask_title || "Sin tarea principal"}
                                 </div>
-                              ) : (
-                                <div>
-                                  <div
-                                    className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
-                                    onClick={() => handleViewTaskDetails(task)}
-                                  >
-                                    {task.title}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {getPriorityBadge(task.priority)}
-                                  </div>
+                                <div
+                                  className="cursor-pointer hover:text-indigo-600 mb-1"
+                                  onClick={() => handleViewTaskDetails(task)}
+                                >
+                                  {task.title}
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
                                 </div>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-600 truncate">
-                              {task.description || '-'}
-                            </div>
-                            <div className="text-sm text-gray-700">
-                              {task.start_date ? (
-                                <>
-                                  <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
-                                  {getTimeIndicator(task.start_date, true).text && (
-                                    <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
-                                      {getTimeIndicator(task.start_date, true).text}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-700">
-                              {task.deadline ? (
-                                <>
-                                  <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
-                                  {getTimeIndicator(task.deadline, false).text && (
-                                    <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
-                                      {getTimeIndicator(task.deadline, false).text}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </div>
-                            <div className="text-sm font-medium">
-                              {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
-                            </div>
-                            <div>
-                              <span className={`px-2 py-1 text-xs rounded-full ${task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                                task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                                  task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    'bg-blue-100 text-blue-800'
-                                }`}>
-                                {task.status === 'pending' ? 'Pendiente' :
-                                  task.status === 'in_progress' ? 'En progreso' :
-                                    task.status === 'completed' ? 'Completada' :
-                                      task.status}
-                              </span>
-                            </div>
-                            <div className="text-sm font-medium text-red-600">
-                              {daysSinceAssignment <= 0 ? 'Hoy' : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? 's' : ''}`}
-                              {task.assignment_date && (
-                                <div className="text-xs text-gray-500">
-                                  Asignada: {format(parseISO(task.assignment_date), 'dd/MM/yyyy')}
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
+                                  {getPriorityBadge(task.priority)}
                                 </div>
-                              )}
-                            </div>
-                            <div>
-                              <button
-                                onClick={() => handleOpenStatusModal(task.id)}
-                                className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
-                              >
-                                Actualizar Estado
-                              </button>
-                            </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div
+                                  className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
+                                  onClick={() => handleViewTaskDetails(task)}
+                                >
+                                  {task.title}
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {getPriorityBadge(task.priority)}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        );
-                      })}
+                          <div className="text-sm text-gray-600 truncate">
+                            {task.description || '-'}
+                          </div>
+                          <div className="text-sm text-gray-700">
+                            {task.start_date ? (
+                              <>
+                                <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
+                                {getTimeIndicator(task.start_date, true).text && (
+                                  <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
+                                    {getTimeIndicator(task.start_date, true).text}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-700">
+                            {task.deadline ? (
+                              <>
+                                <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
+                                {getTimeIndicator(task.deadline, false).text && (
+                                  <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
+                                    {getTimeIndicator(task.deadline, false).text}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </div>
+                          <div className="text-sm font-medium">
+                            {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
+                          </div>
+                          <div>
+                            <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800">
+                              Devuelta
+                            </span>
+                          </div>
+                          <div>
+                            <button
+                              onClick={() => handleViewReturnedFeedback(task)}
+                              className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors"
+                            >
+                              Ver Feedback
+                            </button>
+                          </div>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleOpenStatusModal(task.id)}
+                              className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                            >
+                              Actualizar Estado
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Task list container para tareas asignadas de hoy */}
-              <div className="mb-2">
-                <div className="flex items-center mb-2">
-                  <div className="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
-                  <h3 className="text-lg font-semibold text-blue-700">Tareas Para Hoy</h3>
-                </div>
+          {/* Sección de tareas retrasadas (Urgentes) */}
+          {delayedTaskItems.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center mb-2">
+                <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
+                <h3 className="text-lg font-semibold text-red-700">URGENTE: Tareas Retrasadas</h3>
               </div>
 
-              <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+              <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
                 {/* Task list header */}
-                <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
                   <div>ACTIVIDAD</div>
                   <div>DESCRIPCION</div>
                   <div>INICIO</div>
                   <div>FIN</div>
                   <div>DURACIÓN</div>
                   <div>ESTADO</div>
+                  <div>RETRASO</div>
                   <div>ACCIONES</div>
                 </div>
 
-                {/* Task list */}
-                <div className="divide-y divide-gray-200">
-                  {loadingAssigned ? (
-                    <div className="py-8 text-center text-gray-500 bg-white">
-                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                      <p>Cargando tareas...</p>
-                    </div>
-                  ) : assignedTaskItems.length > 0 ? (
-                    assignedTaskItems.map((task) => (
-                      <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                {/* Task list for delayed tasks */}
+                <div className="divide-y divide-red-200">
+                  {delayedTaskItems.map((task) => {
+                    // Calcular días de retraso
+                    const assignmentDate = task.assignment_date ? parseISO(task.assignment_date) : new Date();
+                    const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
+
+                    return (
+                      <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
                         <div className="font-medium">
                           {task.type === 'subtask' ? (
                             <div>
@@ -2385,6 +2717,14 @@ export default function UserProjectView() {
                                   task.status}
                           </span>
                         </div>
+                        <div className="text-sm font-medium text-red-600">
+                          {daysSinceAssignment <= 0 ? 'Hoy' : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? 's' : ''}`}
+                          {task.assignment_date && (
+                            <div className="text-xs text-gray-500">
+                              Asignada: {format(parseISO(task.assignment_date), 'dd/MM/yyyy')}
+                            </div>
+                          )}
+                        </div>
                         <div>
                           <button
                             onClick={() => handleOpenStatusModal(task.id)}
@@ -2394,19 +2734,173 @@ export default function UserProjectView() {
                           </button>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="py-8 text-center bg-white">
-                      <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
-                      {delayedTaskItems.length > 0 ? (
-                        <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p>
-                      ) : (
-                        <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Task list container para tareas asignadas de hoy */}
+          <div className="mb-2">
+            <div className="flex items-center mb-2">
+              <div className="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
+              <h3 className="text-lg font-semibold text-blue-700">Tareas Para Hoy</h3>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+            {/* Task list header */}
+            <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+              <div>ACTIVIDAD</div>
+              <div>DESCRIPCION</div>
+              <div>INICIO</div>
+              <div>FIN</div>
+              <div>DURACIÓN</div>
+              <div>ESTADO</div>
+              <div>ACCIONES</div>
+            </div>
+
+            {/* Task list */}
+            <div className="divide-y divide-gray-200">
+              {loadingAssigned ? (
+                <div className="py-8 text-center text-gray-500 bg-white">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                  <p>Cargando tareas...</p>
+                </div>
+              ) : assignedTaskItems.length > 0 ? (
+                assignedTaskItems.map((task) => (
+                  <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                    <div className="font-medium">
+                      {task.type === 'subtask' ? (
+                        <div>
+                          <div className="text-sm text-gray-700 font-medium mb-1">
+                            <span className="inline-block mr-2">T.P:</span>
+                            {task.subtask_title || "Sin tarea principal"}
+                          </div>
+                          <div
+                            className="cursor-pointer hover:text-indigo-600 mb-1"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                                {/* Indicador para tareas devueltas */}
+                                {task.status === 'returned' && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
+                                )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div
+                            className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                                {/* Indicador para tareas devueltas */}
+                                {task.status === 'returned' && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
+                                )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-600 truncate">
+                      {task.description || '-'}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.start_date ? (
+                        <>
+                          <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
+                          {getTimeIndicator(task.start_date, true).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
+                              {getTimeIndicator(task.start_date, true).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.deadline ? (
+                        <>
+                          <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
+                          {getTimeIndicator(task.deadline, false).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
+                              {getTimeIndicator(task.deadline, false).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium">
+                      {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
+                    </div>
+                    <div>
+                          <span className={`px-2 py-1 text-xs rounded-full ${
+                            task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                        task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                          task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            task.status === 'returned' ? 'bg-orange-100 text-orange-800' :
+                            'bg-blue-100 text-blue-800'
+                        }`}>
+                        {task.status === 'pending' ? 'Pendiente' :
+                          task.status === 'in_progress' ? 'En progreso' :
+                            task.status === 'completed' ? 'Completada' :
+                              task.status === 'returned' ? 'Devuelta' :
+                              task.status}
+                      </span>
+                    </div>
+                        <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleOpenStatusModal(task.id)}
+                        className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                      >
+                        Actualizar Estado
+                      </button>
+                          {/* Botón para ver retroalimentación si la tarea fue devuelta */}
+                          {task.status === 'returned' && task.notes && typeof task.notes === 'object' && task.notes.returned_feedback && (
+                            <button
+                              onClick={() => handleViewReturnedFeedback(task)}
+                              className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors"
+                            >
+                              Ver Feedback
+                            </button>
+                          )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center bg-white">
+                  <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
+                  {delayedTaskItems.length > 0 ? (
+                    <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p>
+                  ) : (
+                    <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
             </>
           )}
 
@@ -2925,7 +3419,9 @@ export default function UserProjectView() {
               <h3 className="text-lg font-medium">
                 {selectedStatus === 'completed' && completedTaskItems.some(t => t.id === selectedTaskId) 
                   ? 'Editar tarea completada' 
-                  : 'Actualizar estado de tarea'}
+                  : returnedTaskItems.some(t => t.id === selectedTaskId)
+                    ? 'Actualizar tarea devuelta'
+                    : 'Actualizar estado de tarea'}
               </h3>
               <button
                 onClick={() => setShowStatusModal(false)}
@@ -2938,50 +3434,101 @@ export default function UserProjectView() {
             </div>
 
             <div className="px-6 py-4">
+              {/* Panel informativo para tareas devueltas */}
+              {returnedTaskItems.some(t => t.id === selectedTaskId) && (
+                <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
+                  <h4 className="text-sm font-medium text-orange-800 mb-1">Motivo de la devolución:</h4>
+                  <div className="whitespace-pre-wrap text-sm">
+                    {(() => {
+                      // Obtener la retroalimentación si existe
+                      const feedback = typeof selectedReturnedTask?.notes === 'object' 
+                        ? selectedReturnedTask?.notes?.returned_feedback 
+                        : null;
+                        
+                      if (feedback) {
+                        return feedback;
+                      } else {
+                        // Consultar directamente en la base de datos si no hay retroalimentación en las notas
+                        return (
+                          <div>
+                            <p>No se encontró retroalimentación específica para esta tarea.</p>
+                            <p className="mt-2 text-orange-700">Esta tarea fue marcada como "Devuelta" y requiere revisión.</p>
+                          </div>
+                        );
+                      }
+                    })()}
+                  </div>
+                  
+                  {selectedReturnedTask?.notes &&
+                    typeof selectedReturnedTask?.notes === 'object' &&
+                    selectedReturnedTask?.notes?.returned_at && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Devuelta el {format(new Date(selectedReturnedTask?.notes?.returned_at), 'dd/MM/yyyy HH:mm')}
+                      {selectedReturnedTask?.notes?.returned_by && (
+                        <span> por {
+                          // Si el ID parece un UUID, obtener el nombre del usuario
+                          selectedReturnedTask?.notes?.returned_by.includes('-') ? 
+                          (() => {
+                            // Intentar encontrar el usuario en la lista de usuarios del proyecto
+                            const userId = selectedReturnedTask?.notes?.returned_by;
+                            // Devolver un componente que carga el nombre del usuario
+                            return (
+                              <UserNameDisplay userId={userId} />
+                            );
+                          })() : 
+                          // Si no es un UUID, mostrar directamente (podría ser un nombre)
+                          selectedReturnedTask?.notes?.returned_by
+                        }</span>
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Sección de selección de estado - solo mostrar si no es edición de tarea completada */}
               {!completedTaskItems.some(t => t.id === selectedTaskId) && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                     Estado de la tarea:
-                  </label>
+                </label>
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
                       className={`px-4 py-2 rounded-md text-sm font-medium 
                               ${selectedStatus === 'completed' ? 'bg-green-100 text-green-800 border-2 border-green-500' : 'bg-gray-100 text-gray-800 border border-gray-300'}`}
-                      onClick={() => setSelectedStatus('completed')}
-                    >
+                    onClick={() => setSelectedStatus('completed')}
+                  >
                       Completada
                     </button>
                     <button
                       type="button"
                       className={`px-4 py-2 rounded-md text-sm font-medium 
                               ${selectedStatus === 'blocked' ? 'bg-red-100 text-red-800 border-2 border-red-500' : 'bg-gray-100 text-gray-800 border border-gray-300'}`}
-                      onClick={() => setSelectedStatus('blocked')}
-                    >
+                    onClick={() => setSelectedStatus('blocked')}
+                  >
                       Bloqueada
                     </button>
+                    </div>
                   </div>
-                </div>
               )}
 
               {/* Detalles según el estado seleccionado */}
               {selectedStatus === 'completed' ? (
                 <div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                       {completedTaskItems.some(t => t.id === selectedTaskId) 
                         ? 'Editar entregables o resultados:' 
                         : 'Detalla los entregables o resultados:'}
-                    </label>
-                    <textarea
+                </label>
+                <textarea
                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500"
                       rows={3}
-                      value={statusDetails}
-                      onChange={(e) => setStatusDetails(e.target.value)}
+                  value={statusDetails}
+                  onChange={(e) => setStatusDetails(e.target.value)}
                       placeholder="Ejemplos: Terminé la implementación del módulo X, Corregí el error en Y, etc."
                     />
-                  </div>
+              </div>
 
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3052,12 +3599,130 @@ export default function UserProjectView() {
               <button
                 onClick={handleSubmitStatus}
                 className={`px-4 py-2 text-sm font-medium text-white rounded-md shadow-sm hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 
-                ${selectedStatus === 'completed' ? 'bg-green-600 focus:ring-green-500' : 'bg-red-600 focus:ring-red-500'}`}
+                       ${selectedStatus === 'completed' ? 'bg-green-600 focus:ring-green-500' : 'bg-red-600 focus:ring-red-500'}`}
               >
-                {completedTaskItems.some(t => t.id === selectedTaskId) 
-                  ? 'Guardar Cambios' 
-                  : selectedStatus === 'completed' ? 'Marcar como Completada' : 'Marcar como Bloqueada'}
+                {returnedTaskItems.some(t => t.id === selectedTaskId)
+                  ? selectedStatus === 'completed' ? 'Marcar como Corregida' : 'Marcar como Bloqueada'
+                  : completedTaskItems.some(t => t.id === selectedTaskId) 
+                    ? 'Guardar Cambios' 
+                    : selectedStatus === 'completed' ? 'Marcar como Completada' : 'Marcar como Bloqueada'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para ver retroalimentación de tareas devueltas */}
+      {showReturnedFeedbackModal && selectedReturnedTask && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-medium text-orange-700">
+                Retroalimentación de Tarea Devuelta
+              </h3>
+              <button
+                onClick={() => setShowReturnedFeedbackModal(false)}
+                className="text-gray-400 hover:text-gray-500 focus:outline-none"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-4">
+              <div className="mb-4">
+                <h4 className="text-md font-medium text-gray-800 mb-1">
+                  {selectedReturnedTask?.title}
+                  {selectedReturnedTask?.type === 'subtask' && selectedReturnedTask?.subtask_title && (
+                    <span className="ml-2 text-sm text-gray-500">
+                      (Subtarea de {selectedReturnedTask?.subtask_title})
+                    </span>
+                  )}
+                </h4>
+                <div className="text-sm text-gray-600">
+                  {selectedReturnedTask?.description}
+                </div>
+              </div>
+
+              <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
+                <h4 className="text-sm font-medium text-orange-800 mb-1">Motivo de la devolución:</h4>
+                <div className="whitespace-pre-wrap text-sm">
+                  {(() => {
+                    try {
+                      // Verificar si hay retroalimentación disponible
+                      const notes = selectedReturnedTask?.notes;
+                      let feedback = '';
+                      
+                      if (notes && typeof notes === 'object' && notes.returned_feedback) {
+                        // Si la retroalimentación es un objeto, convertirlo a string legible
+                        if (typeof notes.returned_feedback === 'object') {
+                          try {
+                            feedback = JSON.stringify(notes.returned_feedback, null, 2);
+                          } catch (e) {
+                            feedback = "Error al mostrar retroalimentación detallada.";
+                          }
+                        } else {
+                          // Si es un string, usarlo directamente
+                          feedback = String(notes.returned_feedback);
+                        }
+                        
+                        return feedback;
+                      } else {
+                        // Si no hay retroalimentación específica
+                        return (
+                          <div>
+                            <p>No se encontró retroalimentación específica para esta tarea.</p>
+                            <p className="mt-2 text-orange-700">Esta tarea fue marcada como "Devuelta" y requiere revisión.</p>
+                          </div>
+                        );
+                      }
+                    } catch (error) {
+                      console.error("Error al procesar la retroalimentación:", error);
+                      return <p>Error al cargar la retroalimentación. Por favor, inténtelo de nuevo.</p>;
+                    }
+                  })()}
+                </div>
+                
+                {selectedReturnedTask?.notes && 
+                 typeof selectedReturnedTask?.notes === 'object' && 
+                 selectedReturnedTask?.notes.returned_at && (
+                  <div className="mt-3 text-xs text-gray-600">
+                    Devuelta el {format(new Date(selectedReturnedTask?.notes.returned_at), 'dd/MM/yyyy HH:mm')}
+                    {selectedReturnedTask?.notes.returned_by && (
+                      <span> por {
+                        // Si el ID parece un UUID, obtener el nombre del usuario
+                        selectedReturnedTask?.notes?.returned_by.includes('-') ? 
+                        (() => {
+                          // Intentar encontrar el usuario en la lista de usuarios del proyecto
+                          const userId = selectedReturnedTask?.notes?.returned_by;
+                          // Devolver un componente que carga el nombre del usuario
+                          return (
+                            <UserNameDisplay userId={userId} />
+                          );
+                        })() : 
+                        // Si no es un UUID, mostrar directamente (podría ser un nombre)
+                        selectedReturnedTask?.notes?.returned_by
+                      }</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 border-t border-gray-200 pt-4">
+                <p className="text-sm text-gray-700 mb-3">
+                  Para marcar esta tarea como completada, actualiza su estado desde la opción "Actualizar Estado".
+                </p>
+                <button
+                  onClick={() => {
+                    setShowReturnedFeedbackModal(false);
+                    handleOpenStatusModal(selectedReturnedTask?.id);
+                  }}
+                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                >
+                  Actualizar Estado Ahora
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3065,3 +3730,43 @@ export default function UserProjectView() {
     </div>
   );
 } 
+
+// Añadir este componente cerca del inicio del archivo, después de las interfaces
+function UserNameDisplay({ userId }: { userId: string }) {
+  const [userName, setUserName] = useState<string>('');
+  
+  useEffect(() => {
+    async function fetchUserName() {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', userId)
+          .single();
+        
+        if (error) {
+          console.error('Error al buscar nombre de usuario:', error);
+          setUserName('Usuario');
+        } else if (data) {
+          // Usar el nombre completo si existe, sino el email, y si no hay ninguno, mostrar 'Usuario'
+          setUserName(data.full_name || data.email || 'Usuario');
+        } else {
+          setUserName('Usuario');
+        }
+      } catch (error) {
+        console.error('Error al cargar nombre de usuario:', error);
+        setUserName('Usuario');
+      }
+    }
+    
+    if (userId) {
+      fetchUserName();
+    } else {
+      setUserName('Usuario');
+    }
+  }, [userId]);
+  
+  return (
+    <span className="font-medium">{userName || userId}</span>
+  );
+}

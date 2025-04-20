@@ -26,6 +26,7 @@ interface Task {
   project_id: string | null;
   status: 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved';
   feedback?: TaskFeedback | null;
+  returned_at?: string;
 }
 
 interface Subtask {
@@ -40,6 +41,7 @@ interface Subtask {
   start_date: string | null;
   deadline: string | null;
   feedback?: TaskFeedback | null;
+  returned_at?: string;
 }
 
 interface Project {
@@ -82,10 +84,12 @@ function Management() {
   // Estados para los modales
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showFeedbackDetailsModal, setShowFeedbackDetailsModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{id: string, type: 'task' | 'subtask', status: string} | null>(null);
   const [targetStatus, setTargetStatus] = useState<string>('');
   const [feedback, setFeedback] = useState('');
   const [rating, setRating] = useState<number>(5);
+  const [feedbackDetails, setFeedbackDetails] = useState<TaskFeedback | null>(null);
 
   useEffect(() => {
     fetchProjects();
@@ -217,13 +221,19 @@ function Management() {
   }
   
   // Función para actualizar el estado en la base de datos
-  async function updateItemStatus(itemId: string, newStatus: string, isSubtask: boolean = false, feedbackData: TaskFeedback | null = null) {
+  async function updateItemStatus(
+    itemId: string, 
+    newStatus: string, 
+    isSubtask: boolean = false, 
+    feedbackData: TaskFeedback | null = null,
+    additionalData: any = null
+  ) {
     try {
       const table = isSubtask ? 'subtasks' : 'tasks';
-      const updateData: any = { status: newStatus };
+      const updateData: any = additionalData || { status: newStatus };
       
-      // Si hay datos de feedback, añadirlos al objeto de actualización
-      if (feedbackData) {
+      // Si hay datos de feedback y no vienen en additionalData, añadirlos
+      if (feedbackData && !additionalData) {
         updateData.feedback = feedbackData;
       }
       
@@ -232,7 +242,8 @@ function Management() {
         setSubtasks(prev => prev.map(subtask => 
           subtask.id === itemId 
             ? { 
-                ...subtask, 
+                ...subtask,
+                ...updateData,
                 status: newStatus as 'pending' | 'in_progress' | 'completed' | 'blocked' | 'in_review' | 'returned' | 'approved', 
                 feedback: feedbackData || subtask.feedback 
               } 
@@ -242,7 +253,8 @@ function Management() {
         setTasks(prev => prev.map(task => 
           task.id === itemId 
             ? { 
-                ...task, 
+                ...task,
+                ...updateData,
                 status: newStatus as 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved',
                 feedback: feedbackData || task.feedback 
               } 
@@ -301,7 +313,78 @@ function Management() {
       reviewed_at: new Date().toISOString()
     };
     
-    updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData);
+    // Para tareas devueltas, actualizamos datos adicionales
+    const updateData: any = { 
+      status: targetStatus,
+      feedback: feedbackData,
+      returned_at: new Date().toISOString()
+    };
+    
+    // Si es 'returned', configuramos para que vuelva a aparecer como pendiente
+    if (targetStatus === 'returned') {
+      updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData, updateData);
+      
+      // Actualizar también el task_work_assignment para que aparezca como pendiente de nuevo
+      updateTaskWorkAssignment(selectedItem.id, selectedItem.type === 'subtask' ? 'subtask' : 'task');
+    } else {
+      updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData);
+    }
+  }
+  
+  // Función para actualizar el task_work_assignment
+  async function updateTaskWorkAssignment(itemId: string, itemType: 'task' | 'subtask') {
+    try {
+      // Obtener la asignación actual para acceder a las notas existentes
+      const { data: assignmentData, error: fetchError } = await supabase
+        .from('task_work_assignments')
+        .select('id, notes')
+        .eq('task_id', itemId)
+        .eq('task_type', itemType)
+        .single();
+      
+      if (fetchError) {
+        console.error('Error al buscar task_work_assignment:', fetchError);
+        toast.error('Error al buscar la asignación de trabajo');
+        return;
+      }
+      
+      if (!assignmentData) {
+        console.error('No se encontró la asignación de trabajo');
+        toast.error('No se encontró la asignación de trabajo');
+        return;
+      }
+      
+      // Preparar las notas actualizadas
+      let updatedNotes = assignmentData.notes || {};
+      
+      // Añadir la retroalimentación a las notas existentes
+      updatedNotes = {
+        ...updatedNotes,
+        returned_feedback: feedback,
+        returned_at: new Date().toISOString(),
+        returned_by: user?.id
+      };
+      
+      // Actualizar el estado en task_work_assignments
+      const { error: updateError } = await supabase
+        .from('task_work_assignments')
+        .update({ 
+          status: 'pending',  // Cambiar a pendiente de nuevo
+          updated_at: new Date().toISOString(),
+          notes: updatedNotes
+        })
+        .eq('id', assignmentData.id);
+      
+      if (updateError) {
+        console.error('Error al actualizar task_work_assignment:', updateError);
+        toast.error('Error al actualizar la asignación de trabajo');
+      } else {
+        console.log('Task work assignment actualizado correctamente');
+      }
+    } catch (err) {
+      console.error('Error al actualizar task_work_assignment:', err);
+      toast.error('Error al actualizar la asignación de trabajo');
+    }
   }
   
   // Función para manejar el envío del formulario de aprobación
@@ -507,7 +590,13 @@ function Management() {
                           return (
                             <div 
                               key={subtask.id}
-                              className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-emerald-500 cursor-pointer"
+                              className={`bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
+                                subtask.status === 'returned' 
+                                  ? 'border-orange-500' 
+                                  : subtask.status === 'approved' 
+                                    ? 'border-green-600' 
+                                    : 'border-emerald-500'
+                              } cursor-pointer`}
                               draggable
                               onDragStart={(e) => {
                                 e.dataTransfer.setData('text/plain', JSON.stringify({
@@ -529,7 +618,21 @@ function Management() {
                                 </div>
                               )}
                               <div className="flex justify-between">
-                                <h5 className="font-medium text-gray-800">{subtask.title}</h5>
+                                <h5 className="font-medium text-gray-800">
+                                  {subtask.title}
+                                  {subtask.status === 'returned' && (
+                                    <span 
+                                      className="ml-2 text-xs text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full cursor-pointer hover:bg-orange-200"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFeedbackDetails(subtask.feedback || null);
+                                        setShowFeedbackDetailsModal(true);
+                                      }}
+                                    >
+                                      Devuelta
+                                    </span>
+                                  )}
+                                </h5>
                                 <span className={`text-xs px-2 py-1 rounded-full ${
                                   parentTask?.priority === 'high' ? 'bg-red-100 text-red-800' :
                                   parentTask?.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
@@ -609,7 +712,13 @@ function Management() {
                         {tasksWithoutSubtasks.map(task => (
                           <div 
                             key={task.id}
-                            className="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
+                            className={`bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
+                              task.status === 'returned' 
+                                ? 'border-orange-500' 
+                                : task.status === 'approved' 
+                                  ? 'border-green-600' 
+                                  : 'border-indigo-500'
+                            } cursor-pointer`}
                             draggable
                             onDragStart={(e) => {
                               e.dataTransfer.setData('text/plain', JSON.stringify({
@@ -623,7 +732,21 @@ function Management() {
                             }}
                           >
                             <div className="flex justify-between items-start">
-                              <h5 className="font-medium text-gray-800">{task.title}</h5>
+                              <h5 className="font-medium text-gray-800">
+                                {task.title}
+                                {task.status === 'returned' && (
+                                  <span 
+                                    className="ml-2 text-xs text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full cursor-pointer hover:bg-orange-200"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFeedbackDetails(task.feedback || null);
+                                      setShowFeedbackDetailsModal(true);
+                                    }}
+                                  >
+                                    Devuelta
+                                  </span>
+                                )}
+                              </h5>
                               <span className={`text-xs px-2 py-1 rounded-full ${
                                 task.priority === 'high' ? 'bg-red-100 text-red-800' :
                                 task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
@@ -1056,6 +1179,43 @@ function Management() {
 
       {/* Toaster para notificaciones */}
       <Toaster position="top-right" />
+
+      {/* Modal para ver detalles de retroalimentación */}
+      {showFeedbackDetailsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold mb-4 flex items-center text-orange-600">
+              <AlertTriangle className="w-5 h-5 mr-2" />
+              Retroalimentación de la tarea
+            </h3>
+            
+            <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-md">
+              <h4 className="text-sm font-medium text-orange-800 mb-2">Comentarios:</h4>
+              <p className="text-gray-700 whitespace-pre-wrap">
+                {feedbackDetails?.feedback || 'No hay comentarios disponibles'}
+              </p>
+            </div>
+            
+            {feedbackDetails?.reviewed_at && (
+              <div className="text-sm text-gray-500 mb-4">
+                Devuelta el: {new Date(feedbackDetails.reviewed_at).toLocaleString()}
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setShowFeedbackDetailsModal(false);
+                  setFeedbackDetails(null);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
