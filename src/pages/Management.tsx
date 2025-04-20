@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
+import toast, { Toaster } from 'react-hot-toast';
+
+interface TaskFeedback {
+  feedback?: string;
+  rating?: number;
+  reviewed_by?: string;
+  reviewed_at?: string;
+}
 
 interface Task {
   id: string;
@@ -17,6 +25,7 @@ interface Task {
   created_by: string;
   project_id: string | null;
   status: 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved';
+  feedback?: TaskFeedback | null;
 }
 
 interface Subtask {
@@ -30,6 +39,7 @@ interface Subtask {
   task_id: string;
   start_date: string | null;
   deadline: string | null;
+  feedback?: TaskFeedback | null;
 }
 
 interface Project {
@@ -68,6 +78,14 @@ function Management() {
   const [groupByPriority, setGroupByPriority] = useState(false);
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
+  
+  // Estados para los modales
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<{id: string, type: 'task' | 'subtask', status: string} | null>(null);
+  const [targetStatus, setTargetStatus] = useState<string>('');
+  const [feedback, setFeedback] = useState('');
+  const [rating, setRating] = useState<number>(5);
 
   useEffect(() => {
     fetchProjects();
@@ -151,20 +169,155 @@ function Management() {
   }
 
   async function handleStatusChange(itemId: string, newStatus: string, isSubtask: boolean = false) {
+    // Primero verificar el estado actual del elemento
+    const table = isSubtask ? 'subtasks' : 'tasks';
+    const currentItem = isSubtask 
+      ? subtasks.find(s => s.id === itemId)
+      : tasks.find(t => t.id === itemId);
+    
+    if (!currentItem) {
+      toast.error('No se pudo encontrar el elemento seleccionado');
+      return;
+    }
+    
+    const currentStatus = currentItem.status;
+    
+    // Validar transiciones permitidas
+    const allowedTransitions: Record<string, string[]> = {
+      'completed': ['in_review'],
+      'blocked': ['in_review'],
+      'in_review': ['returned', 'approved']
+    };
+    
+    // Verificar si la transición está permitida
+    if (!allowedTransitions[currentStatus as keyof typeof allowedTransitions]?.includes(newStatus)) {
+      toast.error(`No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
+      return;
+    }
+    
+    // Configurar el elemento seleccionado y el estado objetivo
+    setSelectedItem({
+      id: itemId,
+      type: isSubtask ? 'subtask' : 'task',
+      status: currentStatus
+    });
+    setTargetStatus(newStatus);
+    
+    // Mostrar el modal correspondiente según el nuevo estado
+    if (newStatus === 'returned') {
+      setShowFeedbackModal(true);
+      return; // No actualizar hasta que se envíe el formulario
+    } else if (newStatus === 'approved') {
+      setShowApprovalModal(true);
+      return; // No actualizar hasta que se envíe el formulario
+    } else if (newStatus === 'in_review') {
+      // Para in_review no necesitamos feedback, actualizamos directamente
+      updateItemStatus(itemId, newStatus, isSubtask);
+    }
+  }
+  
+  // Función para actualizar el estado en la base de datos
+  async function updateItemStatus(itemId: string, newStatus: string, isSubtask: boolean = false, feedbackData: TaskFeedback | null = null) {
     try {
       const table = isSubtask ? 'subtasks' : 'tasks';
+      const updateData: any = { status: newStatus };
+      
+      // Si hay datos de feedback, añadirlos al objeto de actualización
+      if (feedbackData) {
+        updateData.feedback = feedbackData;
+      }
+      
+      // Actualizar primero la UI localmente (optimistic update)
+      if (isSubtask) {
+        setSubtasks(prev => prev.map(subtask => 
+          subtask.id === itemId 
+            ? { 
+                ...subtask, 
+                status: newStatus as 'pending' | 'in_progress' | 'completed' | 'blocked' | 'in_review' | 'returned' | 'approved', 
+                feedback: feedbackData || subtask.feedback 
+              } 
+            : subtask
+        ));
+      } else {
+        setTasks(prev => prev.map(task => 
+          task.id === itemId 
+            ? { 
+                ...task, 
+                status: newStatus as 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved',
+                feedback: feedbackData || task.feedback 
+              } 
+            : task
+        ));
+      }
+      
+      // Luego actualizar en el servidor
       const { error } = await supabase
         .from(table)
-        .update({ status: newStatus })
+        .update(updateData)
         .eq('id', itemId);
       
-      if (error) throw error;
+      if (error) {
+        // Si hay error, revertir la actualización local
+        toast.error('Error al actualizar el estado');
+        console.error('Error al actualizar estado:', error);
+        
+        // Recargar datos para asegurar consistencia
+        fetchData();
+        return;
+      }
       
-      // Refresh data after update
-      fetchData();
+      // Mostrar mensaje de éxito si todo fue bien
+      toast.success(`Estado actualizado a "${newStatus}" correctamente`);
+      
+      // Cerrar modales
+      setShowFeedbackModal(false);
+      setShowApprovalModal(false);
+      setSelectedItem(null);
+      setFeedback('');
+      setRating(5);
+      
     } catch (error) {
       console.error('Error al actualizar estado:', error);
+      toast.error('Error al actualizar el estado');
+      // Recargar datos para asegurar consistencia
+      fetchData();
     }
+  }
+  
+  // Función para manejar el envío del formulario de retroalimentación
+  function handleFeedbackSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (!selectedItem) return;
+    
+    if (targetStatus === 'returned' && !feedback.trim()) {
+      toast.error('La retroalimentación es obligatoria para devolver una tarea');
+      return;
+    }
+    
+    const feedbackData: TaskFeedback = {
+      feedback: feedback,
+      reviewed_by: user?.id,
+      reviewed_at: new Date().toISOString()
+    };
+    
+    updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData);
+  }
+  
+  // Función para manejar el envío del formulario de aprobación
+  function handleApprovalSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (!selectedItem) return;
+    
+    const feedbackData: TaskFeedback = {
+      feedback: feedback,
+      rating: rating,
+      reviewed_by: user?.id,
+      reviewed_at: new Date().toISOString()
+    };
+    
+    updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData);
   }
 
   // Group tasks by project, priority, assignee, or deadline
@@ -411,6 +564,43 @@ function Management() {
                                   </div>
                                 )}
                               </div>
+                              {subtask.status === 'completed' || subtask.status === 'blocked' ? (
+                                <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                  <button
+                                    className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStatusChange(subtask.id, 'in_review', true);
+                                    }}
+                                  >
+                                    <ArrowRight className="w-3 h-3 mr-1" />
+                                    En revisión
+                                  </button>
+                                </div>
+                              ) : subtask.status === 'in_review' ? (
+                                <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                  <button
+                                    className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStatusChange(subtask.id, 'returned', true);
+                                    }}
+                                  >
+                                    <AlertTriangle className="w-3 h-3 mr-1" />
+                                    Devolver
+                                  </button>
+                                  <button
+                                    className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-md flex items-center"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStatusChange(subtask.id, 'approved', true);
+                                    }}
+                                  >
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Aprobar
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })}
@@ -461,6 +651,43 @@ function Management() {
                                 </div>
                               )}
                             </div>
+                            {task.status === 'completed' || task.status === 'blocked' ? (
+                              <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                <button
+                                  className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStatusChange(task.id, 'in_review', false);
+                                  }}
+                                >
+                                  <ArrowRight className="w-3 h-3 mr-1" />
+                                  En revisión
+                                </button>
+                              </div>
+                            ) : task.status === 'in_review' ? (
+                              <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                <button
+                                  className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStatusChange(task.id, 'returned', false);
+                                  }}
+                                >
+                                  <AlertTriangle className="w-3 h-3 mr-1" />
+                                  Devolver
+                                </button>
+                                <button
+                                  className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-md flex items-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStatusChange(task.id, 'approved', false);
+                                  }}
+                                >
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Aprobar
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -678,7 +905,31 @@ function Management() {
                 if (dropColumn) {
                   const newStatus = dropColumn.getAttribute('data-column-id');
                   if (newStatus) {
-                    handleStatusChange(data.id, newStatus, data.type === 'subtask');
+                    // En vez de llamar directamente a handleStatusChange, que valide primero
+                    // el estado actual del elemento y si es una transición válida
+                    const isSubtask = data.type === 'subtask';
+                    const currentItem = isSubtask 
+                      ? subtasks.find(s => s.id === data.id)
+                      : tasks.find(t => t.id === data.id);
+                      
+                    if (!currentItem) return;
+                    
+                    const currentStatus = currentItem.status;
+                    
+                    // Las mismas validaciones que en handleStatusChange
+                    const allowedTransitions: Record<string, string[]> = {
+                      'completed': ['in_review'],
+                      'blocked': ['in_review'],
+                      'in_review': ['returned', 'approved']
+                    };
+                    
+                    if (!allowedTransitions[currentStatus as keyof typeof allowedTransitions]?.includes(newStatus)) {
+                      toast.error(`No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
+                      return;
+                    }
+                    
+                    // Ahora sí podemos llamar a handleStatusChange
+                    handleStatusChange(data.id, newStatus, isSubtask);
                   }
                 }
               } catch (error) {
@@ -690,6 +941,121 @@ function Management() {
           </div>
         )}
       </div>
+
+      {/* Modal de retroalimentación para devolver tarea */}
+      {showFeedbackModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold mb-4">Retroalimentación para devolución</h3>
+            
+            <form onSubmit={handleFeedbackSubmit}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Comentarios de retroalimentación:
+                </label>
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  className="w-full h-32 p-2 border rounded-md resize-none"
+                  placeholder="Explica los motivos por los que devuelves esta tarea..."
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFeedbackModal(false);
+                    setSelectedItem(null);
+                  }}
+                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                >
+                  Devolver tarea
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de aprobación con calificación */}
+      {showApprovalModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold mb-4">Aprobar tarea</h3>
+            
+            <form onSubmit={handleApprovalSubmit}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Calificación:
+                </label>
+                <div className="flex items-center space-x-2">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      type="button"
+                      key={value}
+                      onClick={() => setRating(value)}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+                        rating >= value ? 'bg-yellow-400 border-yellow-500 text-yellow-800' : 'bg-gray-100 border-gray-300 text-gray-400'
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  {rating === 1 && "Insuficiente"}
+                  {rating === 2 && "Regular"}
+                  {rating === 3 && "Bueno"}
+                  {rating === 4 && "Muy bueno"}
+                  {rating === 5 && "Excelente"}
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Comentarios (opcional):
+                </label>
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  className="w-full h-24 p-2 border rounded-md resize-none"
+                  placeholder="Comentarios adicionales sobre el trabajo..."
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowApprovalModal(false);
+                    setSelectedItem(null);
+                  }}
+                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                >
+                  Aprobar y calificar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toaster para notificaciones */}
+      <Toaster position="top-right" />
     </div>
   );
 }
