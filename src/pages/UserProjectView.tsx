@@ -1549,6 +1549,7 @@ export default function UserProjectView() {
           .eq('date', today)
           .eq('task_id', originalId)
           .eq('task_type', taskType)
+          .select()
       ]);
 
       if (taskRes.error || assignRes.error)
