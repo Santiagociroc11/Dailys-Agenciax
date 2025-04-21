@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { FolderOpen, LogOut, CheckSquare, Calendar } from 'lucide-react';
+import { FolderOpen, LogOut, CheckSquare, Calendar, User, SwitchCamera } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -10,16 +10,30 @@ interface Project {
 }
 
 export default function UserSidebar() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const [isUserView, setIsUserView] = useState(true);
 
   useEffect(() => {
     if (user) {
       fetchUserProjects();
     }
   }, [user]);
+
+  const toggleView = () => {
+    setIsUserView(!isUserView);
+    
+    // Navigate to appropriate route based on the view
+    if (isUserView) {
+      // If currently in user view, switch to admin view
+      navigate('/dashboard');
+    } else {
+      // If currently in admin view, switch to user view
+      navigate('/user');
+    }
+  };
 
   async function fetchUserProjects() {
     try {
@@ -86,6 +100,28 @@ export default function UserSidebar() {
         </div>
       </nav>
       <div className="absolute bottom-0 w-64 p-6">
+        {user && (
+          <div className="mb-4 border-t pt-4">
+            <div className="flex items-center mb-2">
+              <User className="w-5 h-5 mr-3 text-gray-500" />
+              <div className="overflow-hidden">
+                <p className="font-medium text-gray-800 truncate">{user.name}</p>
+                <p className="text-xs text-gray-500 truncate">{user.email}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {isAdmin && (
+          <button
+            onClick={toggleView}
+            className="flex items-center w-full mb-4 py-2 px-3 text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+          >
+            <SwitchCamera className="w-5 h-5 mr-3" />
+            <span>Cambiar a vista {isUserView ? 'Admin' : 'Usuario'}</span>
+          </button>
+        )}
+        
         <button
           onClick={() => {
             signOut();

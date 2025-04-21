@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Users as UsersIcon, Plus, X } from 'lucide-react';
+import { Users as UsersIcon, Plus, X, Trash2, AlertTriangle } from 'lucide-react';
 
 interface User {
   id: string;
@@ -12,7 +12,7 @@ interface User {
 }
 
 export default function Users() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -45,6 +45,9 @@ export default function Users() {
   });
   const [editSuccess, setEditSuccess] = useState('');
   const [editError, setEditError] = useState('');
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [reassignUserId, setReassignUserId] = useState<string>('');
 
   useEffect(() => {
     fetchUsers();
@@ -246,6 +249,125 @@ export default function Users() {
     });
     
     setShowEditUserModal(true);
+  }
+
+  async function handleDeleteUser() {
+    if (!editUser.id) return;
+    
+    setDeleteError('');
+    
+    // Cannot delete yourself
+    if (editUser.id === currentUser?.id) {
+      setDeleteError('No puedes eliminar tu propio usuario.');
+      return;
+    }
+    
+    // Check if a user to reassign tasks has been selected
+    if (!reassignUserId) {
+      setDeleteError('Debes seleccionar un usuario para reasignar las tareas.');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      
+      // 1. Reassign all tasks where the user is in assigned_users array
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('tasks')
+        .select('id, assigned_users')
+        .contains('assigned_users', [editUser.id]);
+      
+      if (tasksError) throw tasksError;
+      
+      // Process task reassignments
+      if (tasksData && tasksData.length > 0) {
+        for (const task of tasksData) {
+          const updatedAssignedUsers = task.assigned_users.filter((id: string) => id !== editUser.id);
+          if (!updatedAssignedUsers.includes(reassignUserId)) {
+            updatedAssignedUsers.push(reassignUserId);
+          }
+          
+          const { error: updateError } = await supabase
+            .from('tasks')
+            .update({ assigned_users: updatedAssignedUsers })
+            .eq('id', task.id);
+          
+          if (updateError) throw updateError;
+        }
+      }
+      
+      // 2. Reassign all subtasks assigned to this user
+      const { error: subtasksError } = await supabase
+        .from('subtasks')
+        .update({ assigned_to: reassignUserId })
+        .eq('assigned_to', editUser.id);
+      
+      if (subtasksError) throw subtasksError;
+      
+      // 3. Reassign task work assignments
+      const { error: workAssignmentsError } = await supabase
+        .from('task_work_assignments')
+        .update({ user_id: reassignUserId })
+        .eq('user_id', editUser.id);
+      
+      if (workAssignmentsError) throw workAssignmentsError;
+      
+      // 4. Remove user from any projects' assigned_projects
+      const { data: projectsData, error: projectsSelectError } = await supabase
+        .from('users')
+        .select('id, assigned_projects')
+        .eq('id', reassignUserId)
+        .single();
+      
+      if (projectsSelectError) throw projectsSelectError;
+      
+      // Get projects assigned to the user being deleted
+      const { data: deletedUserData, error: deletedUserError } = await supabase
+        .from('users')
+        .select('assigned_projects')
+        .eq('id', editUser.id)
+        .single();
+      
+      if (deletedUserError) throw deletedUserError;
+      
+      if (deletedUserData?.assigned_projects && deletedUserData.assigned_projects.length > 0) {
+        // Add the deleted user's projects to the reassigned user if they don't already have them
+        const currentReassignProjects = projectsData?.assigned_projects || [];
+        const projectsToAdd = deletedUserData.assigned_projects.filter(
+          (projectId: string) => !currentReassignProjects.includes(projectId)
+        );
+        
+        if (projectsToAdd.length > 0) {
+          const updatedProjects = [...currentReassignProjects, ...projectsToAdd];
+          
+          const { error: projectsUpdateError } = await supabase
+            .from('users')
+            .update({ assigned_projects: updatedProjects })
+            .eq('id', reassignUserId);
+          
+          if (projectsUpdateError) throw projectsUpdateError;
+        }
+      }
+      
+      // 5. Finally, delete the user
+      const { error: deleteError } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', editUser.id);
+      
+      if (deleteError) throw deleteError;
+      
+      // Close modals and refresh user list
+      setShowDeleteConfirmation(false);
+      setShowEditUserModal(false);
+      await fetchUsers();
+      
+    } catch (error) {
+      console.error('Error al eliminar usuario:', error);
+      setDeleteError('Error al eliminar el usuario y reasignar sus tareas. Por favor, inténtalo de nuevo.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (loading) {
@@ -747,27 +869,129 @@ export default function Users() {
                   </div>
                 </div>
               </div>
-              <div className="mt-6 flex justify-end space-x-3">
+              <div className="mt-6 flex justify-between">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowEditUserModal(false);
-                    setEditError('');
-                    setEditSuccess('');
-                    setNewPassword('');
-                  }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  onClick={() => setShowDeleteConfirmation(true)}
+                  className="px-4 py-2 border border-red-300 bg-red-50 rounded-md text-red-700 hover:bg-red-100 flex items-center transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Eliminar Usuario
+                </button>
+                <div className="flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditUserModal(false);
+                      setEditError('');
+                      setEditSuccess('');
+                      setNewPassword('');
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  >
+                    Guardar Cambios
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
+            <div className="flex justify-between items-center p-5 border-b border-gray-100">
+              <h2 className="text-xl font-semibold text-red-600 flex items-center">
+                <AlertTriangle className="w-6 h-6 mr-2" />
+                Eliminar Usuario
+              </h2>
+              <button
+                onClick={() => setShowDeleteConfirmation(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-5">
+              {deleteError && (
+                <div className="mb-4 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-r">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm">{deleteError}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <p className="text-gray-700 mb-4">
+                ¿Estás seguro de que deseas eliminar al usuario <span className="font-semibold">{editUser.name}</span>?
+              </p>
+              
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <AlertTriangle className="h-5 w-5 text-yellow-400" />
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-yellow-700">
+                      Esta acción es irreversible. Todas las tareas, subtareas y asignaciones de trabajo de este usuario deben ser transferidas a otro usuario.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Selecciona usuario para transferir las tareas
+                </label>
+                <select
+                  value={reassignUserId}
+                  onChange={(e) => setReassignUserId(e.target.value)}
+                  className="block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  required
+                >
+                  <option value="">Selecciona un usuario</option>
+                  {users
+                    .filter(u => u.id !== editUser.id) // Exclude the user being deleted
+                    .map(user => (
+                      <option key={user.id} value={user.id}>
+                        {user.name} ({user.email})
+                      </option>
+                    ))
+                  }
+                </select>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirmation(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                  type="button"
+                  onClick={handleDeleteUser}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                  disabled={!reassignUserId || loading}
                 >
-                  Guardar Cambios
+                  {loading ? 'Procesando...' : 'Confirmar Eliminación'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
