@@ -1790,9 +1790,9 @@ export default function UserProjectView() {
           );
         }
         if (isInDelayed) {
-          setDelayedTaskItems(prev =>
+      setDelayedTaskItems(prev =>
             prev.map(t => t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)
-          );
+      );
         }
       }
 
@@ -2609,168 +2609,36 @@ export default function UserProjectView() {
                 </div>
               )}
 
-              {/* Sección de tareas retrasadas (Urgentes) */}
-              {delayedTaskItems.length > 0 && (
-                <div className="mb-6">
-                  <div className="flex items-center mb-2">
-                    <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
-                    <h3 className="text-lg font-semibold text-red-700">URGENTE: Tareas Retrasadas</h3>
-                  </div>
-
-                  <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
-                    {/* Task list header */}
-                    <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
-                      <div>ACTIVIDAD</div>
-                      <div>DESCRIPCION</div>
-                      <div>INICIO</div>
-                      <div>FIN</div>
-                      <div>DURACIÓN</div>
-                      <div>ESTADO</div>
-                      <div>RETRASO</div>
-                      <div>ACCIONES</div>
-                    </div>
-
-                    {/* Task list for delayed tasks */}
-                    <div className="divide-y divide-red-200">
-                      {delayedTaskItems.map((task) => {
-                        // Calcular días de retraso
-                        const assignmentDate = task.assignment_date ? parseISO(task.assignment_date) : new Date();
-                        const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
-
-                        return (
-                          <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
-                            <div className="font-medium">
-                              {task.type === 'subtask' ? (
-                                <div>
-                                  <div className="text-sm text-gray-700 font-medium mb-1">
-                                    <span className="inline-block mr-2">T.P:</span>
-                                    {task.subtask_title || "Sin tarea principal"}
-                                  </div>
-                                  <div
-                                    className="cursor-pointer hover:text-indigo-600 mb-1"
-                                    onClick={() => handleViewTaskDetails(task)}
-                                  >
-                                    {task.title}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                    {getPriorityBadge(task.priority)}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div>
-                                  <div
-                                    className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
-                                    onClick={() => handleViewTaskDetails(task)}
-                                  >
-                                    {task.title}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {getPriorityBadge(task.priority)}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-600 truncate">
-                              {task.description || '-'}
-                            </div>
-                            <div className="text-sm text-gray-700">
-                              {task.start_date ? (
-                                <>
-                                  <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
-                                  {getTimeIndicator(task.start_date, true).text && (
-                                    <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
-                                      {getTimeIndicator(task.start_date, true).text}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-700">
-                              {task.deadline ? (
-                                <>
-                                  <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
-                                  {getTimeIndicator(task.deadline, false).text && (
-                                    <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
-                                      {getTimeIndicator(task.deadline, false).text}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-gray-400">-</span>
-                              )}
-                            </div>
-                            <div className="text-sm font-medium">
-                              {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
-                            </div>
-                            <div>
-                              <span className={`px-2 py-1 text-xs rounded-full ${task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                                task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                                  task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    'bg-blue-100 text-blue-800'
-                                }`}>
-                                {task.status === 'pending' ? 'Pendiente' :
-                                  task.status === 'in_progress' ? 'En progreso' :
-                                    task.status === 'completed' ? 'Completada' :
-                                      task.status}
-                              </span>
-                            </div>
-                            <div className="text-sm font-medium text-red-600">
-                              {daysSinceAssignment <= 0 ? 'Hoy' : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? 's' : ''}`}
-                              {task.assignment_date && (
-                                <div className="text-xs text-gray-500">
-                                  Asignada: {format(parseISO(task.assignment_date), 'dd/MM/yyyy')}
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <button
-                                onClick={() => handleOpenStatusModal(task.id)}
-                                className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
-                              >
-                                Actualizar Estado
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Task list container para tareas asignadas de hoy */}
-              <div className="mb-2">
-                <div className="flex items-center mb-2">
-                  <div className="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
-                  <h3 className="text-lg font-semibold text-blue-700">Tareas Para Hoy</h3>
-                </div>
+          {/* Sección de tareas retrasadas (Urgentes) */}
+          {delayedTaskItems.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center mb-2">
+                <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
+                <h3 className="text-lg font-semibold text-red-700">URGENTE: Tareas Retrasadas</h3>
               </div>
 
-              <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+              <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
                 {/* Task list header */}
-                <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
                   <div>ACTIVIDAD</div>
                   <div>DESCRIPCION</div>
                   <div>INICIO</div>
                   <div>FIN</div>
                   <div>DURACIÓN</div>
                   <div>ESTADO</div>
+                  <div>RETRASO</div>
                   <div>ACCIONES</div>
                 </div>
 
-                {/* Task list */}
-                <div className="divide-y divide-gray-200">
-                  {loadingAssigned ? (
-                    <div className="py-8 text-center text-gray-500 bg-white">
-                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                      <p>Cargando tareas...</p>
-                    </div>
-                  ) : assignedTaskItems.length > 0 ? (
-                    assignedTaskItems.map((task) => (
-                      <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                {/* Task list for delayed tasks */}
+                <div className="divide-y divide-red-200">
+                  {delayedTaskItems.map((task) => {
+                    // Calcular días de retraso
+                    const assignmentDate = task.assignment_date ? parseISO(task.assignment_date) : new Date();
+                    const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
+
+                    return (
+                      <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
                         <div className="font-medium">
                           {task.type === 'subtask' ? (
                             <div>
@@ -2783,15 +2651,6 @@ export default function UserProjectView() {
                                 onClick={() => handleViewTaskDetails(task)}
                               >
                                 {task.title}
-                                {/* Indicador para tareas devueltas */}
-                                {task.status === 'returned' && (
-                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                    </svg>
-                                    Devuelta
-                                  </span>
-                                )}
                               </div>
                               <div className="flex flex-wrap items-center gap-1">
                                 <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
@@ -2805,15 +2664,6 @@ export default function UserProjectView() {
                                 onClick={() => handleViewTaskDetails(task)}
                               >
                                 {task.title}
-                                {/* Indicador para tareas devueltas */}
-                                {task.status === 'returned' && (
-                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                    </svg>
-                                    Devuelta
-                                  </span>
-                                )}
                               </div>
                               <div className="flex flex-wrap items-center gap-1">
                                 {getPriorityBadge(task.priority)}
@@ -2857,25 +2707,175 @@ export default function UserProjectView() {
                         </div>
                         <div>
                           <span className={`px-2 py-1 text-xs rounded-full ${task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                              task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                                task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                  task.status === 'returned' ? 'bg-orange-100 text-orange-800' :
-                                    'bg-blue-100 text-blue-800'
+                            task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                              task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                'bg-blue-100 text-blue-800'
                             }`}>
                             {task.status === 'pending' ? 'Pendiente' :
                               task.status === 'in_progress' ? 'En progreso' :
                                 task.status === 'completed' ? 'Completada' :
-                                  task.status === 'returned' ? 'Devuelta' :
-                                    task.status}
+                                  task.status}
                           </span>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="text-sm font-medium text-red-600">
+                          {daysSinceAssignment <= 0 ? 'Hoy' : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? 's' : ''}`}
+                          {task.assignment_date && (
+                            <div className="text-xs text-gray-500">
+                              Asignada: {format(parseISO(task.assignment_date), 'dd/MM/yyyy')}
+                            </div>
+                          )}
+                        </div>
+                        <div>
                           <button
                             onClick={() => handleOpenStatusModal(task.id)}
                             className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
                           >
                             Actualizar Estado
                           </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Task list container para tareas asignadas de hoy */}
+          <div className="mb-2">
+            <div className="flex items-center mb-2">
+              <div className="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
+              <h3 className="text-lg font-semibold text-blue-700">Tareas Para Hoy</h3>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+            {/* Task list header */}
+            <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+              <div>ACTIVIDAD</div>
+              <div>DESCRIPCION</div>
+              <div>INICIO</div>
+              <div>FIN</div>
+              <div>DURACIÓN</div>
+              <div>ESTADO</div>
+              <div>ACCIONES</div>
+            </div>
+
+            {/* Task list */}
+            <div className="divide-y divide-gray-200">
+              {loadingAssigned ? (
+                <div className="py-8 text-center text-gray-500 bg-white">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                  <p>Cargando tareas...</p>
+                </div>
+              ) : assignedTaskItems.length > 0 ? (
+                assignedTaskItems.map((task) => (
+                  <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                    <div className="font-medium">
+                      {task.type === 'subtask' ? (
+                        <div>
+                          <div className="text-sm text-gray-700 font-medium mb-1">
+                            <span className="inline-block mr-2">T.P:</span>
+                            {task.subtask_title || "Sin tarea principal"}
+                          </div>
+                          <div
+                            className="cursor-pointer hover:text-indigo-600 mb-1"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                                {/* Indicador para tareas devueltas */}
+                                {task.status === 'returned' && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
+                                )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div
+                            className="cursor-pointer hover:text-indigo-600 mb-1 text-base"
+                            onClick={() => handleViewTaskDetails(task)}
+                          >
+                            {task.title}
+                                {/* Indicador para tareas devueltas */}
+                                {task.status === 'returned' && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Devuelta
+                                  </span>
+                                )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {getPriorityBadge(task.priority)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-600 truncate">
+                      {task.description || '-'}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.start_date ? (
+                        <>
+                          <div>{format(new Date(task.start_date), 'dd/MM/yyyy')}</div>
+                          {getTimeIndicator(task.start_date, true).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>
+                              {getTimeIndicator(task.start_date, true).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-700">
+                      {task.deadline ? (
+                        <>
+                          <div>{format(new Date(task.deadline), 'dd/MM/yyyy')}</div>
+                          {getTimeIndicator(task.deadline, false).text && (
+                            <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>
+                              {getTimeIndicator(task.deadline, false).text}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium">
+                      {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
+                    </div>
+                    <div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                        task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                          task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                  task.status === 'returned' ? 'bg-orange-100 text-orange-800' :
+                            'bg-blue-100 text-blue-800'
+                        }`}>
+                        {task.status === 'pending' ? 'Pendiente' :
+                          task.status === 'in_progress' ? 'En progreso' :
+                            task.status === 'completed' ? 'Completada' :
+                                  task.status === 'returned' ? 'Devuelta' :
+                              task.status}
+                      </span>
+                    </div>
+                        <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleOpenStatusModal(task.id)}
+                        className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                      >
+                        Actualizar Estado
+                      </button>
                           {/* Botón para ver retroalimentación si la tarea fue devuelta */}
                           {task.status === 'returned' && task.notes && typeof task.notes === 'object' && task.notes.returned_feedback && (
                             <button
@@ -2885,21 +2885,21 @@ export default function UserProjectView() {
                               Ver Feedback
                             </button>
                           )}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="py-8 text-center bg-white">
-                      <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
-                      {delayedTaskItems.length > 0 ? (
-                        <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p>
-                      ) : (
-                        <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>
-                      )}
                     </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center bg-white">
+                  <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
+                  {delayedTaskItems.length > 0 ? (
+                    <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p>
+                  ) : (
+                    <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>
                   )}
                 </div>
-              </div>
+              )}
+            </div>
+          </div>
             </>
           )}
 
@@ -3486,48 +3486,48 @@ export default function UserProjectView() {
 
               {/* Sección de selección de estado - solo mostrar si no es edición de tarea completada */}
               {!completedTaskItems.some(t => t.id === selectedTaskId) && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                     Estado de la tarea:
-                  </label>
+                </label>
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
                       className={`px-4 py-2 rounded-md text-sm font-medium 
                               ${selectedStatus === 'completed' ? 'bg-green-100 text-green-800 border-2 border-green-500' : 'bg-gray-100 text-gray-800 border border-gray-300'}`}
-                      onClick={() => setSelectedStatus('completed')}
-                    >
+                    onClick={() => setSelectedStatus('completed')}
+                  >
                       Completada
                     </button>
                     <button
                       type="button"
                       className={`px-4 py-2 rounded-md text-sm font-medium 
                               ${selectedStatus === 'blocked' ? 'bg-red-100 text-red-800 border-2 border-red-500' : 'bg-gray-100 text-gray-800 border border-gray-300'}`}
-                      onClick={() => setSelectedStatus('blocked')}
-                    >
+                    onClick={() => setSelectedStatus('blocked')}
+                  >
                       Bloqueada
                     </button>
+                    </div>
                   </div>
-                </div>
               )}
 
               {/* Detalles según el estado seleccionado */}
               {selectedStatus === 'completed' ? (
                 <div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                       {completedTaskItems.some(t => t.id === selectedTaskId)
                         ? 'Editar entregables o resultados:'
                         : 'Detalla los entregables o resultados:'}
-                    </label>
-                    <textarea
+                </label>
+                <textarea
                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500"
                       rows={3}
-                      value={statusDetails}
-                      onChange={(e) => setStatusDetails(e.target.value)}
+                  value={statusDetails}
+                  onChange={(e) => setStatusDetails(e.target.value)}
                       placeholder="Ejemplos: Terminé la implementación del módulo X, Corregí el error en Y, etc."
                     />
-                  </div>
+              </div>
 
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3673,7 +3673,7 @@ export default function UserProjectView() {
                           <div>
                             <p>No se encontró retroalimentación específica para esta tarea.</p>
                             <p className="mt-2 text-orange-700">Esta tarea fue marcada como "Devuelta" y requiere revisión.</p>
-                          </div>
+    </div>
                         );
                       }
                     } catch (error) {

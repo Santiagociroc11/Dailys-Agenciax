@@ -25,6 +25,15 @@ export default function Users() {
     phone: '' 
   });
   const [error, setError] = useState('');
+  const [userPasswords, setUserPasswords] = useState<Record<string, string>>({});
+  const [passwordVisibility, setPasswordVisibility] = useState<Record<string, boolean>>({});
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserName, setSelectedUserName] = useState<string>('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [passwordChangeError, setPasswordChangeError] = useState('');
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
 
   useEffect(() => {
     fetchUsers();
@@ -34,11 +43,18 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone');
+        .select('id, name, email, role, phone, password');
 
       if (error) throw error;
 
       setUsers(data || []);
+      
+      const passwords: Record<string, string> = {};
+      (data || []).forEach(user => {
+        passwords[user.id] = user.password || '';
+      });
+      
+      setUserPasswords(passwords);
     } catch (error) {
       console.error('Error al cargar usuarios:', error);
     } finally {
@@ -97,6 +113,50 @@ export default function Users() {
     }
   }
 
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPasswordChangeError('');
+    setPasswordChangeSuccess('');
+    
+    if (!selectedUserId || !newPassword.trim()) {
+      setPasswordChangeError('Por favor, ingresa una contraseña válida.');
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ password: newPassword })
+        .eq('id', selectedUserId);
+      
+      if (error) throw error;
+      
+      setUserPasswords(prev => ({
+        ...prev,
+        [selectedUserId]: newPassword
+      }));
+      
+      setPasswordChangeSuccess('Contraseña actualizada con éxito.');
+      setTimeout(() => {
+        setShowChangePasswordModal(false);
+        setNewPassword('');
+        setSelectedUserId(null);
+        setSelectedUserName('');
+        setPasswordChangeSuccess('');
+      }, 1500);
+    } catch (error) {
+      console.error('Error al cambiar la contraseña:', error);
+      setPasswordChangeError('Error al cambiar la contraseña. Por favor, inténtalo de nuevo.');
+    }
+  }
+
+  function togglePasswordVisibility(userId: string) {
+    setPasswordVisibility(prev => ({
+      ...prev,
+      [userId]: !prev[userId]
+    }));
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -135,6 +195,9 @@ export default function Users() {
                 Teléfono
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Contraseña
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Rol
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -158,6 +221,32 @@ export default function Users() {
                   {user.phone || '-'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="relative flex items-center">
+                    <input 
+                      type={passwordVisibility[user.id] ? "text" : "password"} 
+                      value={userPasswords[user.id] || ''} 
+                      readOnly
+                      className="pr-8 py-1 px-2 text-sm bg-gray-50 border rounded w-full"
+                    />
+                    <button
+                      onClick={() => togglePasswordVisibility(user.id)}
+                      className="absolute right-2 text-gray-400 hover:text-gray-600"
+                      title={passwordVisibility[user.id] ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    >
+                      {passwordVisibility[user.id] ? (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                     user.role === 'admin' 
                       ? 'bg-purple-100 text-purple-800' 
@@ -167,14 +256,31 @@ export default function Users() {
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <select
-                    value={user.role}
-                    onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                    className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                  >
-                    <option value="user">Usuario</option>
-                    <option value="admin">Administrador</option>
-                  </select>
+                  <div className="flex flex-col space-y-2">
+                    <select
+                      value={user.role}
+                      onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                      className="block w-full py-1.5 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    >
+                      <option value="user">Usuario</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                    
+                    <button
+                      onClick={() => {
+                        setSelectedUserId(user.id);
+                        setSelectedUserName(user.name);
+                        setNewPassword(userPasswords[user.id] || '');
+                        setShowChangePasswordModal(true);
+                      }}
+                      className="w-full text-xs px-2 py-1.5 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 transition-colors flex items-center justify-center"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                      Editar contraseña
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -292,6 +398,117 @@ export default function Users() {
                   className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
                 >
                   Crear Usuario
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
+            <div className="flex justify-between items-center p-5 border-b border-gray-100">
+              <h2 className="text-xl font-semibold text-gray-800">
+                Cambiar Contraseña
+                {selectedUserName && <span className="text-indigo-600 ml-1">- {selectedUserName}</span>}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setNewPassword('');
+                  setPasswordChangeError('');
+                  setPasswordChangeSuccess('');
+                  setShowNewPassword(false);
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <form onSubmit={handleChangePassword} className="p-5">
+              {passwordChangeError && (
+                <div className="mb-4 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-r">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm">{passwordChangeError}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {passwordChangeSuccess && (
+                <div className="mb-4 bg-green-50 border-l-4 border-green-400 text-green-700 p-4 rounded-r">
+                  <div className="flex">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm">{passwordChangeSuccess}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Nueva Contraseña
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-md pr-10 shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      required
+                      placeholder="Ingresa la nueva contraseña"
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? (
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Recomendación: Usa una combinación de letras, números y símbolos.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangePasswordModal(false);
+                    setNewPassword('');
+                    setPasswordChangeError('');
+                    setPasswordChangeSuccess('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+                >
+                  Guardar Cambios
                 </button>
               </div>
             </form>

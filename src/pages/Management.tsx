@@ -100,6 +100,10 @@ function Management() {
   const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
   const [deliveryComments, setDeliveryComments] = useState<string>('');
 
+  // Agregar estos estados nuevos después de los estados existentes
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
   useEffect(() => {
     fetchProjects();
     fetchUsers();
@@ -109,6 +113,19 @@ function Management() {
   useEffect(() => {
     fetchData();
   }, [selectedProject, selectedPriority, selectedAssignee]);
+
+  useEffect(() => {
+    // Solo configurar el intervalo si autoRefresh está activado
+    if (!autoRefresh) return;
+    
+    const refreshInterval = setInterval(() => {
+      console.log('Auto-refrescando datos del tablero Kanban...');
+      fetchData();
+    }, 10000); // 10000 ms = 10 segundos
+    
+    // Limpiar el intervalo cuando el componente se desmonte o autoRefresh cambie
+    return () => clearInterval(refreshInterval);
+  }, [autoRefresh]);
 
   async function fetchProjects() {
     try {
@@ -137,7 +154,9 @@ function Management() {
   }
 
   async function fetchData() {
-    setLoading(true);
+    if (refreshing) return; // Evitar múltiples llamadas simultáneas
+    
+    setRefreshing(true);
     try {
       // Fetch tasks with filter
       let query = supabase.from('tasks').select('*');
@@ -177,6 +196,7 @@ function Management() {
     } catch (error) {
       console.error('Error al cargar datos:', error);
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
   }
@@ -604,7 +624,9 @@ function Management() {
                                   ? 'border-orange-500' 
                                   : subtask.status === 'approved' 
                                     ? 'border-green-600' 
-                                    : 'border-emerald-500'
+                                    : subtask.status === 'blocked'
+                                      ? 'border-red-500 bg-red-50' 
+                                      : 'border-emerald-500'
                               } cursor-pointer`}
                               draggable
                               onDragStart={(e) => {
@@ -723,7 +745,9 @@ function Management() {
                                 ? 'border-orange-500' 
                                 : task.status === 'approved' 
                                   ? 'border-green-600' 
-                                  : 'border-indigo-500'
+                                  : task.status === 'blocked'
+                                    ? 'border-red-500 bg-red-50' 
+                                    : 'border-indigo-500'
                             } cursor-pointer`}
                             draggable
                             onDragStart={(e) => {
@@ -980,6 +1004,45 @@ function Management() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Gestión</h1>
           <p className="text-gray-600">Tablero Kanban para visualizar y gestionar tareas</p>
+        </div>
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`flex items-center text-sm px-3 py-1.5 rounded-md transition-all duration-300 ${
+              autoRefresh 
+                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' 
+                : 'bg-gray-50 text-gray-600 border border-gray-200'
+            }`}
+          >
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              className={`h-4 w-4 mr-1.5 transition-opacity duration-300 ${
+                refreshing 
+                  ? 'text-indigo-500 animate-spin' 
+                  : autoRefresh ? 'text-indigo-500' : 'text-gray-400'
+              }`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {autoRefresh ? 'Actualización automática' : 'Actualización manual'}
+          </button>
+          
+          {/* Indicador sutil con transición suave */}
+          <div className="relative h-5">
+            <span 
+              className={`text-xs absolute transition-all duration-300 ${
+                refreshing 
+                  ? 'opacity-100 translate-y-0' 
+                  : 'opacity-0 -translate-y-1'
+              }`}
+              style={{ color: '#6366f1' }}
+            >
+              Sincronizando...
+            </span>
+          </div>
         </div>
         <div>
           <button
