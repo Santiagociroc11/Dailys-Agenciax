@@ -29,7 +29,7 @@ interface Subtask {
   estimated_duration: number;
   sequence_order: number | null;
   assigned_to: string;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'approved';
   task_id: string;
   start_date: string | null;
   deadline: string | null;
@@ -344,7 +344,7 @@ function Tasks() {
     }
   }
 
-  async function handleStatusUpdate(subtaskId: string, newStatus: 'pending' | 'in_progress' | 'completed') {
+  async function handleStatusUpdate(subtaskId: string, newStatus: 'pending' | 'in_progress' | 'completed' | 'approved') {
     try {
       console.log('Updating subtask status:', { subtaskId, newStatus });
       const { error } = await supabase
@@ -765,10 +765,10 @@ function Tasks() {
                                   
                                   <div className="flex items-center">
                                     <span className={`font-medium ${
-                                      subtask.status === 'completed' ? 'text-green-600' : 
+                                      subtask.status === 'completed' || subtask.status === 'approved' ? 'text-green-600' : 
                                       subtask.status === 'in_progress' ? 'text-blue-600' : 'text-gray-600'
                                     }`}>
-                                      {subtask.status === 'completed' ? 'Completada' : 
+                                      {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
                                        subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                                     </span>
                                     </div>
@@ -906,16 +906,17 @@ function Tasks() {
                                         <option value="pending">Pendiente</option>
                                         <option value="in_progress">En Progreso</option>
                                         <option value="completed">Completada</option>
+                                        <option value="approved">Aprobada</option>
                                       </select>
                                     )}
                                 
                                 {isAdmin && (
                                   <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${
-                                    subtask.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                                    subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
                                     subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                                     'bg-gray-100 text-gray-800'
                                   }`}>
-                                    {subtask.status === 'completed' ? 'Completada' : 
+                                    {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
                                      subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                                   </span>
                                     )}
@@ -1580,7 +1581,7 @@ function Tasks() {
                                       <div className="flex-1">
                                         <p className="font-medium">{subtask.title}</p>
                                         <p className="text-xs text-gray-500">
-                                          {subtask.status === 'completed' ? 'Completada' : 
+                                          {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
                                           subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                                         </p>
                                       </div>
@@ -1630,11 +1631,11 @@ function Tasks() {
                                     {users.find(u => u.id === subtask.assigned_to)?.email || "No asignada"}
                                   </span>
                                   <span className={`text-xs px-2 py-1 rounded ${
-                                    subtask.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                                    subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
                                     subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                                     'bg-gray-100 text-gray-800'
                                   }`}>
-                                    {subtask.status === 'completed' ? 'Completada' : 
+                                    {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
                                     subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                                   </span>
                                 </div>
@@ -1922,14 +1923,15 @@ function Tasks() {
                         <option value="pending">Pendiente</option>
                         <option value="in_progress">En Progreso</option>
                         <option value="completed">Completada</option>
+                        <option value="approved">Aprobada</option>
                       </select>
                     ) : (
                       <p className={`p-2 rounded-md ${
-                        selectedSubtask.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                        selectedSubtask.status === 'completed' || selectedSubtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
                         selectedSubtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                         'bg-gray-100 text-gray-800'
                       }`}>
-                        {selectedSubtask.status === 'completed' ? 'Completada' : 
+                        {selectedSubtask.status === 'completed' || selectedSubtask.status === 'approved' ? 'Completada' : 
                          selectedSubtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
                       </p>
                     )}

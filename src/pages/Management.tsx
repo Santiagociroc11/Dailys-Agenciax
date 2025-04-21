@@ -90,6 +90,13 @@ function Management() {
   const [feedback, setFeedback] = useState('');
   const [rating, setRating] = useState<number>(5);
   const [feedbackDetails, setFeedbackDetails] = useState<TaskFeedback | null>(null);
+  const [showTaskDetailsModal, setShowTaskDetailsModal] = useState(false);
+  const [detailsItem, setDetailsItem] = useState<{id: string, type: 'task' | 'subtask'} | null>(null);
+  const [taskDetails, setTaskDetails] = useState<any>(null);
+  const [relatedSubtasks, setRelatedSubtasks] = useState<Subtask[]>([]);
+  const [previousSubtask, setPreviousSubtask] = useState<Subtask | null>(null);
+  const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
+  const [deliveryComments, setDeliveryComments] = useState<string>('');
 
   useEffect(() => {
     fetchProjects();
@@ -604,10 +611,7 @@ function Management() {
                                   type: 'subtask'
                                 }));
                               }}
-                              onClick={() => {
-                                // Navigate to subtask details (could be implemented later)
-                                console.log("Navegar a detalles de subtarea:", subtask.id);
-                              }}
+                              onClick={() => handleViewTaskDetails(subtask.id, 'subtask')}
                             >
                               {parentTask && (
                                 <div className="mb-2 pb-2 border-b border-gray-100">
@@ -726,10 +730,7 @@ function Management() {
                                 type: 'task'
                               }));
                             }}
-                            onClick={() => {
-                              // Navigate to task details (could be implemented later)
-                              console.log("Navegar a detalles de tarea:", task.id);
-                            }}
+                            onClick={() => handleViewTaskDetails(task.id, 'task')}
                           >
                             <div className="flex justify-between items-start">
                               <h5 className="font-medium text-gray-800">
@@ -824,6 +825,152 @@ function Management() {
       </div>
     );
   };
+
+  async function handleViewTaskDetails(itemId: string, itemType: 'task' | 'subtask') {
+    try {
+      setShowTaskDetailsModal(true);
+      setDetailsItem({ id: itemId, type: itemType });
+      
+      // Buscar el elemento en los estados locales primero
+      let item;
+      let parentTask = null;
+      
+      if (itemType === 'subtask') {
+        item = subtasks.find(s => s.id === itemId);
+        
+        if (item && item.task_id) {
+          // Buscar la tarea padre
+          parentTask = tasks.find(t => t.id === item.task_id);
+          
+          // Si la tarea es secuencial, buscar las subtareas anterior y siguiente
+          if (parentTask && parentTask.is_sequential) {
+            const taskSubtasks = subtasks
+              .filter(s => s.task_id === item.task_id)
+              .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+            
+            const currentIndex = taskSubtasks.findIndex(s => s.id === itemId);
+            
+            if (currentIndex > 0) {
+              setPreviousSubtask(taskSubtasks[currentIndex - 1]);
+            } else {
+              setPreviousSubtask(null);
+            }
+            
+            if (currentIndex < taskSubtasks.length - 1) {
+              setNextSubtask(taskSubtasks[currentIndex + 1]);
+            } else {
+              setNextSubtask(null);
+            }
+          }
+        }
+      } else {
+        item = tasks.find(t => t.id === itemId);
+        
+        // Buscar subtareas relacionadas
+        if (item) {
+          const relatedItems = subtasks.filter(s => s.task_id === itemId);
+          setRelatedSubtasks(relatedItems);
+        }
+      }
+      
+      if (!item) {
+        // Si no se encuentra en el estado local, buscar en la base de datos
+        const table = itemType === 'subtask' ? 'subtasks' : 'tasks';
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .eq('id', itemId)
+          .single();
+        
+        if (error) {
+          console.error(`Error al obtener detalles de ${itemType}:`, error);
+          return;
+        }
+        
+        item = data;
+        
+        // Buscar información adicional
+        if (itemType === 'subtask' && item) {
+          const { data: taskData } = await supabase
+            .from('tasks')
+            .select('*')
+            .eq('id', item.task_id)
+            .single();
+          
+          parentTask = taskData;
+          
+          // Si la tarea es secuencial, buscar las subtareas anterior y siguiente
+          if (taskData && taskData.is_sequential) {
+            const { data: seqSubtasks } = await supabase
+              .from('subtasks')
+              .select('*')
+              .eq('task_id', item.task_id)
+              .order('sequence_order', { ascending: true });
+            
+            if (seqSubtasks) {
+              const currentIndex = seqSubtasks.findIndex(s => s.id === itemId);
+              
+              if (currentIndex > 0) {
+                setPreviousSubtask(seqSubtasks[currentIndex - 1]);
+              } else {
+                setPreviousSubtask(null);
+              }
+              
+              if (currentIndex < seqSubtasks.length - 1) {
+                setNextSubtask(seqSubtasks[currentIndex + 1]);
+              } else {
+                setNextSubtask(null);
+              }
+            }
+          }
+        } else if (item) {
+          // Obtener subtareas relacionadas para tareas
+          const { data: relatedItems } = await supabase
+            .from('subtasks')
+            .select('*')
+            .eq('task_id', itemId);
+          
+          setRelatedSubtasks(relatedItems || []);
+        }
+      }
+      
+      // Buscar comentarios de entrega si está completada
+      if (item && (item.status === 'completed' || item.status === 'in_review' || 
+          item.status === 'returned' || item.status === 'approved')) {
+        const table = itemType === 'subtask' ? 'task_work_assignments' : 'task_work_assignments';
+        const { data } = await supabase
+          .from(table)
+          .select('notes')
+          .eq('task_id', itemType === 'subtask' ? itemId : itemId)
+          .eq('task_type', itemType)
+          .single();
+        
+        if (data && data.notes) {
+          let deliveryNote = '';
+          if (typeof data.notes === 'string') {
+            try {
+              const notesObj = JSON.parse(data.notes);
+              deliveryNote = notesObj.entregables || '';
+            } catch (e) {
+              deliveryNote = data.notes;
+            }
+          } else if (typeof data.notes === 'object') {
+            deliveryNote = data.notes.entregables || '';
+          }
+          
+          setDeliveryComments(deliveryNote);
+        } else {
+          setDeliveryComments('');
+        }
+      }
+      
+      setTaskDetails({ ...item, parentTask });
+      
+    } catch (error) {
+      console.error('Error al obtener detalles:', error);
+      toast.error('Error al cargar los detalles');
+    }
+  }
 
   return (
     <div className="h-full flex flex-col p-4">
@@ -1207,6 +1354,419 @@ function Management() {
                 onClick={() => {
                   setShowFeedbackDetailsModal(false);
                   setFeedbackDetails(null);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de detalles de tarea */}
+      {showTaskDetailsModal && taskDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex-1">
+                <div className="flex items-center">
+                  <h3 className="text-xl font-semibold">
+                    {detailsItem?.type === 'subtask' ? '📋 Subtarea:' : '📋 Tarea:'}
+                  </h3>
+                  <span className="ml-2 text-2xl font-medium">{taskDetails.title}</span>
+                  <span className={`ml-3 px-3 py-1 text-sm rounded-full ${
+                    taskDetails.priority === 'high' ? 'bg-red-100 text-red-800' :
+                    taskDetails.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-green-100 text-green-800'
+                  }`}>
+                    {taskDetails.priority === 'high' ? 'Alta' :
+                     taskDetails.priority === 'medium' ? 'Media' : 'Baja'}
+                  </span>
+                </div>
+                
+                {detailsItem?.type === 'subtask' && taskDetails.parentTask && (
+                  <div className="text-sm text-indigo-600 flex items-center mt-1">
+                    <FolderOpen className="w-4 h-4 mr-1" />
+                    <span>Parte de: {taskDetails.parentTask.title}</span>
+                  </div>
+                )}
+              </div>
+              
+              <button
+                onClick={() => {
+                  setShowTaskDetailsModal(false);
+                  setTaskDetails(null);
+                  setRelatedSubtasks([]);
+                  setPreviousSubtask(null);
+                  setNextSubtask(null);
+                  setDeliveryComments('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            {/* Grid de detalles */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="col-span-2">
+                <div className="space-y-4">
+                  {/* Descripción */}
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Descripción:</h4>
+                    <div className="text-gray-800 whitespace-pre-wrap">
+                      {taskDetails.description || "Sin descripción disponible"}
+                    </div>
+                  </div>
+                  
+                  {/* Comentarios de entrega */}
+                  {deliveryComments && (
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <h4 className="text-sm font-medium text-green-800 mb-2">
+                        <CheckCircle className="w-4 h-4 inline mr-1" />
+                        Comentarios de entrega:
+                      </h4>
+                      <div className="text-gray-800 whitespace-pre-wrap">
+                        {deliveryComments}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Retroalimentación de devolución */}
+                  {taskDetails.status === 'returned' && taskDetails.feedback && (
+                    <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                      <h4 className="text-sm font-medium text-orange-800 mb-2">
+                        <AlertTriangle className="w-4 h-4 inline mr-1" />
+                        Retroalimentación de devolución:
+                      </h4>
+                      <div className="text-gray-800 whitespace-pre-wrap">
+                        {taskDetails.feedback.feedback || "Sin retroalimentación específica"}
+                      </div>
+                      {taskDetails.feedback.reviewed_at && (
+                        <div className="text-xs text-gray-500 mt-2">
+                          Devuelta el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
+                          {taskDetails.feedback.reviewed_by && (
+                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.email || 'Usuario'}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Retroalimentación de aprobación */}
+                  {taskDetails.status === 'approved' && taskDetails.feedback && (
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <h4 className="text-sm font-medium text-green-800 mb-2">
+                        <CheckCircle className="w-4 h-4 inline mr-1" />
+                        Retroalimentación de aprobación:
+                      </h4>
+                      <div className="text-gray-800 whitespace-pre-wrap mb-2">
+                        {taskDetails.feedback.feedback || "Sin retroalimentación específica"}
+                      </div>
+                      {taskDetails.feedback.rating && (
+                        <div className="flex items-center">
+                          <span className="text-sm font-medium mr-2">Calificación:</span>
+                          <div className="flex items-center">
+                            {[1, 2, 3, 4, 5].map((value) => (
+                              <span
+                                key={value}
+                                className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                                  (taskDetails.feedback.rating || 0) >= value 
+                                    ? 'bg-yellow-400 text-yellow-800' 
+                                    : 'bg-gray-100 text-gray-400'
+                                } mr-1`}
+                              >
+                                {value}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {taskDetails.feedback.reviewed_at && (
+                        <div className="text-xs text-gray-500 mt-2">
+                          Aprobada el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
+                          {taskDetails.feedback.reviewed_by && (
+                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.email || 'Usuario'}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <div className="space-y-4">
+                  {/* Meta información */}
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-gray-700 mb-3">Información General:</h4>
+                    
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Estado:</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          taskDetails.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                          taskDetails.status === 'in_review' ? 'bg-indigo-100 text-indigo-800' :
+                          taskDetails.status === 'returned' ? 'bg-orange-100 text-orange-800' :
+                          taskDetails.status === 'approved' ? 'bg-green-100 text-green-800' :
+                          taskDetails.status === 'blocked' ? 'bg-red-100 text-red-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {taskDetails.status === 'completed' ? 'Completada' :
+                           taskDetails.status === 'in_review' ? 'En revisión' :
+                           taskDetails.status === 'returned' ? 'Devuelta' :
+                           taskDetails.status === 'approved' ? 'Aprobada' :
+                           taskDetails.status === 'blocked' ? 'Bloqueada' :
+                           taskDetails.status === 'pending' ? 'Pendiente' : 
+                           taskDetails.status === 'in_progress' ? 'En progreso' : 
+                           taskDetails.status}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Duración estimada:</span>
+                        <span className="font-medium">{taskDetails.estimated_duration} min</span>
+                      </div>
+                      
+                      {taskDetails.start_date && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Fecha de inicio:</span>
+                          <span className="font-medium">{new Date(taskDetails.start_date).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                      
+                      {taskDetails.deadline && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Fecha límite:</span>
+                          <span className="font-medium">{new Date(taskDetails.deadline).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                      
+                      {detailsItem?.type === 'subtask' && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Asignada a:</span>
+                          <span className="font-medium">
+                            {users.find(u => u.id === taskDetails.assigned_to)?.email || 'No asignada'}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {detailsItem?.type === 'task' && taskDetails.parentTask && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Secuencial:</span>
+                          <span className="font-medium">{taskDetails.is_sequential ? 'Sí' : 'No'}</span>
+                        </div>
+                      )}
+                      
+                      {taskDetails.created_at && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Creada el:</span>
+                          <span className="font-medium">{new Date(taskDetails.created_at).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                      
+                      {taskDetails.created_by && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Creada por:</span>
+                          <span className="font-medium">
+                            {users.find(u => u.id === taskDetails.created_by)?.email || 'Usuario'}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {detailsItem?.type === 'task' && taskDetails.project_id && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Proyecto:</span>
+                          <span className="font-medium">
+                            {projects.find(p => p.id === taskDetails.project_id)?.name || 'Proyecto'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Información de secuencialidad */}
+                  {detailsItem?.type === 'subtask' && taskDetails.parentTask?.is_sequential && (
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h4 className="text-sm font-medium text-gray-700 mb-3">Secuencia:</h4>
+                      
+                      <div className="space-y-3">
+                        {previousSubtask ? (
+                          <div className="p-2 bg-white rounded border border-gray-200">
+                            <div className="text-xs text-gray-500 mb-1">Anterior:</div>
+                            <div className="text-sm font-medium">{previousSubtask.title}</div>
+                            <div className="text-xs mt-1 flex justify-between">
+                              <span className={`px-2 py-0.5 rounded-full ${
+                                previousSubtask.status === 'completed' || previousSubtask.status === 'approved' 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {previousSubtask.status === 'completed' || previousSubtask.status === 'approved' 
+                                  ? 'Completada' 
+                                  : 'Pendiente'}
+                              </span>
+                              <span className="text-gray-500">
+                                {previousSubtask.sequence_order !== null 
+                                  ? `Orden: ${previousSubtask.sequence_order}` 
+                                  : ''}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-2 bg-white rounded border border-dashed border-gray-200 text-gray-500 text-sm">
+                            Esta es la primera subtarea de la secuencia
+                          </div>
+                        )}
+                        
+                        <div className="p-2 bg-indigo-50 rounded border border-indigo-200">
+                          <div className="text-xs text-indigo-600 mb-1">Actual:</div>
+                          <div className="text-sm font-medium">{taskDetails.title}</div>
+                          <div className="text-xs mt-1 flex justify-between">
+                            <span className={`px-2 py-0.5 rounded-full ${
+                              taskDetails.status === 'completed' || taskDetails.status === 'approved' 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {taskDetails.status === 'completed' || taskDetails.status === 'approved' 
+                                ? 'Completada' 
+                                : taskDetails.status === 'returned' 
+                                  ? 'Devuelta' 
+                                  : taskDetails.status === 'in_review' 
+                                    ? 'En revisión' 
+                                    : 'Pendiente'}
+                            </span>
+                            <span className="text-gray-500">
+                              {taskDetails.sequence_order !== null 
+                                ? `Orden: ${taskDetails.sequence_order}` 
+                                : ''}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {nextSubtask ? (
+                          <div className="p-2 bg-white rounded border border-gray-200">
+                            <div className="text-xs text-gray-500 mb-1">Siguiente:</div>
+                            <div className="text-sm font-medium">{nextSubtask.title}</div>
+                            <div className="text-xs mt-1 flex justify-between">
+                              <span className={`px-2 py-0.5 rounded-full ${
+                                nextSubtask.status === 'completed' || nextSubtask.status === 'approved' 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {nextSubtask.status === 'completed' || nextSubtask.status === 'approved' 
+                                  ? 'Completada' 
+                                  : 'Pendiente'}
+                              </span>
+                              <span className="text-gray-500">
+                                {nextSubtask.sequence_order !== null 
+                                  ? `Orden: ${nextSubtask.sequence_order}` 
+                                  : ''}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-2 bg-white rounded border border-dashed border-gray-200 text-gray-500 text-sm">
+                            Esta es la última subtarea de la secuencia
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Lista de subtareas si es una tarea principal */}
+            {detailsItem?.type === 'task' && relatedSubtasks.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-md font-medium mb-3 text-gray-700">Subtareas ({relatedSubtasks.length}):</h4>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Título</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                          {taskDetails.is_sequential && (
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
+                          )}
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignada a</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duración</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {relatedSubtasks
+                          .sort((a, b) => {
+                            if (taskDetails.is_sequential) {
+                              return (a.sequence_order || 0) - (b.sequence_order || 0);
+                            }
+                            return 0;
+                          })
+                          .map((subtask) => (
+                            <tr 
+                              key={subtask.id} 
+                              className="hover:bg-gray-50 cursor-pointer"
+                              onClick={() => handleViewTaskDetails(subtask.id, 'subtask')}
+                            >
+                              <td className="px-4 py-2">
+                                <div className="font-medium text-gray-900">{subtask.title}</div>
+                                {subtask.status === 'returned' && (
+                                  <span className="ml-2 text-xs text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full">
+                                    Devuelta
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  subtask.status === 'completed' ? 'bg-blue-100 text-blue-800' :
+                                  subtask.status === 'in_review' ? 'bg-indigo-100 text-indigo-800' :
+                                  subtask.status === 'returned' ? 'bg-orange-100 text-orange-800' :
+                                  subtask.status === 'approved' ? 'bg-green-100 text-green-800' :
+                                  subtask.status === 'blocked' ? 'bg-red-100 text-red-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {subtask.status === 'completed' ? 'Completada' :
+                                   subtask.status === 'in_review' ? 'En revisión' :
+                                   subtask.status === 'returned' ? 'Devuelta' :
+                                   subtask.status === 'approved' ? 'Aprobada' :
+                                   subtask.status === 'blocked' ? 'Bloqueada' :
+                                   subtask.status === 'pending' ? 'Pendiente' : 
+                                   subtask.status === 'in_progress' ? 'En progreso' : 
+                                   subtask.status}
+                                </span>
+                              </td>
+                              {taskDetails.is_sequential && (
+                                <td className="px-4 py-2 text-sm text-gray-500">
+                                  {subtask.sequence_order !== null ? subtask.sequence_order : '-'}
+                                </td>
+                              )}
+                              <td className="px-4 py-2">
+                                <div className="text-sm text-gray-500">
+                                  {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignada'}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-sm text-gray-500">
+                                {subtask.estimated_duration} min
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowTaskDetailsModal(false);
+                  setTaskDetails(null);
+                  setRelatedSubtasks([]);
+                  setPreviousSubtask(null);
+                  setNextSubtask(null);
+                  setDeliveryComments('');
                 }}
                 className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
               >
