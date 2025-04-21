@@ -858,8 +858,8 @@ function Management() {
       setDetailsItem({ id: itemId, type: itemType });
       
       // Buscar el elemento en los estados locales primero
-      let item;
-      let parentTask = null;
+      let item: Task | Subtask | undefined;
+      let parentTask: Task | null = null;
       
       if (itemType === 'subtask') {
         item = subtasks.find(s => s.id === itemId);
@@ -962,7 +962,7 @@ function Management() {
       
       // Buscar comentarios de entrega si está completada
       if (item && (item.status === 'completed' || item.status === 'in_review' || 
-          item.status === 'returned' || item.status === 'approved')) {
+          item.status === 'returned' || item.status === 'approved' || item.status === 'blocked')) {
         const table = itemType === 'subtask' ? 'task_work_assignments' : 'task_work_assignments';
         const { data } = await supabase
           .from(table)
@@ -973,23 +973,34 @@ function Management() {
         
         if (data && data.notes) {
           let deliveryNote = '';
+          let blockingReason = '';
+          
           if (typeof data.notes === 'string') {
             try {
               const notesObj = JSON.parse(data.notes);
               deliveryNote = notesObj.entregables || '';
+              blockingReason = notesObj.razon_bloqueo || '';
             } catch (e) {
               deliveryNote = data.notes;
             }
           } else if (typeof data.notes === 'object') {
             deliveryNote = data.notes.entregables || '';
+            blockingReason = data.notes.razon_bloqueo || '';
           }
           
           setDeliveryComments(deliveryNote);
+          
+          // Si es una tarea bloqueada y hay razón de bloqueo, guardarla en el estado
+          if (item.status === 'blocked' && blockingReason) {
+            // Usar el estado existente pero añadir el campo razon_bloqueo
+            setTaskDetails((prev: any) => prev ? { ...prev, razon_bloqueo: blockingReason } : null);
+          }
         } else {
           setDeliveryComments('');
         }
       }
       
+      // Asegurar que se actualiza el estado con la información más reciente
       setTaskDetails({ ...item, parentTask });
       
     } catch (error) {
@@ -1516,6 +1527,19 @@ function Management() {
                           )}
                         </div>
                       )}
+                    </div>
+                  )}
+                  
+                  {/* Comentarios de bloqueo */}
+                  {taskDetails.status === 'blocked' && taskDetails.razon_bloqueo && (
+                    <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+                      <h4 className="text-sm font-medium text-red-800 mb-2">
+                        <AlertTriangle className="w-4 h-4 inline mr-1" />
+                        Motivo del bloqueo:
+                      </h4>
+                      <div className="text-gray-800 whitespace-pre-wrap">
+                        {taskDetails.razon_bloqueo}
+                      </div>
                     </div>
                   )}
                   
