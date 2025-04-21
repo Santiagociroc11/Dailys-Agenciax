@@ -52,6 +52,8 @@ interface Project {
 interface User {
   id: string;
   email: string;
+  name?: string;
+  assigned_projects?: string[];
 }
 
 // Define the column statuses

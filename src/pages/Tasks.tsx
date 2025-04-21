@@ -40,6 +40,7 @@ interface Subtask {
 interface User {
   id: string;
   email: string;
+  name?: string;
   assigned_projects?: string[];
 }
 
@@ -61,6 +62,16 @@ interface NewTask {
     deadline: string;
   }[];
   project_id: string | null;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  start_date?: string;
+  deadline?: string;
+  created_by?: string;
+  created_at?: string;
 }
 
 function Tasks() {
@@ -111,7 +122,7 @@ function Tasks() {
       try {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
-          .select('id, email, assigned_projects');
+          .select('id, email, assigned_projects, name');
 
         if (usersError) throw usersError;
         setUsers(usersData || []);
@@ -1101,7 +1112,7 @@ function Tasks() {
                           }}
                         />
                         <label htmlFor={`assign-${user.id}`} className="text-sm text-gray-700">
-                          {user.email}
+                          {user.name}
                         </label>
                       </div>
                     ))}
@@ -1203,7 +1214,7 @@ function Tasks() {
                               <option value="">Seleccionar usuario</option>
                               {getAvailableUsers(newTask.project_id).map((user) => (
                                 <option key={user.id} value={user.id}>
-                                  {user.email}
+                                  {user.name}
                                 </option>
                               ))}
                             </select>
@@ -1602,7 +1613,7 @@ function Tasks() {
                                           <option value="">Sin asignar</option>
                                           {getAvailableUsers(selectedTask?.project_id || null).map((user) => (
                                             <option key={user.id} value={user.id}>
-                                              {user.email}
+                                              {user.name}
                                             </option>
                                           ))}
                                         </select>
@@ -1899,7 +1910,7 @@ function Tasks() {
                         <option value="">Sin asignar</option>
                         {getAvailableUsers(tasks.find(t => t.id === selectedSubtask?.task_id)?.project_id || null).map((user) => (
                           <option key={user.id} value={user.id}>
-                            {user.email}
+                            {user.name}
                           </option>
                         ))}
                       </select>
