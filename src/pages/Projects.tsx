@@ -70,7 +70,7 @@ function Projects() {
     try {
       const { data: usersData, error: usersError } = await supabase
         .from('users')
-        .select('id, email, assigned_projects');
+        .select('id, email, assigned_projects, name');
 
       if (usersError) throw usersError;
       setUsers(usersData || []);
@@ -338,7 +338,18 @@ function Projects() {
     }
     
     try {
-      // First delete all tasks associated with this project
+      // First delete all task work assignments related to this project
+      const { error: workAssignmentsError } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq('project_id', selectedProject.id);
+      
+      if (workAssignmentsError) {
+        console.error("Error al eliminar asignaciones de trabajo del proyecto:", workAssignmentsError);
+        throw workAssignmentsError;
+      }
+      
+      // Second delete all tasks associated with this project
       const { error: tasksError } = await supabase
         .from('tasks')
         .delete()
@@ -349,7 +360,7 @@ function Projects() {
         throw tasksError;
       }
       
-      // Then delete the project
+      // Then delete the project itself
       const { error } = await supabase
         .from('projects')
         .delete()
@@ -360,11 +371,36 @@ function Projects() {
         throw error;
       }
       
+      // Remove project from assigned_projects array for all users
+      for (const usr of users) {
+        if (userProjectAssignments[usr.id]?.includes(selectedProject.id)) {
+          const currentProjects = userProjectAssignments[usr.id] || [];
+          const updatedProjects = currentProjects.filter((id: string) => id !== selectedProject.id);
+          
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ 
+              assigned_projects: updatedProjects 
+            })
+            .eq('id', usr.id);
+            
+          if (updateError) {
+            console.error("Error al actualizar asignaciones de usuario:", updateError);
+          }
+        }
+      }
+      
       await fetchProjects();
       setShowDetailModal(false);
+      
+      // Mostrar mensaje de éxito
+      alert('Proyecto eliminado correctamente');
     } catch (error) {
       console.error('Error al eliminar el proyecto:', error);
       setError('Error al eliminar el proyecto. Por favor, inténtalo de nuevo.');
+      
+      // Mostrar mensaje de error más claro
+      alert('No se pudo eliminar el proyecto. Puede que existan otras dependencias en la base de datos.');
     }
   }
 
@@ -434,7 +470,7 @@ function Projects() {
                         start_date: project.start_date ? project.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                         deadline: project.deadline ? project.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                         restricted_access: project.restricted_access || false,
-                        involved_users: projectUsers[project.id] || []
+                        involved_users: getUsersWithAccessToProject(project.id).map(u => u.id)
                       });
                       setShowDetailModal(true);
                     }}
@@ -487,7 +523,7 @@ function Projects() {
                   </div>
                   <div className="flex items-center text-sm text-gray-500">
                     <Users className="w-4 h-4 mr-2" />
-                    <span>Creado por: {users.find(u => u.id === project.created_by)?.email || 'Desconocido'}</span>
+                    <span>Creado por: {users.find(u => u.id === project.created_by)?.name || 'Desconocido'}</span>
                   </div>
                   <div className="flex items-center text-sm text-gray-500">
                     <Users className="w-4 h-4 mr-2" />
@@ -643,7 +679,7 @@ function Projects() {
                             } else {
                               setNewProject({
                                 ...newProject,
-                                involved_users: newProject.involved_users.filter(id => id !== u.id)
+                                involved_users: newProject.involved_users.filter((id: string) => id !== u.id)
                               });
                             }
                           }}
@@ -813,7 +849,7 @@ function Projects() {
                                 if (u.id !== selectedProject.created_by) {
                                   setEditedProject({
                                     ...editedProject,
-                                    involved_users: (editedProject.involved_users || []).filter(id => id !== u.id)
+                                    involved_users: (editedProject.involved_users || []).filter((id: string) => id !== u.id)
                                   });
                                 }
                               }
@@ -936,7 +972,7 @@ function Projects() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="block text-gray-500">Creado por:</span>
-                      <span>{users.find(u => u.id === selectedProject.created_by)?.email || 'Desconocido'}</span>
+                      <span>{users.find(u => u.id === selectedProject.created_by)?.name || 'Desconocido'}</span>
                     </div>
                     <div>
                       <span className="block text-gray-500">Fecha de creación:</span>
@@ -1019,7 +1055,7 @@ function Projects() {
                           start_date: selectedProject.start_date ? selectedProject.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                           deadline: selectedProject.deadline ? selectedProject.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                           restricted_access: selectedProject.restricted_access || false,
-                          involved_users: selectedProject.restricted_access ? projectUsers[selectedProject.id] || [] : []
+                          involved_users: getUsersWithAccessToProject(selectedProject.id).map(u => u.id)
                         });
                       }}
                       className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"

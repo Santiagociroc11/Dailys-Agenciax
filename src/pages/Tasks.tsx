@@ -111,6 +111,11 @@ function Tasks() {
     project_id: null,
   });
   const [error, setError] = useState('');
+  const [projectSelected, setProjectSelected] = useState(false);
+  const [selectedProjectDates, setSelectedProjectDates] = useState<{
+    start_date: string;
+    deadline: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -243,6 +248,12 @@ function Tasks() {
     e.preventDefault();
     if (!user) return;
     setError('');
+
+    // Validar que se haya seleccionado un proyecto
+    if (!newTask.project_id) {
+      setError('Debes seleccionar un proyecto antes de crear una tarea.');
+      return;
+    }
 
     try {
       let taskToCreate = { ...newTask };
@@ -959,7 +970,22 @@ function Tasks() {
             <div className="flex justify-between items-center p-6 border-b">
               <h2 className="text-xl font-semibold">Crear Nueva Tarea</h2>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  setProjectSelected(false);
+                  setNewTask({
+                    title: '',
+                    description: '',
+                    start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                    deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                    estimated_duration: 30,
+                    priority: 'medium',
+                    is_sequential: false,
+                    assigned_to: [],
+                    subtasks: [],
+                    project_id: null,
+                  });
+                }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -973,359 +999,490 @@ function Tasks() {
               )}
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Título
-                  </label>
-                  <input
-                    type="text"
-                    value={newTask.title}
-                    onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                    className="w-full p-2 border rounded-md"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descripción
-                  </label>
-                  <textarea
-                    value={newTask.description}
-                    onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                    className="w-full p-2 border rounded-md"
-                    rows={3}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fecha de inicio
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={newTask.start_date}
-                      onChange={(e) => setNewTask({ ...newTask, start_date: e.target.value })}
-                      className="w-full p-2 border rounded-md"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fecha límite
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={newTask.deadline}
-                      onChange={(e) => setNewTask({ ...newTask, deadline: e.target.value })}
-                      className="w-full p-2 border rounded-md"
-                      required
-                    />
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Duración estimada (minutos)
-                    </label>
-                    <input
-                      type="number"
-                      value={newTask.estimated_duration}
-                      onChange={(e) => setNewTask({ ...newTask, estimated_duration: Number(e.target.value) })}
-                      className="w-full p-2 border rounded-md"
-                      min="1"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Prioridad
-                    </label>
-                    <select
-                      value={newTask.priority}
-                      onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as 'low' | 'medium' | 'high' })}
-                      className="w-full p-2 border rounded-md"
-                    >
-                      <option value="low">Baja</option>
-                      <option value="medium">Media</option>
-                      <option value="high">Alta</option>
-                    </select>
-                  </div>
-                </div>
-                
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Proyecto
-                  </label>
-                  <select
-                    value={newTask.project_id || ''}
-                    onChange={(e) => setNewTask({ ...newTask, project_id: e.target.value || null })}
-                    className="w-full p-2 border rounded-md"
-                  >
-                    <option value="">Sin proyecto</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div className="flex items-center mb-4">
-                    <input
-                      type="checkbox"
-                    id="sequential"
-                      checked={newTask.is_sequential}
-                    onChange={(e) => setNewTask({ ...newTask, is_sequential: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <label htmlFor="sequential" className="text-sm text-gray-700">
-                    Tareas secuenciales (las subtareas deben completarse en orden)
-                  </label>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Asignar a
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {getAvailableUsers(newTask.project_id).map((user) => (
-                      <div key={user.id} className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id={`assign-${user.id}`}
-                          checked={newTask.assigned_to.includes(user.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewTask({
-                                ...newTask,
-                                assigned_to: [...newTask.assigned_to, user.id],
+                {!projectSelected ? (
+                  <div className="bg-indigo-50 p-6 rounded-lg border border-indigo-100">
+                    <h3 className="text-lg font-medium text-indigo-700 mb-4">Selecciona un proyecto</h3>
+                    <p className="text-sm text-indigo-600 mb-4">Para comenzar, selecciona el proyecto al que pertenecerá esta tarea.</p>
+                    
+                    <div className="mb-6">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Proyecto <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={newTask.project_id || ''}
+                        onChange={(e) => {
+                          const projectId = e.target.value || null;
+                          setNewTask({ ...newTask, project_id: projectId });
+                          
+                          if (projectId) {
+                            const selectedProject = projects.find(p => p.id === projectId);
+                            if (selectedProject) {
+                              // Ajustar fechas de la tarea según el proyecto
+                              const projectStartDate = selectedProject.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                              const projectEndDate = selectedProject.deadline || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                              
+                              setSelectedProjectDates({
+                                start_date: projectStartDate.replace(" ", "T").substring(0, 16),
+                                deadline: projectEndDate.replace(" ", "T").substring(0, 16)
                               });
-                            } else {
-                              setNewTask({
-                                ...newTask,
-                                assigned_to: newTask.assigned_to.filter((id) => id !== user.id),
-                              });
+                              
+                              setNewTask(prev => ({
+                                ...prev,
+                                start_date: projectStartDate.replace(" ", "T").substring(0, 16),
+                                deadline: projectEndDate.replace(" ", "T").substring(0, 16)
+                              }));
                             }
-                          }}
-                        />
-                        <label htmlFor={`assign-${user.id}`} className="text-sm text-gray-700">
-                          {user.name}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="border-t mt-6 pt-6">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Subtareas</h3>
-                  <div className="space-y-4">
-                  {newTask.subtasks.map((subtask, index) => (
-                      <div
-                        key={`new-subtask-${index}`}
-                        className="mb-4 p-4 bg-gray-50 rounded-md"
+                          } else {
+                            setSelectedProjectDates(null);
+                          }
+                        }}
+                        className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                        required
                       >
-                      <div className="flex justify-between items-center mb-2">
-                          <div className="flex items-center">
-                            <div className="mr-2">
-                              <input
-                                type="number"
-                                value={index + 1}
-                                onChange={(e) => {
-                                  const newPosition = parseInt(e.target.value) - 1;
-                                  if (newPosition < 0 || newPosition >= newTask.subtasks.length) return;
-                                  
-                                  const updatedSubtasks = [...newTask.subtasks];
-                                  const movedSubtask = updatedSubtasks.splice(index, 1)[0];
-                                  updatedSubtasks.splice(newPosition, 0, movedSubtask);
-                                  setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                }}
-                                className="w-12 p-1 border rounded text-center"
-                                min="1"
-                                max={newTask.subtasks.length}
-                              />
-                            </div>
-                            <h4 className="font-medium">Subtarea</h4>
-                          </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updatedSubtasks = [...newTask.subtasks];
-                            updatedSubtasks.splice(index, 1);
-                            setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                        <option value="">Seleccionar proyecto</option>
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newTask.project_id) {
+                            setError('Debes seleccionar un proyecto antes de continuar.');
+                            return;
+                          }
+                          setProjectSelected(true);
+                          setError('');
+                        }}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center"
+                      >
+                        Continuar
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 ml-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="bg-gray-50 p-3 rounded-lg mb-4 flex items-center justify-between">
+                      <div className="flex items-center">
+                        <FolderOpen className="w-5 h-5 text-indigo-600 mr-2" />
+                        <span className="font-medium">Proyecto seleccionado: </span>
+                        <span className="ml-2">{projects.find(p => p.id === newTask.project_id)?.name}</span>
                       </div>
-                      <div className="space-y-3">
-                          <div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProjectSelected(false);
+                        }}
+                        className="text-sm text-indigo-600 hover:text-indigo-800"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Título <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newTask.title}
+                        onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                        className="w-full p-2 border rounded-md"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Descripción
+                      </label>
+                      <textarea
+                        value={newTask.description}
+                        onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                        className="w-full p-2 border rounded-md"
+                        rows={3}
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Fecha de inicio <span className="text-red-500">*</span>
+                        </label>
                         <input
-                          type="text"
-                          value={subtask.title}
+                          type="datetime-local"
+                          value={newTask.start_date}
                           onChange={(e) => {
-                            const updatedSubtasks = [...newTask.subtasks];
-                            updatedSubtasks[index] = { ...subtask, title: e.target.value };
-                            setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                            const newValue = e.target.value;
+                            setNewTask({ ...newTask, start_date: newValue });
+                            
+                            // Cerrar automáticamente el datepicker ajustando el foco
+                            e.target.blur();
                           }}
-                          placeholder="Título de la subtarea"
                           className="w-full p-2 border rounded-md"
+                          min={selectedProjectDates?.start_date}
+                          max={selectedProjectDates?.deadline}
+                          required
                         />
-                          </div>
-                        <textarea
-                          value={subtask.description}
+                        {selectedProjectDates && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Debe estar entre {new Date(selectedProjectDates.start_date).toLocaleString()} y {new Date(selectedProjectDates.deadline).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Fecha límite <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={newTask.deadline}
                           onChange={(e) => {
-                            const updatedSubtasks = [...newTask.subtasks];
-                            updatedSubtasks[index] = { ...subtask, description: e.target.value };
-                            setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                            const newValue = e.target.value;
+                            setNewTask({ ...newTask, deadline: newValue });
+                            
+                            // Cerrar automáticamente el datepicker ajustando el foco
+                            e.target.blur();
                           }}
-                          placeholder="Descripción de la subtarea"
                           className="w-full p-2 border rounded-md"
-                          rows={2}
+                          min={newTask.start_date}
+                          max={selectedProjectDates?.deadline}
+                          required
                         />
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <input
-                              type="number"
-                              value={subtask.estimated_duration}
-                              onChange={(e) => {
-                                const updatedSubtasks = [...newTask.subtasks];
-                                  updatedSubtasks[index] = { ...subtask, estimated_duration: Number(e.target.value) };
-                                setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                              }}
-                              placeholder="Duración (minutos)"
-                              className="w-full p-2 border rounded-md"
-                              min="1"
-                            />
-                          </div>
-                          <div>
-                            <select
-                                value={subtask.assigned_to || ''}
-                              onChange={(e) => {
-                                const updatedSubtasks = [...newTask.subtasks];
-                                updatedSubtasks[index] = { ...subtask, assigned_to: e.target.value };
-                                setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                              }}
-                              className="w-full p-2 border rounded-md"
-                            >
-                              <option value="">Seleccionar usuario</option>
-                              {getAvailableUsers(newTask.project_id).map((user) => (
-                                <option key={user.id} value={user.id}>
-                                  {user.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Fecha de inicio
-                              </label>
-                              <input
-                                type="datetime-local"
-                                value={subtask.start_date}
-                                onChange={(e) => {
-                                  const newStartDate = e.target.value;
-                                  if (newStartDate < newTask.start_date) {
-                                    alert("La fecha de inicio de la subtarea no puede ser anterior a la fecha de inicio de la tarea principal.");
-                                    return;
-                                  }
-                                  
-                                  const updatedSubtasks = [...newTask.subtasks];
-                                  updatedSubtasks[index] = { ...subtask, start_date: newStartDate };
-                                  setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                }}
-                                className="w-full p-2 border rounded-md"
-                                min={newTask.start_date}
-                                max={newTask.deadline}
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Fecha límite
-                              </label>
-                              <input
-                                type="datetime-local"
-                                value={subtask.deadline}
-                                onChange={(e) => {
-                                  const newDeadline = e.target.value;
-                                  if (newDeadline > newTask.deadline) {
-                                    alert("La fecha límite de la subtarea no puede ser posterior a la fecha límite de la tarea principal.");
-                                    return;
-                                  }
-                                  
-                                  if (newDeadline < subtask.start_date) {
-                                    alert("La fecha límite no puede ser anterior a la fecha de inicio de la subtarea.");
-                                    return;
-                                  }
-                                  
-                                  const updatedSubtasks = [...newTask.subtasks];
-                                  updatedSubtasks[index] = { ...subtask, deadline: newDeadline };
-                                  setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                }}
-                                className="w-full p-2 border rounded-md"
-                                min={subtask.start_date}
-                                max={newTask.deadline}
-                              />
-                            </div>
-                          </div>
+                        {selectedProjectDates && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            No puede ser posterior a {new Date(selectedProjectDates.deadline).toLocaleString()}
+                          </p>
+                        )}
                       </div>
                     </div>
-                  ))}
-                  </div>
-                  
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewTask({
-                        ...newTask,
-                        subtasks: [
-                          ...newTask.subtasks,
-                          {
-                            title: '',
-                            description: '',
-                            estimated_duration: 30,
-                            assigned_to: '',
-                            start_date: newTask.start_date,
-                            deadline: newTask.deadline,
-                          },
-                        ],
-                      });
-                    }}
-                    className="mt-2 flex items-center text-indigo-600 hover:text-indigo-700"
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Agregar Subtarea
-                  </button>
-                </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Duración estimada (minutos) <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={newTask.estimated_duration}
+                          onChange={(e) => setNewTask({ ...newTask, estimated_duration: Number(e.target.value) })}
+                          className="w-full p-2 border rounded-md"
+                          min="1"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Prioridad <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={newTask.priority}
+                          onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as 'low' | 'medium' | 'high' })}
+                          className="w-full p-2 border rounded-md"
+                        >
+                          <option value="low">Baja</option>
+                          <option value="medium">Media</option>
+                          <option value="high">Alta</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center mb-4">
+                        <input
+                          type="checkbox"
+                        id="sequential"
+                          checked={newTask.is_sequential}
+                        onChange={(e) => setNewTask({ ...newTask, is_sequential: e.target.checked })}
+                        className="mr-2"
+                      />
+                      <label htmlFor="sequential" className="text-sm text-gray-700">
+                        Tareas secuenciales (las subtareas deben completarse en orden)
+                      </label>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Asignar a
+                      </label>
+                      <div className="flex flex-wrap gap-2 p-3 border border-gray-200 rounded-md bg-gray-50 max-h-36 overflow-y-auto">
+                        {getAvailableUsers(newTask.project_id).map((user) => (
+                          <div key={user.id} className="flex items-center space-x-2 bg-white px-3 py-2 rounded shadow-sm">
+                            <input
+                              type="checkbox"
+                              id={`assign-${user.id}`}
+                              checked={newTask.assigned_to.includes(user.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setNewTask({
+                                    ...newTask,
+                                    assigned_to: [...newTask.assigned_to, user.id],
+                                  });
+                                } else {
+                                  setNewTask({
+                                    ...newTask,
+                                    assigned_to: newTask.assigned_to.filter((id) => id !== user.id),
+                                  });
+                                }
+                              }}
+                            />
+                            <label htmlFor={`assign-${user.id}`} className="text-sm text-gray-700">
+                              {user.name || user.email}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div className="border-t mt-6 pt-6">
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">Subtareas</h3>
+                      <div className="space-y-4">
+                      {newTask.subtasks.map((subtask, index) => (
+                          <div
+                            key={`new-subtask-${index}`}
+                            className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200"
+                          >
+                          <div className="flex justify-between items-center mb-2">
+                              <div className="flex items-center">
+                                <div className="mr-2">
+                                  <input
+                                    type="number"
+                                    value={index + 1}
+                                    onChange={(e) => {
+                                      const newPosition = parseInt(e.target.value) - 1;
+                                      if (newPosition < 0 || newPosition >= newTask.subtasks.length) return;
+                                      
+                                      const updatedSubtasks = [...newTask.subtasks];
+                                      const movedSubtask = updatedSubtasks.splice(index, 1)[0];
+                                      updatedSubtasks.splice(newPosition, 0, movedSubtask);
+                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                    }}
+                                    className="w-12 p-1 border rounded text-center"
+                                    min="1"
+                                    max={newTask.subtasks.length}
+                                  />
+                                </div>
+                                <h4 className="font-medium">Subtarea {index + 1}</h4>
+                              </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedSubtasks = [...newTask.subtasks];
+                                updatedSubtasks.splice(index, 1);
+                                setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                              }}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Título <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  value={subtask.title}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
+                                    updatedSubtasks[index] = { ...subtask, title: e.target.value };
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  placeholder="Título de la subtarea"
+                                  className="w-full p-2 border rounded-md"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Descripción
+                                </label>
+                                <textarea
+                                  value={subtask.description}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
+                                    updatedSubtasks[index] = { ...subtask, description: e.target.value };
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  placeholder="Descripción de la subtarea"
+                                  className="w-full p-2 border rounded-md"
+                                  rows={2}
+                                />
+                              </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Duración (minutos) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  value={subtask.estimated_duration}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
+                                      updatedSubtasks[index] = { ...subtask, estimated_duration: Number(e.target.value) };
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  className="w-full p-2 border rounded-md"
+                                  min="1"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Asignar a <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={subtask.assigned_to || ''}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
+                                    updatedSubtasks[index] = { ...subtask, assigned_to: e.target.value };
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  className="w-full p-2 border rounded-md"
+                                  required
+                                >
+                                  <option value="">Seleccionar usuario</option>
+                                  {getAvailableUsers(newTask.project_id).map((user) => (
+                                    <option key={user.id} value={user.id}>
+                                      {user.name || user.email}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Fecha de inicio <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="datetime-local"
+                                    value={subtask.start_date}
+                                    onChange={(e) => {
+                                      const newStartDate = e.target.value;
+                                      if (newStartDate < newTask.start_date) {
+                                        alert("La fecha de inicio de la subtarea no puede ser anterior a la fecha de inicio de la tarea principal.");
+                                        return;
+                                      }
+                                      
+                                      const updatedSubtasks = [...newTask.subtasks];
+                                      updatedSubtasks[index] = { ...subtask, start_date: newStartDate };
+                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                      
+                                      // Cerrar datepicker
+                                      e.target.blur();
+                                    }}
+                                    className="w-full p-2 border rounded-md"
+                                    min={newTask.start_date}
+                                    max={newTask.deadline}
+                                    required
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                                    Fecha límite <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="datetime-local"
+                                    value={subtask.deadline}
+                                    onChange={(e) => {
+                                      const newDeadline = e.target.value;
+                                      if (newDeadline > newTask.deadline) {
+                                        alert("La fecha límite de la subtarea no puede ser posterior a la fecha límite de la tarea principal.");
+                                        return;
+                                      }
+                                      
+                                      if (newDeadline < subtask.start_date) {
+                                        alert("La fecha límite no puede ser anterior a la fecha de inicio de la subtarea.");
+                                        return;
+                                      }
+                                      
+                                      const updatedSubtasks = [...newTask.subtasks];
+                                      updatedSubtasks[index] = { ...subtask, deadline: newDeadline };
+                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                      
+                                      // Cerrar datepicker
+                                      e.target.blur();
+                                    }}
+                                    className="w-full p-2 border rounded-md"
+                                    min={subtask.start_date}
+                                    max={newTask.deadline}
+                                    required
+                                  />
+                                </div>
+                              </div>
+                          </div>
+                        </div>
+                      ))}
+                      </div>
+                      
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewTask({
+                            ...newTask,
+                            subtasks: [
+                              ...newTask.subtasks,
+                              {
+                                title: '',
+                                description: '',
+                                estimated_duration: 30,
+                                assigned_to: '',
+                                start_date: newTask.start_date,
+                                deadline: newTask.deadline,
+                              },
+                            ],
+                          });
+                        }}
+                        className="mt-2 flex items-center text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-2 rounded-md"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Agregar Subtarea
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             <div className="p-6 border-t mt-auto">
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => {
-                    console.log('Canceling task creation, current state:', {
-                      newTask,
-                      showModal: true,
-                    });
                     setShowModal(false);
-                    console.log('Modal closed, task creation canceled');
+                    setProjectSelected(false);
+                    setNewTask({
+                      title: '',
+                      description: '',
+                      start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      estimated_duration: 30,
+                      priority: 'medium',
+                      is_sequential: false,
+                      assigned_to: [],
+                      subtasks: [],
+                      project_id: null,
+                    });
                   }}
                   className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
                 >
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                    onClick={(e) => handleCreateTask(e)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                >
-                  Crear Tarea
-                </button>
+                {projectSelected && (
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                  >
+                    Crear Tarea
+                  </button>
+                )}
               </div>
             </div>
             </form>
