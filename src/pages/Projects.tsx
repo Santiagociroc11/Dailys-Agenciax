@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Plus, X, Calendar, Clock, Users } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
+import TaskStatusDisplay from '../components/TaskStatusDisplay';
 
 interface Project {
   id: string;

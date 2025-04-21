@@ -4,6 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
 import toast, { Toaster } from 'react-hot-toast';
+import { statusTextMap } from '../components/TaskStatusDisplay';
+import TaskStatusDisplay from '../components/TaskStatusDisplay';
 
 interface TaskFeedback {
   feedback?: string;
@@ -27,6 +29,8 @@ interface Task {
   status: 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved';
   feedback?: TaskFeedback | null;
   returned_at?: string;
+  razon_bloqueo?: string;
+  notes?: string | { [key: string]: any };
 }
 
 interface Subtask {
@@ -42,6 +46,7 @@ interface Subtask {
   deadline: string | null;
   feedback?: TaskFeedback | null;
   returned_at?: string;
+  notes?: string | { [key: string]: any };
 }
 
 interface Project {
@@ -58,13 +63,13 @@ interface User {
 
 // Define the column statuses
 const columns = [
-  { id: 'pending', name: 'POR ASIGNAR AL DIA' },
-  { id: 'assigned', name: 'ASIGNADA' },
-  { id: 'blocked', name: 'BLOQUEADA' },
-  { id: 'completed', name: 'COMPLETADA' },
-  { id: 'in_review', name: 'EN REVISIÓN' },
-  { id: 'returned', name: 'DEVUELTA' },
-  { id: 'approved', name: 'COMPLETADA Y REVISADA' }
+  { id: 'pending', name: statusTextMap['pending'].toUpperCase() },
+  { id: 'assigned', name: statusTextMap['assigned'].toUpperCase() },
+  { id: 'blocked', name: statusTextMap['blocked'].toUpperCase() },
+  { id: 'completed', name: statusTextMap['completed'].toUpperCase() },
+  { id: 'in_review', name: statusTextMap['in_review'].toUpperCase() },
+  { id: 'returned', name: statusTextMap['returned'].toUpperCase() },
+  { id: 'approved', name: statusTextMap['approved'].toUpperCase() }
 ];
 
 function Management() {
@@ -121,7 +126,7 @@ function Management() {
     const refreshInterval = setInterval(() => {
       console.log('Auto-refrescando datos del tablero Kanban...');
       fetchData();
-    }, 10000); // 10000 ms = 10 segundos
+    }, 5000); // 10000 ms = 10 segundos
     
     // Limpiar el intervalo cuando el componente se desmonte o autoRefresh cambie
     return () => clearInterval(refreshInterval);
@@ -853,158 +858,184 @@ function Management() {
   };
 
   async function handleViewTaskDetails(itemId: string, itemType: 'task' | 'subtask') {
+    setShowTaskDetailsModal(true);
+    setDetailsItem({ id: itemId, type: itemType });
+
     try {
-      setShowTaskDetailsModal(true);
-      setDetailsItem({ id: itemId, type: itemType });
-      
-      // Buscar el elemento en los estados locales primero
-      let item: Task | Subtask | undefined;
-      let parentTask: Task | null = null;
-      
-      if (itemType === 'subtask') {
-        item = subtasks.find(s => s.id === itemId);
+      // Determinar si estamos viendo una tarea o subtarea
+      let item: Task | Subtask | null = null;
+      if (itemType === 'task') {
+        item = tasks.find(t => t.id === itemId) || null;
+      } else {
+        item = subtasks.find(s => s.id === itemId) || null;
+      }
+
+      if (!item) {
+        toast.error('No se pudo encontrar el elemento seleccionado');
+        return;
+      }
+
+      // Función auxiliar para verificar si es una subtarea
+      const isSubtask = (item: Task | Subtask): item is Subtask => {
+        return 'task_id' in item;
+      };
+
+      // Procesar las notas y metadatos de la tarea
+      const processItemDetails = (itemData: any) => {
+        const details = { ...itemData };
         
-        if (item && item.task_id) {
-          // Buscar la tarea padre
-          parentTask = tasks.find(t => t.id === item.task_id);
-          
-          // Si la tarea es secuencial, buscar las subtareas anterior y siguiente
-          if (parentTask && parentTask.is_sequential) {
-            const taskSubtasks = subtasks
-              .filter(s => s.task_id === item.task_id)
-              .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
-            
-            const currentIndex = taskSubtasks.findIndex(s => s.id === itemId);
-            
-            if (currentIndex > 0) {
-              setPreviousSubtask(taskSubtasks[currentIndex - 1]);
-            } else {
-              setPreviousSubtask(null);
+        // Procesar el campo notes si existe
+        if (details.notes) {
+          // Si es string, intentar parsearlo como JSON
+          if (typeof details.notes === 'string') {
+            try {
+              const notesObj = JSON.parse(details.notes);
+              
+              // Extraer campos relevantes según el estado
+              if (details.status === 'blocked' && notesObj.razon_bloqueo) {
+                details.razon_bloqueo = notesObj.razon_bloqueo;
+              } else if ((details.status === 'completed' || details.status === 'in_review' || details.status === 'approved') && notesObj.entregables) {
+                details.entregables = notesObj.entregables;
+              }
+              
+              // Si hay un campo duracion_real, extraerlo también
+              if (notesObj.duracion_real) {
+                details.duracion_real = notesObj.duracion_real;
+              }
+              
+              // Mantener el objeto notes original también
+              details.notes = notesObj;
+            } catch (e) {
+              console.log('Notes no es un JSON válido:', e);
+            }
+          } else if (typeof details.notes === 'object' && details.notes !== null) {
+            // Ya es un objeto, extraer campos relevantes
+            if (details.status === 'blocked' && details.notes.razon_bloqueo) {
+              details.razon_bloqueo = details.notes.razon_bloqueo;
+            } else if ((details.status === 'completed' || details.status === 'in_review' || details.status === 'approved') && details.notes.entregables) {
+              details.entregables = details.notes.entregables;
             }
             
-            if (currentIndex < taskSubtasks.length - 1) {
-              setNextSubtask(taskSubtasks[currentIndex + 1]);
-            } else {
-              setNextSubtask(null);
+            if (details.notes.duracion_real) {
+              details.duracion_real = details.notes.duracion_real;
             }
+          }
+        }
+        
+        return details;
+      };
+
+      if (isSubtask(item)) {
+        // Es una subtarea, buscar la tarea padre y las subtareas relacionadas
+        const { data: taskData } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', item.task_id)
+          .single();
+
+        // Obtener todas las subtareas relacionadas
+        const { data: relatedSubtasksData } = await supabase
+          .from('subtasks')
+          .select('*')
+          .eq('task_id', item.task_id)
+          .order('sequence_order', { ascending: true });
+
+        // Procesar los datos de la subtarea actual
+        const processedItem = processItemDetails(item);
+        
+        setTaskDetails({ ...processedItem, parent_task: taskData });
+        setRelatedSubtasks(relatedSubtasksData || []);
+
+        // Encontrar subtareas anterior y siguiente si existe secuencia
+        if (relatedSubtasksData && relatedSubtasksData.length > 0 && item.sequence_order !== null) {
+          const currentIndex = relatedSubtasksData.findIndex(s => s.id === itemId);
+          if (currentIndex > 0) {
+            setPreviousSubtask(relatedSubtasksData[currentIndex - 1]);
+          } else {
+            setPreviousSubtask(null);
+          }
+          if (currentIndex < relatedSubtasksData.length - 1) {
+            setNextSubtask(relatedSubtasksData[currentIndex + 1]);
+          } else {
+            setNextSubtask(null);
           }
         }
       } else {
-        item = tasks.find(t => t.id === itemId);
-        
-        // Buscar subtareas relacionadas
-        if (item) {
-          const relatedItems = subtasks.filter(s => s.task_id === itemId);
-          setRelatedSubtasks(relatedItems);
-        }
-      }
-      
-      if (!item) {
-        // Si no se encuentra en el estado local, buscar en la base de datos
-        const table = itemType === 'subtask' ? 'subtasks' : 'tasks';
-        const { data, error } = await supabase
-          .from(table)
+        // Es una tarea principal - procesar sus datos
+        const processedItem = processItemDetails(item);
+        setTaskDetails(processedItem);
+
+        // Obtener las subtareas relacionadas si las hay
+        const { data: relatedSubtasksData } = await supabase
+          .from('subtasks')
           .select('*')
-          .eq('id', itemId)
-          .single();
+          .eq('task_id', item.id)
+          .order('sequence_order', { ascending: true });
+
+        setRelatedSubtasks(relatedSubtasksData || []);
+        setPreviousSubtask(null);
+        setNextSubtask(null);
+      }
+
+      // Cargar los comentarios de entrega o razón de bloqueo según corresponda
+      const getNotes = (item: Task | Subtask) => {
+        if (!item) return null;
         
-        if (error) {
-          console.error(`Error al obtener detalles de ${itemType}:`, error);
-          return;
+        const notes = item.notes;
+        const status = item.status;
+        
+        // Si no hay notas
+        if (!notes) return null;
+        
+        // Para tareas bloqueadas, no mostrar comentarios de entrega
+        if (status === 'blocked') {
+          return null;
         }
         
-        item = data;
+        // Si notes es un objeto
+        if (typeof notes === 'object' && notes !== null) {
+          // Para tareas completadas, mostrar entregables
+          if (status === 'completed' || status === 'in_review' || status === 'approved') {
+            if ('entregables' in notes) {
+              return notes.entregables;
+            }
+          }
+          
+          if ('notes' in notes) {
+            return notes.notes;
+          }
+          return null;
+        }
         
-        // Buscar información adicional
-        if (itemType === 'subtask' && item) {
-          const { data: taskData } = await supabase
-            .from('tasks')
-            .select('*')
-            .eq('id', item.task_id)
-            .single();
-          
-          parentTask = taskData;
-          
-          // Si la tarea es secuencial, buscar las subtareas anterior y siguiente
-          if (taskData && taskData.is_sequential) {
-            const { data: seqSubtasks } = await supabase
-              .from('subtasks')
-              .select('*')
-              .eq('task_id', item.task_id)
-              .order('sequence_order', { ascending: true });
+        // Si notes es string, intentar parsearlo
+        if (typeof notes === 'string') {
+          try {
+            const notesObj = JSON.parse(notes);
+            // Para tareas completadas, mostrar entregables
+            if (status === 'completed' || status === 'in_review' || status === 'approved') {
+              if (notesObj.entregables) {
+                return notesObj.entregables;
+              }
+            }
             
-            if (seqSubtasks) {
-              const currentIndex = seqSubtasks.findIndex(s => s.id === itemId);
-              
-              if (currentIndex > 0) {
-                setPreviousSubtask(seqSubtasks[currentIndex - 1]);
-              } else {
-                setPreviousSubtask(null);
-              }
-              
-              if (currentIndex < seqSubtasks.length - 1) {
-                setNextSubtask(seqSubtasks[currentIndex + 1]);
-              } else {
-                setNextSubtask(null);
-              }
+            if (notesObj.notes) {
+              return notesObj.notes;
             }
+            // Si no hay campos específicos, devolver el string
+            return notes;
+          } catch (e) {
+            // Si no es JSON, devolver el string como está
+            return notes;
           }
-        } else if (item) {
-          // Obtener subtareas relacionadas para tareas
-          const { data: relatedItems } = await supabase
-            .from('subtasks')
-            .select('*')
-            .eq('task_id', itemId);
-          
-          setRelatedSubtasks(relatedItems || []);
         }
-      }
-      
-      // Buscar comentarios de entrega si está completada
-      if (item && (item.status === 'completed' || item.status === 'in_review' || 
-          item.status === 'returned' || item.status === 'approved' || item.status === 'blocked')) {
-        const table = itemType === 'subtask' ? 'task_work_assignments' : 'task_work_assignments';
-        const { data } = await supabase
-          .from(table)
-          .select('notes')
-          .eq('task_id', itemType === 'subtask' ? itemId : itemId)
-          .eq('task_type', itemType)
-          .single();
         
-        if (data && data.notes) {
-          let deliveryNote = '';
-          let blockingReason = '';
-          
-          if (typeof data.notes === 'string') {
-            try {
-              const notesObj = JSON.parse(data.notes);
-              deliveryNote = notesObj.entregables || '';
-              blockingReason = notesObj.razon_bloqueo || '';
-            } catch (e) {
-              deliveryNote = data.notes;
-            }
-          } else if (typeof data.notes === 'object') {
-            deliveryNote = data.notes.entregables || '';
-            blockingReason = data.notes.razon_bloqueo || '';
-          }
-          
-          setDeliveryComments(deliveryNote);
-          
-          // Si es una tarea bloqueada y hay razón de bloqueo, guardarla en el estado
-          if (item.status === 'blocked' && blockingReason) {
-            // Usar el estado existente pero añadir el campo razon_bloqueo
-            setTaskDetails((prev: any) => prev ? { ...prev, razon_bloqueo: blockingReason } : null);
-          }
-        } else {
-          setDeliveryComments('');
-        }
-      }
-      
-      // Asegurar que se actualiza el estado con la información más reciente
-      setTaskDetails({ ...item, parentTask });
-      
+        return null;
+      };
+
+      const deliveryNotes = getNotes(item) || '';
+      setDeliveryComments(typeof deliveryNotes === 'string' ? deliveryNotes : JSON.stringify(deliveryNotes, null, 2));
     } catch (error) {
-      console.error('Error al obtener detalles:', error);
+      console.error('Error al cargar detalles:', error);
       toast.error('Error al cargar los detalles');
     }
   }
@@ -1461,10 +1492,10 @@ function Management() {
                   </span>
                 </div>
                 
-                {detailsItem?.type === 'subtask' && taskDetails.parentTask && (
+                {detailsItem?.type === 'subtask' && taskDetails.parent_task && (
                   <div className="text-sm text-indigo-600 flex items-center mt-1">
                     <FolderOpen className="w-4 h-4 mr-1" />
-                    <span>Parte de: {taskDetails.parentTask.title}</span>
+                    <span>Parte de: {taskDetails.parent_task.title}</span>
                   </div>
                 )}
               </div>
@@ -1497,7 +1528,7 @@ function Management() {
                   </div>
                   
                   {/* Comentarios de entrega */}
-                  {deliveryComments && (
+                  {deliveryComments && taskDetails.status !== 'blocked' && (
                     <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                       <h4 className="text-sm font-medium text-green-800 mb-2">
                         <CheckCircle className="w-4 h-4 inline mr-1" />
@@ -1531,14 +1562,43 @@ function Management() {
                   )}
                   
                   {/* Comentarios de bloqueo */}
-                  {taskDetails.status === 'blocked' && taskDetails.razon_bloqueo && (
+                  {taskDetails.status === 'blocked' && (
                     <div className="bg-red-50 p-4 rounded-lg border border-red-200">
                       <h4 className="text-sm font-medium text-red-800 mb-2">
                         <AlertTriangle className="w-4 h-4 inline mr-1" />
                         Motivo del bloqueo:
                       </h4>
                       <div className="text-gray-800 whitespace-pre-wrap">
-                        {taskDetails.razon_bloqueo}
+                        {(() => {
+                          try {
+                            // Si razon_bloqueo existe directamente, usarlo
+                            if (taskDetails.razon_bloqueo) {
+                              return taskDetails.razon_bloqueo;
+                            }
+                            
+                            // Si hay notas en formato de objeto
+                            if (taskDetails.notes) {
+                              // Si es string, intentar parsearlo como JSON
+                              if (typeof taskDetails.notes === 'string') {
+                                try {
+                                  const notesObj = JSON.parse(taskDetails.notes);
+                                  return notesObj.razon_bloqueo || 'Sin detalles específicos sobre el bloqueo';
+                                } catch (e) {
+                                  return taskDetails.notes;
+                                }
+                              } 
+                              // Si ya es un objeto
+                              else if (typeof taskDetails.notes === 'object') {
+                                return taskDetails.notes.razon_bloqueo || 'Sin detalles específicos sobre el bloqueo';
+                              }
+                            }
+                            
+                            return 'Sin detalles específicos sobre el bloqueo';
+                          } catch (error) {
+                            console.error("Error al procesar motivo de bloqueo:", error);
+                            return 'Error al cargar el motivo del bloqueo';
+                          }
+                        })()}
                       </div>
                     </div>
                   )}
@@ -1641,7 +1701,7 @@ function Management() {
                         </div>
                       )}
                       
-                      {detailsItem?.type === 'task' && taskDetails.parentTask && (
+                      {detailsItem?.type === 'task' && taskDetails.parent_task && (
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-600">Secuencial:</span>
                           <span className="font-medium">{taskDetails.is_sequential ? 'Sí' : 'No'}</span>
@@ -1676,7 +1736,7 @@ function Management() {
                   </div>
                   
                   {/* Información de secuencialidad */}
-                  {detailsItem?.type === 'subtask' && taskDetails.parentTask?.is_sequential && (
+                  {detailsItem?.type === 'subtask' && taskDetails.parent_task?.is_sequential && (
                     <div className="bg-gray-50 p-4 rounded-lg">
                       <h4 className="text-sm font-medium text-gray-700 mb-3">Secuencia:</h4>
                       

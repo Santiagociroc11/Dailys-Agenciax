@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen } from 'lucide-react';
 import { format } from 'date-fns';
+import TaskStatusDisplay from '../components/TaskStatusDisplay';
 
 
 interface Task {

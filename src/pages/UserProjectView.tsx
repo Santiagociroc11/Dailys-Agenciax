@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'react-hot-toast';
+import TaskStatusDisplay from '../components/TaskStatusDisplay';
 
 interface Task {
   id: string;
@@ -147,12 +148,10 @@ function SubtaskSequenceDisplay({
   subtaskUsers: Record<string, string>
 }) {
   return (
-    <div className="mb-4">
-      <h4 className="text-sm font-medium text-gray-700 mb-2">Secuencia de trabajo:</h4>
-
-      <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-        {/* Subtarea previa */}
-        <div className="mb-3">
+    <div>
+      <div className="mb-8 grid grid-cols-3 gap-4">
+        {/* Subtarea anterior */}
+        <div>
           <h5 className="text-xs font-medium text-gray-500 mb-1">TAREA ANTERIOR:</h5>
           {previousSubtask ? (
             <div>
@@ -162,22 +161,14 @@ function SubtaskSequenceDisplay({
                     'bg-gray-400'
                   }`}></div>
                 <p className="text-sm font-medium text-gray-700">{previousSubtask.title}</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${previousSubtask.status === 'completed' ? 'bg-green-100 text-green-800' :
-                  previousSubtask.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                  {previousSubtask.status === 'completed' ? 'Completada' :
-                    previousSubtask.status === 'in_progress' ? 'En progreso' :
-                      previousSubtask.status === 'pending' ? 'Pendiente' :
-                        previousSubtask.status}
-                </span>
+                <TaskStatusDisplay status={previousSubtask.status} className="text-xs px-2 py-0.5" />
               </div>
               {previousSubtask.assigned_to && (
                 <div className="mt-1 ml-4 text-xs text-gray-500 flex items-center">
                   <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  Asignada a: &nbsp;<span className="font-medium text-blue-600">{subtaskUsers[previousSubtask.assigned_to] || 'Usuario'}</span>
+                  Asignada a: &nbsp;<span className="font-medium text-blue-600">{previousSubtask?.assigned_to ? subtaskUsers[previousSubtask.assigned_to] || 'Usuario' : 'No asignado'}</span>
                 </div>
               )}
             </div>
@@ -186,10 +177,21 @@ function SubtaskSequenceDisplay({
           )}
         </div>
 
-        {/* Subtarea actual (referencia visual) */}
-        <div className="mb-3 bg-yellow-50 p-2 rounded border-l-4 border-yellow-400">
-          <h5 className="text-xs font-medium text-yellow-700 mb-1">TAREA ACTUAL:</h5>
-          <p className="text-sm font-medium text-yellow-800">{selectedTaskDetails.title}</p>
+        {/* Tarea actual */}
+        <div>
+          <h5 className="text-xs font-medium text-blue-600 mb-1">TAREA ACTUAL:</h5>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            <p className="text-sm font-medium text-blue-800">{selectedTaskDetails.title}</p>
+          </div>
+          {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.assigned_users && selectedTaskDetails.assigned_users[0] && (
+            <div className="mt-1 ml-4 text-xs text-gray-500 flex items-center">
+              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Asignada a: &nbsp;<span className="font-medium text-blue-600">{selectedTaskDetails.assigned_users[0] ? subtaskUsers[selectedTaskDetails.assigned_users[0]] || 'Usuario' : 'No asignado'}</span>
+            </div>
+          )}
         </div>
 
         {/* Subtarea siguiente */}
@@ -203,15 +205,7 @@ function SubtaskSequenceDisplay({
                     'bg-gray-400'
                   }`}></div>
                 <p className="text-sm font-medium text-gray-700">{nextSubtask.title}</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${nextSubtask.status === 'completed' ? 'bg-green-100 text-green-800' :
-                  nextSubtask.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                  {nextSubtask.status === 'completed' ? 'Completada' :
-                    nextSubtask.status === 'in_progress' ? 'En progreso' :
-                      nextSubtask.status === 'pending' ? 'Pendiente' :
-                        nextSubtask.status}
-                </span>
+                <TaskStatusDisplay status={nextSubtask.status} className="text-xs px-2 py-0.5" />
               </div>
               {nextSubtask.assigned_to && (
                 <div className="mt-1 ml-4 text-xs text-gray-500 flex items-center">
@@ -2856,18 +2850,7 @@ export default function UserProjectView() {
                       {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? 'S' : ''}
                     </div>
                     <div>
-                      <span className={`px-2 py-1 text-xs rounded-full ${task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
-                        task.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                          task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                  task.status === 'returned' ? 'bg-orange-100 text-orange-800' :
-                            'bg-blue-100 text-blue-800'
-                        }`}>
-                        {task.status === 'pending' ? 'Pendiente' :
-                          task.status === 'in_progress' ? 'En progreso' :
-                            task.status === 'completed' ? 'Completada' :
-                                  task.status === 'returned' ? 'Devuelta' :
-                              task.status}
-                      </span>
+                      <TaskStatusDisplay status={task.status} />
                     </div>
                         <div className="flex space-x-2">
                       <button
