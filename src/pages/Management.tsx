@@ -6,6 +6,8 @@ import { format } from 'date-fns';
 import toast, { Toaster } from 'react-hot-toast';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface TaskFeedback {
   feedback?: string;
@@ -71,6 +73,83 @@ const columns = [
   { id: 'returned', name: statusTextMap['returned'].toUpperCase() },
   { id: 'approved', name: statusTextMap['approved'].toUpperCase() }
 ];
+
+// Helper function to parse notes and feedback
+const getItemDetails = (item: Task | Subtask | null): {
+  description: string | null;
+  deliveryComments: string | null;
+  blockReason: string | null;
+  returnedFeedback: TaskFeedback | null;
+  approvedFeedback: TaskFeedback | null;
+  realDuration: number | null;
+} => {
+  if (!item) {
+    return {
+      description: null,
+      deliveryComments: null,
+      blockReason: null,
+      returnedFeedback: null,
+      approvedFeedback: null,
+      realDuration: null
+    };
+  }
+
+  let description = item.description;
+  let deliveryComments: string | null = null;
+  let blockReason: string | null = null;
+  let returnedFeedback: TaskFeedback | null = null;
+  let approvedFeedback: TaskFeedback | null = null;
+  let realDuration: number | null = null;
+  
+  const notes = item.notes;
+  let parsedNotes: any = null;
+
+  if (typeof notes === 'string') {
+    try {
+      parsedNotes = JSON.parse(notes);
+    } catch (e) {
+      // If it's not JSON, treat it as raw notes (could be delivery comments)
+      // Avoid setting it directly if status isn't relevant
+      if (item.status === 'completed' || item.status === 'in_review') {
+         deliveryComments = notes;
+      } else if (item.status === 'blocked') {
+         blockReason = notes;
+      }
+    }
+  } else if (typeof notes === 'object' && notes !== null) {
+    parsedNotes = notes;
+  }
+
+  if (parsedNotes) {
+    if (item.status === 'blocked' && parsedNotes.razon_bloqueo) {
+      blockReason = parsedNotes.razon_bloqueo;
+    }
+    if ((item.status === 'completed' || item.status === 'in_review' || item.status === 'approved') && parsedNotes.entregables) {
+      deliveryComments = typeof parsedNotes.entregables === 'string' 
+        ? parsedNotes.entregables
+        : JSON.stringify(parsedNotes.entregables, null, 2);
+    }
+     // Accept 'notes' field as potential delivery comments too
+    if (!deliveryComments && parsedNotes.notes && (item.status === 'completed' || item.status === 'in_review' || item.status === 'approved')) {
+        deliveryComments = typeof parsedNotes.notes === 'string'
+            ? parsedNotes.notes
+            : JSON.stringify(parsedNotes.notes, null, 2);
+    }
+    if (parsedNotes.duracion_real) {
+      realDuration = parsedNotes.duracion_real;
+    }
+  }
+
+  if (item.feedback) {
+    if (item.status === 'returned') {
+      returnedFeedback = item.feedback;
+    } else if (item.status === 'approved') {
+      approvedFeedback = item.feedback;
+    }
+  }
+
+  return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration };
+};
 
 function Management() {
   const { isAdmin, user } = useAuth();
@@ -872,186 +951,102 @@ function Management() {
     );
   };
 
+  // Improved function to handle viewing task/subtask details
   async function handleViewTaskDetails(itemId: string, itemType: 'task' | 'subtask') {
-    setShowTaskDetailsModal(true);
     setDetailsItem({ id: itemId, type: itemType });
+    setLoading(true); // Show loading indicator while fetching details
+    setShowTaskDetailsModal(true); // Show modal structure immediately
+    setTaskDetails(null); // Clear previous details
+    setRelatedSubtasks([]);
+    setPreviousSubtask(null);
+    setNextSubtask(null);
+    setDeliveryComments('');
 
     try {
-      // Determinar si estamos viendo una tarea o subtarea
       let item: Task | Subtask | null = null;
-      if (itemType === 'task') {
-        item = tasks.find(t => t.id === itemId) || null;
-      } else {
-        item = subtasks.find(s => s.id === itemId) || null;
+      let parentTaskData: Task | null = null;
+      let relatedSubtasksData: Subtask[] = [];
+      let fetchedPreviousSubtask: Subtask | null = null;
+      let fetchedNextSubtask: Subtask | null = null;
+
+      const isSubtaskType = itemType === 'subtask';
+      const table = isSubtaskType ? 'subtasks' : 'tasks';
+
+      // Fetch the main item
+      const { data: itemData, error: itemError } = await supabase
+        .from(table)
+        .select('*')
+        .eq('id', itemId)
+        .single();
+
+      if (itemError || !itemData) {
+        throw itemError || new Error('Item not found');
       }
+      item = itemData as (Task | Subtask);
 
-      if (!item) {
-        toast.error('No se pudo encontrar el elemento seleccionado');
-        return;
-      }
-
-      // Función auxiliar para verificar si es una subtarea
-      const isSubtask = (item: Task | Subtask): item is Subtask => {
-        return 'task_id' in item;
-      };
-
-      // Procesar las notas y metadatos de la tarea
-      const processItemDetails = (itemData: any) => {
-        const details = { ...itemData };
-        
-        // Procesar el campo notes si existe
-        if (details.notes) {
-          // Si es string, intentar parsearlo como JSON
-          if (typeof details.notes === 'string') {
-            try {
-              const notesObj = JSON.parse(details.notes);
-              
-              // Extraer campos relevantes según el estado
-              if (details.status === 'blocked' && notesObj.razon_bloqueo) {
-                details.razon_bloqueo = notesObj.razon_bloqueo;
-              } else if ((details.status === 'completed' || details.status === 'in_review' || details.status === 'approved') && notesObj.entregables) {
-                details.entregables = notesObj.entregables;
-              }
-              
-              // Si hay un campo duracion_real, extraerlo también
-              if (notesObj.duracion_real) {
-                details.duracion_real = notesObj.duracion_real;
-              }
-              
-              // Mantener el objeto notes original también
-              details.notes = notesObj;
-            } catch (e) {
-              console.log('Notes no es un JSON válido:', e);
-            }
-          } else if (typeof details.notes === 'object' && details.notes !== null) {
-            // Ya es un objeto, extraer campos relevantes
-            if (details.status === 'blocked' && details.notes.razon_bloqueo) {
-              details.razon_bloqueo = details.notes.razon_bloqueo;
-            } else if ((details.status === 'completed' || details.status === 'in_review' || details.status === 'approved') && details.notes.entregables) {
-              details.entregables = details.notes.entregables;
-            }
-            
-            if (details.notes.duracion_real) {
-              details.duracion_real = details.notes.duracion_real;
-            }
-          }
-        }
-        
-        return details;
-      };
-
-      if (isSubtask(item)) {
-        // Es una subtarea, buscar la tarea padre y las subtareas relacionadas
-        const { data: taskData } = await supabase
+      // Fetch related data based on type
+      if (isSubtaskType) {
+        const subtask = item as Subtask;
+        // Fetch parent task
+        const { data: fetchedParentTask, error: parentError } = await supabase
           .from('tasks')
           .select('*')
-          .eq('id', item.task_id)
+          .eq('id', subtask.task_id)
           .single();
+        if (parentError) throw parentError;
+        parentTaskData = fetchedParentTask;
 
-        // Obtener todas las subtareas relacionadas
-        const { data: relatedSubtasksData } = await supabase
-          .from('subtasks')
-          .select('*')
-          .eq('task_id', item.task_id)
-          .order('sequence_order', { ascending: true });
+        // Fetch related subtasks if parent task exists
+        if (parentTaskData) {
+          const { data: fetchedRelatedSubtasks, error: relatedError } = await supabase
+            .from('subtasks')
+            .select('*')
+            .eq('task_id', subtask.task_id)
+            .order('sequence_order', { ascending: true });
+          if (relatedError) throw relatedError;
+          relatedSubtasksData = fetchedRelatedSubtasks || [];
 
-        // Procesar los datos de la subtarea actual
-        const processedItem = processItemDetails(item);
-        
-        setTaskDetails({ ...processedItem, parent_task: taskData });
-        setRelatedSubtasks(relatedSubtasksData || []);
-
-        // Encontrar subtareas anterior y siguiente si existe secuencia
-        if (relatedSubtasksData && relatedSubtasksData.length > 0 && item.sequence_order !== null) {
-          const currentIndex = relatedSubtasksData.findIndex(s => s.id === itemId);
-          if (currentIndex > 0) {
-            setPreviousSubtask(relatedSubtasksData[currentIndex - 1]);
-          } else {
-            setPreviousSubtask(null);
-          }
-          if (currentIndex < relatedSubtasksData.length - 1) {
-            setNextSubtask(relatedSubtasksData[currentIndex + 1]);
-          } else {
-            setNextSubtask(null);
+          // Find previous/next subtasks if sequential
+          if (parentTaskData.is_sequential && subtask.sequence_order !== null) {
+            const currentIndex = relatedSubtasksData.findIndex(s => s.id === itemId);
+            if (currentIndex > 0) {
+              fetchedPreviousSubtask = relatedSubtasksData[currentIndex - 1];
+            }
+            if (currentIndex < relatedSubtasksData.length - 1) {
+              fetchedNextSubtask = relatedSubtasksData[currentIndex + 1];
+            }
           }
         }
       } else {
-        // Es una tarea principal - procesar sus datos
-        const processedItem = processItemDetails(item);
-        setTaskDetails(processedItem);
-
-        // Obtener las subtareas relacionadas si las hay
-        const { data: relatedSubtasksData } = await supabase
+        const task = item as Task;
+        parentTaskData = task; // The item itself is the parent task in this context
+        // Fetch related subtasks
+        const { data: fetchedRelatedSubtasks, error: relatedError } = await supabase
           .from('subtasks')
           .select('*')
-          .eq('task_id', item.id)
+          .eq('task_id', task.id)
           .order('sequence_order', { ascending: true });
-
-        setRelatedSubtasks(relatedSubtasksData || []);
-        setPreviousSubtask(null);
-        setNextSubtask(null);
+        if (relatedError) throw relatedError;
+        relatedSubtasksData = fetchedRelatedSubtasks || [];
       }
 
-      // Cargar los comentarios de entrega o razón de bloqueo según corresponda
-      const getNotes = (item: Task | Subtask) => {
-        if (!item) return null;
-        
-        const notes = item.notes;
-        const status = item.status;
-        
-        // Si no hay notas
-        if (!notes) return null;
-        
-        // Para tareas bloqueadas, no mostrar comentarios de entrega
-        if (status === 'blocked') {
-          return null;
-        }
-        
-        // Si notes es un objeto
-        if (typeof notes === 'object' && notes !== null) {
-          // Para tareas completadas, mostrar entregables
-          if (status === 'completed' || status === 'in_review' || status === 'approved') {
-            if ('entregables' in notes) {
-              return notes.entregables;
-            }
-          }
-          
-          if ('notes' in notes) {
-            return notes.notes;
-          }
-          return null;
-        }
-        
-        // Si notes es string, intentar parsearlo
-        if (typeof notes === 'string') {
-          try {
-            const notesObj = JSON.parse(notes);
-            // Para tareas completadas, mostrar entregables
-            if (status === 'completed' || status === 'in_review' || status === 'approved') {
-              if (notesObj.entregables) {
-                return notesObj.entregables;
-              }
-            }
-            
-            if (notesObj.notes) {
-              return notesObj.notes;
-            }
-            // Si no hay campos específicos, devolver el string
-            return notes;
-          } catch (e) {
-            // Si no es JSON, devolver el string como está
-            return notes;
-          }
-        }
-        
-        return null;
-      };
+      // Set all state variables together
+      setTaskDetails({ ...item, parent_task: isSubtaskType ? parentTaskData : undefined });
+      setRelatedSubtasks(relatedSubtasksData);
+      setPreviousSubtask(fetchedPreviousSubtask);
+      setNextSubtask(fetchedNextSubtask);
 
-      const deliveryNotes = getNotes(item) || '';
-      setDeliveryComments(typeof deliveryNotes === 'string' ? deliveryNotes : JSON.stringify(deliveryNotes, null, 2));
-    } catch (error) {
+      // Process notes/feedback using the helper
+      const details = getItemDetails(item);
+      setDeliveryComments(details.deliveryComments || '');
+
+    } catch (error: any) {
       console.error('Error al cargar detalles:', error);
-      toast.error('Error al cargar los detalles');
+      toast.error(`Error al cargar los detalles: ${error.message}`);
+      setShowTaskDetailsModal(false); // Close modal on error
+      setDetailsItem(null);
+    } finally {
+      setLoading(false); // Hide loading indicator
     }
   }
 
@@ -1486,35 +1481,36 @@ function Management() {
         </div>
       )}
 
-      {/* Modal de detalles de tarea */}
-      {showTaskDetailsModal && taskDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex-1">
-                <div className="flex items-center">
-                  <h3 className="text-xl font-semibold">
-                    {detailsItem?.type === 'subtask' ? '📋 Subtarea:' : '📋 Tarea:'}
+      {/* Modal de detalles de tarea / subtarea (Refactorizado) */}
+      {showTaskDetailsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex justify-between items-start z-10">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-lg font-semibold">
+                    {detailsItem?.type === 'subtask' ? '📋 Subtarea:' : '📌 Tarea:'}
                   </h3>
-                  <span className="ml-2 text-2xl font-medium">{taskDetails.title}</span>
-                  <span className={`ml-3 px-3 py-1 text-sm rounded-full ${
-                    taskDetails.priority === 'high' ? 'bg-red-100 text-red-800' :
-                    taskDetails.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
-                    {taskDetails.priority === 'high' ? 'Alta' :
-                     taskDetails.priority === 'medium' ? 'Media' : 'Baja'}
-                  </span>
+                  <span className="text-xl font-medium text-gray-800">{taskDetails?.title || 'Cargando...'}</span>
+                  {taskDetails && (
+                    <span className={`ml-2 px-2.5 py-0.5 text-xs rounded-full font-medium ${
+                      taskDetails.priority === 'high' ? 'bg-red-100 text-red-800' :
+                      taskDetails.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-800'
+                    }`}>
+                      {taskDetails.priority === 'high' ? 'Alta' :
+                       taskDetails.priority === 'medium' ? 'Media' : 'Baja'} Prioridad
+                    </span>
+                  )}
                 </div>
-                
-                {detailsItem?.type === 'subtask' && taskDetails.parent_task && (
+                {detailsItem?.type === 'subtask' && taskDetails?.parent_task && (
                   <div className="text-sm text-indigo-600 flex items-center mt-1">
-                    <FolderOpen className="w-4 h-4 mr-1" />
-                    <span>Parte de: {taskDetails.parent_task.title}</span>
+                    <FolderOpen className="w-4 h-4 mr-1.5 flex-shrink-0" />
+                    <span>Parte de la tarea: {taskDetails.parent_task.title}</span>
                   </div>
                 )}
               </div>
-              
               <button
                 onClick={() => {
                   setShowTaskDetailsModal(false);
@@ -1523,420 +1519,360 @@ function Management() {
                   setPreviousSubtask(null);
                   setNextSubtask(null);
                   setDeliveryComments('');
+                  setDetailsItem(null); // Reset details item
                 }}
-                className="text-gray-500 hover:text-gray-700"
+                className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
-            
-            {/* Grid de detalles */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div className="col-span-2">
-                <div className="space-y-4">
-                  {/* Descripción */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Descripción:</h4>
-                    <div className="text-gray-800 whitespace-pre-wrap">
-                      {taskDetails.description || "Sin descripción disponible"}
-                    </div>
-                  </div>
-                  
-                  {/* Comentarios de entrega */}
-                  {deliveryComments && taskDetails.status !== 'blocked' && (
-                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                      <h4 className="text-sm font-medium text-green-800 mb-2">
-                        <CheckCircle className="w-4 h-4 inline mr-1" />
-                        Comentarios de entrega:
-                      </h4>
-                      <div className="text-gray-800 whitespace-pre-wrap">
-                        {deliveryComments}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Retroalimentación de devolución */}
-                  {taskDetails.status === 'returned' && taskDetails.feedback && (
-                    <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                      <h4 className="text-sm font-medium text-orange-800 mb-2">
-                        <AlertTriangle className="w-4 h-4 inline mr-1" />
-                        Retroalimentación de devolución:
-                      </h4>
-                      <div className="text-gray-800 whitespace-pre-wrap">
-                        {taskDetails.feedback.feedback || "Sin retroalimentación específica"}
-                      </div>
-                      {taskDetails.feedback.reviewed_at && (
-                        <div className="text-xs text-gray-500 mt-2">
-                          Devuelta el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
-                          {taskDetails.feedback.reviewed_by && (
-                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.name || 'Usuario'}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Comentarios de bloqueo */}
-                  {taskDetails.status === 'blocked' && (
-                    <div className="bg-red-50 p-4 rounded-lg border border-red-200">
-                      <h4 className="text-sm font-medium text-red-800 mb-2">
-                        <AlertTriangle className="w-4 h-4 inline mr-1" />
-                        Motivo del bloqueo:
-                      </h4>
-                      <div className="text-gray-800 whitespace-pre-wrap">
-                        {(() => {
-                          try {
-                            // Si razon_bloqueo existe directamente, usarlo
-                            if (taskDetails.razon_bloqueo) {
-                              return taskDetails.razon_bloqueo;
-                            }
-                            
-                            // Si hay notas en formato de objeto
-                            if (taskDetails.notes) {
-                              // Si es string, intentar parsearlo como JSON
-                              if (typeof taskDetails.notes === 'string') {
-                                try {
-                                  const notesObj = JSON.parse(taskDetails.notes);
-                                  return notesObj.razon_bloqueo || 'Sin detalles específicos sobre el bloqueo';
-                                } catch (e) {
-                                  return taskDetails.notes;
-                                }
-                              } 
-                              // Si ya es un objeto
-                              else if (typeof taskDetails.notes === 'object') {
-                                return taskDetails.notes.razon_bloqueo || 'Sin detalles específicos sobre el bloqueo';
-                              }
-                            }
-                            
-                            return 'Sin detalles específicos sobre el bloqueo';
-                          } catch (error) {
-                            console.error("Error al procesar motivo de bloqueo:", error);
-                            return 'Error al cargar el motivo del bloqueo';
-                          }
-                        })()}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Retroalimentación de aprobación */}
-                  {taskDetails.status === 'approved' && taskDetails.feedback && (
-                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                      <h4 className="text-sm font-medium text-green-800 mb-2">
-                        <CheckCircle className="w-4 h-4 inline mr-1" />
-                        Retroalimentación de aprobación:
-                      </h4>
-                      <div className="text-gray-800 whitespace-pre-wrap mb-2">
-                        {taskDetails.feedback.feedback || "Sin retroalimentación específica"}
-                      </div>
-                      {taskDetails.feedback.rating && (
-                        <div className="flex items-center">
-                          <span className="text-sm font-medium mr-2">Calificación:</span>
-                          <div className="flex items-center">
-                            {[1, 2, 3, 4, 5].map((value) => (
-                              <span
-                                key={value}
-                                className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                                  (taskDetails.feedback.rating || 0) >= value 
-                                    ? 'bg-yellow-400 text-yellow-800' 
-                                    : 'bg-gray-100 text-gray-400'
-                                } mr-1`}
-                              >
-                                {value}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {taskDetails.feedback.reviewed_at && (
-                        <div className="text-xs text-gray-500 mt-2">
-                          Aprobada el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
-                          {taskDetails.feedback.reviewed_by && (
-                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.name || 'Usuario'}</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {loading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                  <span className="ml-3 text-gray-600">Cargando detalles...</span>
                 </div>
-              </div>
-              
-              <div>
-                <div className="space-y-4">
-                  {/* Meta información */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-gray-700 mb-3">Información General:</h4>
-                    
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Estado:</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          taskDetails.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                          taskDetails.status === 'in_review' ? 'bg-indigo-100 text-indigo-800' :
-                          taskDetails.status === 'returned' ? 'bg-orange-100 text-orange-800' :
-                          taskDetails.status === 'approved' ? 'bg-green-100 text-green-800' :
-                          taskDetails.status === 'blocked' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {taskDetails.status === 'completed' ? 'Completada' :
-                           taskDetails.status === 'in_review' ? 'En revisión' :
-                           taskDetails.status === 'returned' ? 'Devuelta' :
-                           taskDetails.status === 'approved' ? 'Aprobada' :
-                           taskDetails.status === 'blocked' ? 'Bloqueada' :
-                           taskDetails.status === 'pending' ? 'Pendiente' : 
-                           taskDetails.status === 'in_progress' ? 'En progreso' : 
-                           taskDetails.status}
-                        </span>
+              ) : taskDetails ? (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Columna Principal (Información y Feedback) */}
+                  <div className="lg:col-span-2 space-y-6">
+                    {/* Description Card */}
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                        <h4 className="text-base font-semibold text-gray-700">Descripción</h4>
                       </div>
-                      
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Duración estimada:</span>
-                        <span className="font-medium">{taskDetails.estimated_duration} min</span>
-                      </div>
-                      
-                      {taskDetails.start_date && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Fecha de inicio:</span>
-                          <span className="font-medium">{new Date(taskDetails.start_date).toLocaleDateString()}</span>
-                        </div>
-                      )}
-                      
-                      {taskDetails.deadline && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Fecha límite:</span>
-                          <span className="font-medium">{new Date(taskDetails.deadline).toLocaleDateString()}</span>
-                        </div>
-                      )}
-                      
-                      {detailsItem?.type === 'subtask' && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Asignada a:</span>
-                          <span className="font-medium">
-                            {users.find(u => u.id === taskDetails.assigned_to)?.name || 'No asignada'}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {detailsItem?.type === 'task' && taskDetails.parent_task && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Secuencial:</span>
-                          <span className="font-medium">{taskDetails.is_sequential ? 'Sí' : 'No'}</span>
-                        </div>
-                      )}
-                      
-                      {taskDetails.created_at && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Creada el:</span>
-                          <span className="font-medium">{new Date(taskDetails.created_at).toLocaleDateString()}</span>
-                        </div>
-                      )}
-                      
-                      {taskDetails.created_by && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Creada por:</span>
-                          <span className="font-medium">
-                            {users.find(u => u.id === taskDetails.created_by)?.name || 'Usuario'}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {detailsItem?.type === 'task' && taskDetails.project_id && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600">Proyecto:</span>
-                          <span className="font-medium">
-                            {projects.find(p => p.id === taskDetails.project_id)?.name || 'Proyecto'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Información de secuencialidad */}
-                  {detailsItem?.type === 'subtask' && taskDetails.parent_task?.is_sequential && (
-                    <div className="bg-gray-50 p-4 rounded-lg">
-                      <h4 className="text-sm font-medium text-gray-700 mb-3">Secuencia:</h4>
-                      
-                      <div className="space-y-3">
-                        {previousSubtask ? (
-                          <div className="p-2 bg-white rounded border border-gray-200">
-                            <div className="text-xs text-gray-500 mb-1">Anterior:</div>
-                            <div className="text-sm font-medium">{previousSubtask.title}</div>
-                            <div className="text-xs mt-1 flex justify-between">
-                              <span className={`px-2 py-0.5 rounded-full ${
-                                previousSubtask.status === 'completed' || previousSubtask.status === 'approved' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {previousSubtask.status === 'completed' || previousSubtask.status === 'approved' 
-                                  ? 'Completada' 
-                                  : 'Pendiente'}
-                              </span>
-                              <span className="text-gray-500">
-                                {previousSubtask.sequence_order !== null 
-                                  ? `Orden: ${previousSubtask.sequence_order}` 
-                                  : ''}
-                              </span>
-                            </div>
-                          </div>
+                      {/* Apply specific link styles using ReactMarkdown components prop */}
+                      <div className="p-4 text-gray-700 text-sm prose prose-sm max-w-none"> {/* Remove prose-a styles */}
+                        {taskDetails.description ? (
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              // Sobrescribir el renderizador para la etiqueta 'a' (enlace)
+                              a: ({node, ...props}) => (
+                                <a
+                                  {...props}
+                                  className="text-blue-600 hover:underline" // Aplicar estilos directamente
+                                  target="_blank" // Abrir enlaces en nueva pestaña por defecto
+                                  rel="noopener noreferrer" // Seguridad para target="_blank"
+                                />
+                              )
+                            }}
+                          >
+                            {taskDetails.description}
+                          </ReactMarkdown>
                         ) : (
-                          <div className="p-2 bg-white rounded border border-dashed border-gray-200 text-gray-500 text-sm">
-                            Esta es la primera subtarea de la secuencia
-                          </div>
-                        )}
-                        
-                        <div className="p-2 bg-indigo-50 rounded border border-indigo-200">
-                          <div className="text-xs text-indigo-600 mb-1">Actual:</div>
-                          <div className="text-sm font-medium">{taskDetails.title}</div>
-                          <div className="text-xs mt-1 flex justify-between">
-                            <span className={`px-2 py-0.5 rounded-full ${
-                              taskDetails.status === 'completed' || taskDetails.status === 'approved' 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {taskDetails.status === 'completed' || taskDetails.status === 'approved' 
-                                ? 'Completada' 
-                                : taskDetails.status === 'returned' 
-                                  ? 'Devuelta' 
-                                  : taskDetails.status === 'in_review' 
-                                    ? 'En revisión' 
-                                    : 'Pendiente'}
-                            </span>
-                            <span className="text-gray-500">
-                              {taskDetails.sequence_order !== null 
-                                ? `Orden: ${taskDetails.sequence_order}` 
-                                : ''}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {nextSubtask ? (
-                          <div className="p-2 bg-white rounded border border-gray-200">
-                            <div className="text-xs text-gray-500 mb-1">Siguiente:</div>
-                            <div className="text-sm font-medium">{nextSubtask.title}</div>
-                            <div className="text-xs mt-1 flex justify-between">
-                              <span className={`px-2 py-0.5 rounded-full ${
-                                nextSubtask.status === 'completed' || nextSubtask.status === 'approved' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {nextSubtask.status === 'completed' || nextSubtask.status === 'approved' 
-                                  ? 'Completada' 
-                                  : 'Pendiente'}
-                              </span>
-                              <span className="text-gray-500">
-                                {nextSubtask.sequence_order !== null 
-                                  ? `Orden: ${nextSubtask.sequence_order}` 
-                                  : ''}
-                              </span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="p-2 bg-white rounded border border-dashed border-gray-200 text-gray-500 text-sm">
-                            Esta es la última subtarea de la secuencia
-                          </div>
+                          <span className="italic text-gray-500">Sin descripción disponible</span>
                         )}
                       </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            
-            {/* Lista de subtareas si es una tarea principal */}
-            {detailsItem?.type === 'task' && relatedSubtasks.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-md font-medium mb-3 text-gray-700">Subtareas ({relatedSubtasks.length}):</h4>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-100">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Título</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                          {taskDetails.is_sequential && (
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
+
+                    {/* Delivery Comments Card */}
+                    {deliveryComments && taskDetails.status !== 'blocked' && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-green-100 px-4 py-3 border-b border-green-200 flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-green-700" />
+                          <h4 className="text-base font-semibold text-green-800">Comentarios de Entrega</h4>
+                        </div>
+                        <div className="p-4 text-green-900 text-sm whitespace-pre-wrap">
+                          {deliveryComments}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Block Reason Card */}
+                    {taskDetails.status === 'blocked' && getItemDetails(taskDetails).blockReason && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-red-100 px-4 py-3 border-b border-red-200 flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-red-700" />
+                          <h4 className="text-base font-semibold text-red-800">Motivo del Bloqueo</h4>
+                        </div>
+                        <div className="p-4 text-red-900 text-sm whitespace-pre-wrap">
+                          {getItemDetails(taskDetails).blockReason}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Returned Feedback Card */}
+                    {taskDetails.status === 'returned' && getItemDetails(taskDetails).returnedFeedback && (
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-orange-100 px-4 py-3 border-b border-orange-200 flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-orange-700" />
+                          <h4 className="text-base font-semibold text-orange-800">Retroalimentación (Devuelta)</h4>
+                        </div>
+                        <div className="p-4 space-y-2">
+                          <p className="text-orange-900 text-sm whitespace-pre-wrap">
+                            {getItemDetails(taskDetails).returnedFeedback?.feedback || <span className="italic text-gray-500">Sin comentarios específicos.</span>}
+                          </p>
+                          {getItemDetails(taskDetails).returnedFeedback?.reviewed_at && (
+                            <p className="text-xs text-gray-500">
+                              Devuelta el: {new Date(getItemDetails(taskDetails).returnedFeedback!.reviewed_at!).toLocaleString()} por {users.find(u => u.id === getItemDetails(taskDetails).returnedFeedback?.reviewed_by)?.name || 'Usuario'}
+                            </p>
                           )}
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignada a</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duración</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {relatedSubtasks
-                          .sort((a, b) => {
-                            if (taskDetails.is_sequential) {
-                              return (a.sequence_order || 0) - (b.sequence_order || 0);
-                            }
-                            return 0;
-                          })
-                          .map((subtask) => (
-                            <tr 
-                              key={subtask.id} 
-                              className="hover:bg-gray-50 cursor-pointer"
-                              onClick={() => handleViewTaskDetails(subtask.id, 'subtask')}
-                            >
-                              <td className="px-4 py-2">
-                                <div className="font-medium text-gray-900">{subtask.title}</div>
-                                {subtask.status === 'returned' && (
-                                  <span className="ml-2 text-xs text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full">
-                                    Devuelta
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Approved Feedback Card */}
+                    {taskDetails.status === 'approved' && getItemDetails(taskDetails).approvedFeedback && (
+                       <div className="bg-teal-50 border border-teal-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-teal-100 px-4 py-3 border-b border-teal-200 flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-teal-700" />
+                          <h4 className="text-base font-semibold text-teal-800">Retroalimentación (Aprobada)</h4>
+                        </div>
+                        <div className="p-4 space-y-3">
+                           <p className="text-teal-900 text-sm whitespace-pre-wrap mb-2">
+                             {getItemDetails(taskDetails).approvedFeedback?.feedback || <span className="italic text-gray-500">Sin comentarios específicos.</span>}
+                           </p>
+                           {getItemDetails(taskDetails).approvedFeedback?.rating && (
+                             <div className="flex items-center gap-2">
+                               <span className="text-sm font-medium text-gray-700">Calificación:</span>
+                               <div className="flex items-center">
+                                 {[1, 2, 3, 4, 5].map((value) => (
+                                   <span
+                                     key={value}
+                                     className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold border ${
+                                       (getItemDetails(taskDetails).approvedFeedback!.rating || 0) >= value
+                                         ? 'bg-yellow-400 border-yellow-500 text-yellow-900'
+                                         : 'bg-gray-100 border-gray-300 text-gray-400'
+                                     } mr-1`}
+                                   >
+                                     {value}
+                                   </span>
+                                 ))}
+                                 <span className="text-sm ml-1 text-gray-600">
+                                   ({
+                                     {1: 'Insuficiente', 2: 'Regular', 3: 'Bueno', 4: 'Muy bueno', 5: 'Excelente'}[getItemDetails(taskDetails).approvedFeedback!.rating || 0] || ''
+                                   })
+                                 </span>
+                               </div>
+                             </div>
+                           )}
+                           {getItemDetails(taskDetails).approvedFeedback?.reviewed_at && (
+                             <p className="text-xs text-gray-500">
+                               Aprobada el: {new Date(getItemDetails(taskDetails).approvedFeedback!.reviewed_at!).toLocaleString()} por {users.find(u => u.id === getItemDetails(taskDetails).approvedFeedback?.reviewed_by)?.name || 'Usuario'}
+                             </p>
+                           )}
+                         </div>
+                       </div>
+                    )}
+
+                    {/* Subtasks List (if viewing a Task) */}
+                     {detailsItem?.type === 'task' && relatedSubtasks.length > 0 && (
+                      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                         <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                           <h4 className="text-base font-semibold text-gray-700">Subtareas ({relatedSubtasks.length})</h4>
+                         </div>
+                         <div className="overflow-x-auto">
+                           <table className="min-w-full divide-y divide-gray-200">
+                             <thead className="bg-gray-100">
+                               <tr>
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Título</th>
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                                 {taskDetails.is_sequential && (
+                                   <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
+                                 )}
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
+                                 <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duración</th>
+                               </tr>
+                             </thead>
+                             <tbody className="bg-white divide-y divide-gray-200">
+                               {relatedSubtasks
+                                 .sort((a, b) => taskDetails.is_sequential ? (a.sequence_order || 0) - (b.sequence_order || 0) : 0)
+                                 .map((subtask) => (
+                                   <tr
+                                     key={subtask.id}
+                                     className="hover:bg-gray-50 cursor-pointer transition-colors"
+                                     onClick={() => handleViewTaskDetails(subtask.id, 'subtask')} // Allow drilling down
+                                     title={`Ver detalles de ${subtask.title}`}
+                                   >
+                                     <td className="px-4 py-3 whitespace-nowrap">
+                                       <div className="text-sm font-medium text-gray-900">{subtask.title}</div>
+                                        {subtask.status === 'returned' && (
+                                          <span className="text-xs text-orange-600">(Devuelta)</span>
+                                        )}
+                                     </td>
+                                     <td className="px-4 py-3 whitespace-nowrap">
+                                       <TaskStatusDisplay status={subtask.status} />
+                                     </td>
+                                     {taskDetails.is_sequential && (
+                                       <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500">
+                                         {subtask.sequence_order ?? '-'}
+                                       </td>
+                                     )}
+                                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                       {users.find(u => u.id === subtask.assigned_to)?.name || <span className="italic">No asignada</span>}
+                                     </td>
+                                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-right">
+                                       {subtask.estimated_duration} min
+                                     </td>
+                                   </tr>
+                                 ))}
+                             </tbody>
+                           </table>
+                         </div>
+                       </div>
+                    )}
+                  </div>
+
+                  {/* Columna Lateral (Metadatos y Secuencia) */}
+                  <div className="lg:col-span-1 space-y-6">
+                    {/* Metadata Card */}
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                       <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                         <h4 className="text-base font-semibold text-gray-700">Información General</h4>
+                       </div>
+                       <div className="p-4 space-y-3">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-gray-600">Estado:</span>
+                          <TaskStatusDisplay status={taskDetails.status} />
+                        </div>
+                        {detailsItem?.type === 'subtask' && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Asignada a:</span>
+                            <span className="font-medium text-gray-800">
+                              {users.find(u => u.id === taskDetails.assigned_to)?.name || <span className="italic">No asignada</span>}
+                            </span>
+                          </div>
+                        )}
+                         <div className="flex justify-between text-sm">
+                           <span className="text-gray-600">Duración estimada:</span>
+                           <span className="font-medium text-gray-800">{taskDetails.estimated_duration} min</span>
+                         </div>
+                         {getItemDetails(taskDetails).realDuration && (
+                          <div className="flex justify-between text-sm">
+                             <span className="text-gray-600">Duración real:</span>
+                             <span className="font-medium text-indigo-600">{getItemDetails(taskDetails).realDuration} min</span>
+                           </div>
+                         )}
+                         {taskDetails.start_date && (
+                           <div className="flex justify-between text-sm">
+                             <span className="text-gray-600">Fecha de inicio:</span>
+                             <span className="font-medium text-gray-800">{new Date(taskDetails.start_date).toLocaleDateString()}</span>
+                           </div>
+                         )}
+                         {taskDetails.deadline && (
+                           <div className="flex justify-between text-sm">
+                             <span className="text-gray-600">Fecha límite:</span>
+                             <span className="font-medium text-gray-800">{new Date(taskDetails.deadline).toLocaleDateString()}</span>
+                           </div>
+                         )}
+                          {detailsItem?.type === 'task' && taskDetails.project_id && (
+                           <div className="flex justify-between text-sm">
+                             <span className="text-gray-600">Proyecto:</span>
+                             <span className="font-medium text-gray-800">
+                               {projects.find(p => p.id === taskDetails.project_id)?.name || 'N/A'}
+                             </span>
+                           </div>
+                         )}
+                         {detailsItem?.type === 'task' && (
+                           <div className="flex justify-between text-sm">
+                             <span className="text-gray-600">Secuencial:</span>
+                             <span className="font-medium text-gray-800">{taskDetails.is_sequential ? 'Sí' : 'No'}</span>
+                           </div>
+                         )}
+                         <div className="border-t border-gray-100 pt-3 mt-3 space-y-2">
+                          {taskDetails.created_at && (
+                             <div className="flex justify-between text-xs text-gray-500">
+                               <span>Creada el:</span>
+                               <span>{new Date(taskDetails.created_at).toLocaleString()}</span>
+                             </div>
+                           )}
+                           {taskDetails.created_by && (
+                             <div className="flex justify-between text-xs text-gray-500">
+                               <span>Creada por:</span>
+                               <span>{users.find(u => u.id === taskDetails.created_by)?.name || 'Usuario'}</span>
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     </div>
+
+                    {/* Sequence Card (if applicable) */}
+                    {detailsItem?.type === 'subtask' && taskDetails.parent_task?.is_sequential && (
+                      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                          <h4 className="text-base font-semibold text-gray-700">Secuencia de Tarea</h4>
+                        </div>
+                        <div className="p-4 space-y-3">
+                           {previousSubtask ? (
+                            <div className="p-3 bg-white rounded border border-gray-200 hover:border-gray-300 transition-colors">
+                              <div className="text-xs text-gray-500 mb-1">← Anterior:</div>
+                              <div className="text-sm font-medium text-gray-800">{previousSubtask.title}</div>
+                              <div className="text-xs mt-1 flex justify-between items-center">
+                                 <TaskStatusDisplay status={previousSubtask.status} />
+                                 <span className="text-gray-500 truncate max-w-[100px]" title={users.find(u => u.id === previousSubtask.assigned_to)?.name || 'No asignada'}>
+                                   👤 {users.find(u => u.id === previousSubtask.assigned_to)?.name || 'No asignada'}
+                                 </span>
+                                 <span className="text-gray-400">#{previousSubtask.sequence_order}</span>
+                              </div>
+                            </div>
+                          ) : (
+                             <div className="p-3 bg-gray-50 rounded border border-dashed border-gray-200 text-gray-500 text-sm text-center">
+                              Primera subtarea de la secuencia
+                             </div>
+                          )}
+
+                          {/* Current Subtask in Sequence */}
+                          <div className="p-3 bg-indigo-50 rounded border border-indigo-200 ring-1 ring-indigo-100">
+                             <div className="text-xs text-indigo-600 mb-1 font-medium">Actual:</div>
+                             <div className="text-sm font-medium text-indigo-900">{taskDetails.title}</div>
+                             <div className="text-xs mt-1 flex justify-between items-center">
+                               <TaskStatusDisplay status={taskDetails.status} />
+                               <span className="text-indigo-700 truncate max-w-[100px]" title={users.find(u => u.id === taskDetails.assigned_to)?.name || 'No asignada'}>
+                                 👤 {users.find(u => u.id === taskDetails.assigned_to)?.name || 'No asignada'}
+                               </span>
+                               <span className="text-indigo-500 font-medium">#{taskDetails.sequence_order}</span>
+                             </div>
+                           </div>
+
+                           {nextSubtask ? (
+                             <div className="p-3 bg-white rounded border border-gray-200 hover:border-gray-300 transition-colors">
+                               <div className="text-xs text-gray-500 mb-1">→ Siguiente:</div>
+                               <div className="text-sm font-medium text-gray-800">{nextSubtask.title}</div>
+                               <div className="text-xs mt-1 flex justify-between items-center">
+                                 <TaskStatusDisplay status={nextSubtask.status} />
+                                  <span className="text-gray-500 truncate max-w-[100px]" title={users.find(u => u.id === nextSubtask.assigned_to)?.name || 'No asignada'}>
+                                     👤 {users.find(u => u.id === nextSubtask.assigned_to)?.name || 'No asignada'}
                                   </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2">
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  subtask.status === 'completed' ? 'bg-blue-100 text-blue-800' :
-                                  subtask.status === 'in_review' ? 'bg-indigo-100 text-indigo-800' :
-                                  subtask.status === 'returned' ? 'bg-orange-100 text-orange-800' :
-                                  subtask.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                  subtask.status === 'blocked' ? 'bg-red-100 text-red-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {subtask.status === 'completed' ? 'Completada' :
-                                   subtask.status === 'in_review' ? 'En revisión' :
-                                   subtask.status === 'returned' ? 'Devuelta' :
-                                   subtask.status === 'approved' ? 'Aprobada' :
-                                   subtask.status === 'blocked' ? 'Bloqueada' :
-                                   subtask.status === 'pending' ? 'Pendiente' : 
-                                   subtask.status === 'in_progress' ? 'En progreso' : 
-                                   subtask.status}
-                                </span>
-                              </td>
-                              {taskDetails.is_sequential && (
-                                <td className="px-4 py-2 text-sm text-gray-500">
-                                  {subtask.sequence_order !== null ? subtask.sequence_order : '-'}
-                                </td>
-                              )}
-                              <td className="px-4 py-2">
-                                <div className="text-sm text-gray-500">
-                                  {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignada'}
-                                </div>
-                              </td>
-                              <td className="px-4 py-2 text-sm text-gray-500">
-                                {subtask.estimated_duration} min
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
+                                  <span className="text-gray-400">#{nextSubtask.sequence_order}</span>
+                               </div>
+                             </div>
+                           ) : (
+                             <div className="p-3 bg-gray-50 rounded border border-dashed border-gray-200 text-gray-500 text-sm text-center">
+                               Última subtarea de la secuencia
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     )}
                   </div>
                 </div>
-              </div>
-            )}
-            
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => {
-                  setShowTaskDetailsModal(false);
-                  setTaskDetails(null);
-                  setRelatedSubtasks([]);
-                  setPreviousSubtask(null);
-                  setNextSubtask(null);
-                  setDeliveryComments('');
-                }}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
-              >
-                Cerrar
-              </button>
+              ) : (
+                 <div className="text-center text-gray-500 py-10">
+                   No se pudieron cargar los detalles de la tarea.
+                 </div>
+              )}
             </div>
+
+             {/* Modal Footer */}
+             <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 flex justify-end">
+               <button
+                 onClick={() => {
+                   setShowTaskDetailsModal(false);
+                   setTaskDetails(null);
+                   setRelatedSubtasks([]);
+                   setPreviousSubtask(null);
+                   setNextSubtask(null);
+                   setDeliveryComments('');
+                   setDetailsItem(null); // Reset details item
+                 }}
+                 className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors text-sm font-medium"
+               >
+                 Cerrar
+               </button>
+             </div>
           </div>
         </div>
       )}
