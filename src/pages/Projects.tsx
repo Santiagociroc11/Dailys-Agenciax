@@ -33,6 +33,7 @@ interface User {
   id: string;
   email: string;
   assigned_projects?: string[];
+  name?: string;
 }
 
 function Projects() {
@@ -539,14 +540,14 @@ function Projects() {
                       {projectTasks.slice(0, 3).map(task => (
                         <li key={task.id} className="text-sm">
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                              <div className={`w-2 h-2 rounded-full mr-2 ${
+                            <div className="flex items-center min-w-0 mr-2">
+                              <div className={`w-2 h-2 rounded-full mr-2 flex-shrink-0 ${
                                 task.priority === 'high' ? 'bg-red-500' :
                                 task.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
                               }`}></div>
                               <span className="truncate">{task.title}</span>
                             </div>
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
                               task.status === 'completed' || task.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
                               task.status === 'blocked' ? 'bg-red-100 text-red-800' :
                               task.status === 'in_review' ? 'bg-blue-100 text-blue-800' :
