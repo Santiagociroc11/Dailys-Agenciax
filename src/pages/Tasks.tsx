@@ -222,6 +222,7 @@ function Tasks() {
   }, [newTask.subtasks]);
 
   useEffect(() => {
+    // Only update main task assignees from subtasks if subtasks exist
     if (newTask.subtasks.length > 0) {
       const assignedUsers = [...new Set(
         newTask.subtasks
@@ -234,6 +235,10 @@ function Tasks() {
         assigned_to: assignedUsers
       }));
     }
+    // If no subtasks, don't automatically clear assigned_to 
+    // else {
+    //   setNewTask(prev => ({ ...prev, assigned_to: [] }));
+    // }
   }, [newTask.subtasks]);
 
   // Función para obtener los usuarios disponibles para un proyecto específico
@@ -261,10 +266,28 @@ function Tasks() {
       return;
     }
 
+    // Validation: Prevent multiple assignees if no subtasks
+    if (newTask.subtasks.length === 0 && newTask.assigned_to.length > 1) {
+      setError('Las tareas principales sin subtareas solo pueden tener un usuario asignado. Para asignar múltiples usuarios, crea subtareas individuales para cada responsabilidad específica. En caso de reuniones o decisiones conjuntas, asigna un responsable principal que coordine la actividad.');
+      return;
+    }
+
     try {
       let taskToCreate = { ...newTask };
       
+      // --- Determine final assigned users based on subtasks presence --- 
+      let finalAssignedUsers: string[];
+
       if (taskToCreate.subtasks.length > 0) {
+        // Logic when subtasks exist (current behavior)
+        const assignedSubtaskUsers = [...new Set(
+          taskToCreate.subtasks
+            .map(subtask => subtask.assigned_to)
+            .filter(userId => userId && userId.trim() !== '')
+        )];
+        finalAssignedUsers = assignedSubtaskUsers.length > 0 ? assignedSubtaskUsers : [user.id]; // Default to creator if no one assigned in subtasks
+        
+        // Adjust main task start/end dates based on subtasks
         const earliestStart = taskToCreate.subtasks.reduce(
           (earliest, subtask) => {
             if (!subtask.start_date) return earliest;
@@ -281,14 +304,20 @@ function Tasks() {
           taskToCreate.subtasks[0]?.deadline || taskToCreate.deadline
         );
         
+        // Update taskToCreate with adjusted dates
         taskToCreate = {
           ...taskToCreate,
           start_date: earliestStart,
           deadline: latestDeadline
         };
+      } else {
+        // Logic when NO subtasks exist 
+        finalAssignedUsers = taskToCreate.assigned_to.length === 1
+          ? [taskToCreate.assigned_to[0]] // Use the single selected user
+          : [user.id]; // Default to creator if none selected (or multiple were erroneously selected before validation)
       }
 
-      const assignedTo = taskToCreate.assigned_to.filter(userId => userId && userId.trim() !== '');
+      // --- Construct final task data for insertion ---
       const taskData = {
         title: taskToCreate.title,
         description: taskToCreate.description,
@@ -298,7 +327,7 @@ function Tasks() {
         priority: taskToCreate.priority,
         is_sequential: taskToCreate.is_sequential,
         created_by: user.id,
-        assigned_users: assignedTo.length > 0 ? assignedTo : [user.id],
+        assigned_users: finalAssignedUsers, // Use the determined assignees
         project_id: taskToCreate.project_id
       };
 

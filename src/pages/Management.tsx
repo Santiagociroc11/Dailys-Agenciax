@@ -31,6 +31,7 @@ interface Task {
   status: 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved';
   feedback?: TaskFeedback | null;
   returned_at?: string;
+  assigned_users?: string[];
   razon_bloqueo?: string;
   notes?: string | { [key: string]: any };
 }
@@ -937,6 +938,23 @@ function Management() {
                                 </button>
                               </div>
                             ) : null}
+                            {/* START: Add Assignee Badge */}
+                            {(task.assigned_users && task.assigned_users.length > 0) ? (
+                              <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                <Users className="w-2.5 h-2.5 mr-1" />
+                                <span className="truncate max-w-[120px]" title={users.find(u => u.id === task.assigned_users![0])?.name || 'Usuario'}>
+                                  {users.find(u => u.id === task.assigned_users![0])?.name || 'Usuario'}
+                                </span>
+                                {/* Optional: Indicate if there are more assignees */}
+                                {task.assigned_users.length > 1 && <span className="ml-1 text-gray-400 text-[10px] font-medium">(+{task.assigned_users.length - 1})</span>}
+                              </div>
+                            ) : (
+                               <div className="flex items-center bg-gray-100 rounded px-1.5 py-0.5 text-gray-400 italic text-xs">
+                                  <Users className="w-2.5 h-2.5 mr-1" />
+                                  <span>No asignado</span>
+                               </div>
+                            )}
+                            {/* END: Add Assignee Badge */}
                           </div>
                         ))}
                       </div>
