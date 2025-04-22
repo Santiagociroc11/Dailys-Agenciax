@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import Tasks from './pages/Tasks';
 import Users from './pages/Users';
 import Projects from './pages/Projects';
+import Areas from './pages/Areas';
 import Management from './pages/Management';
 import UserProjectView from './pages/UserProjectView';
 import Login from './pages/Login';
@@ -63,6 +64,7 @@ function App() {
             <Route path="projects" element={<Projects />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="users" element={<Users />} />
+            <Route path="areas" element={<Areas />} />
           </Route>
 
           {/* User routes */}

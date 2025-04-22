@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Sidebar() {
@@ -72,17 +72,30 @@ export default function Sidebar() {
           {isAdmin ? 'Tareas' : 'Mis Tareas'}
         </NavLink>
         {isAdmin && (
-          <NavLink
-            to="/users"
-            className={({ isActive }) =>
-              `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
-                isActive ? 'bg-gray-100' : ''
-              }`
-            }
-          >
-            <Users className="w-5 h-5 mr-3" />
-            Usuarios
-          </NavLink>
+          <>
+            <NavLink
+              to="/users"
+              className={({ isActive }) =>
+                `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+                  isActive ? 'bg-gray-100' : ''
+                }`
+              }
+            >
+              <Users className="w-5 h-5 mr-3" />
+              Usuarios
+            </NavLink>
+            <NavLink
+              to="/areas"
+              className={({ isActive }) =>
+                `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+                  isActive ? 'bg-gray-100' : ''
+                }`
+              }
+            >
+              <Layers className="w-5 h-5 mr-3" />
+              Áreas de Trabajo
+            </NavLink>
+          </>
         )}
       </nav>
       <div className="absolute bottom-0 w-64 p-6">
