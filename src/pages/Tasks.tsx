@@ -124,6 +124,10 @@ function Tasks() {
   }, []);
 
   useEffect(() => {
+    fetchTasks();
+  }, [selectedProject]);
+
+  useEffect(() => {
     async function fetchUsers() {
       try {
         const { data: usersData, error: usersError } = await supabase

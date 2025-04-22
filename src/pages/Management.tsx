@@ -624,7 +624,7 @@ function Management() {
                           return (
                             <div 
                               key={subtask.id}
-                              className={`bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
+                              className={`bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
                                 subtask.status === 'returned' 
                                   ? 'border-orange-500' 
                                   : subtask.status === 'approved' 
@@ -645,12 +645,12 @@ function Management() {
                               {parentTask && (
                                 <div className="mb-2 pb-2 border-b border-gray-100">
                                   <span className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center">
-                                    <FolderOpen className="w-3 h-3 mr-1" />
+                                    <FolderOpen className="w-2.5 h-2.5 mr-1" />
                                     {parentTask.title}
                                   </span>
                                 </div>
                               )}
-                              <div className="flex justify-between">
+                              <div className="flex justify-between items-start gap-2">
                                 <h5 className="font-medium text-gray-800">
                                   {subtask.title}
                                   {subtask.status === 'returned' && (
@@ -666,7 +666,7 @@ function Management() {
                                     </span>
                                   )}
                                 </h5>
-                                <span className={`text-xs px-2 py-1 rounded-full ${
+                                <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
                                   parentTask?.priority === 'high' ? 'bg-red-100 text-red-800' :
                                   parentTask?.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
                                   'bg-green-100 text-green-800'
@@ -675,19 +675,19 @@ function Management() {
                                    parentTask?.priority === 'medium' ? 'Media' : 'Baja'}
                                 </span>
                               </div>
-                              <div className="text-xs text-gray-500 mt-3 flex flex-wrap gap-2">
-                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                  <Clock className="w-3 h-3 mr-1" />
+                              <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-1.5">
+                                <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                  <Clock className="w-2.5 h-2.5 mr-1" />
                                   <span>{subtask.estimated_duration} min</span>
                                 </div>
                                 {subtask.deadline && (
-                                  <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                    <Calendar className="w-3 h-3 mr-1" />
+                                  <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                    <Calendar className="w-2.5 h-2.5 mr-1" />
                                     <span>{new Date(subtask.deadline).toLocaleDateString()}</span>
                                   </div>
                                 )}
-                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                  <Users className="w-3 h-3 mr-1" />
+                                <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                  <Users className="w-2.5 h-2.5 mr-1" />
                                   <span className="truncate max-w-[120px]">
                                     {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignado'}
                                   </span>
@@ -701,7 +701,7 @@ function Management() {
                                 )}
                               </div>
                               {subtask.status === 'completed' || subtask.status === 'blocked' ? (
-                                <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                   <button
                                     className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                     onClick={(e) => {
@@ -709,12 +709,12 @@ function Management() {
                                       handleStatusChange(subtask.id, 'in_review', true);
                                     }}
                                   >
-                                    <ArrowRight className="w-3 h-3 mr-1" />
+                                    <ArrowRight className="w-2.5 h-2.5 mr-1" />
                                     En revisión
                                   </button>
                                 </div>
                               ) : subtask.status === 'in_review' ? (
-                                <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                                <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                   <button
                                     className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
                                     onClick={(e) => {
@@ -722,7 +722,7 @@ function Management() {
                                       handleStatusChange(subtask.id, 'returned', true);
                                     }}
                                   >
-                                    <AlertTriangle className="w-3 h-3 mr-1" />
+                                    <AlertTriangle className="w-2.5 h-2.5 mr-1" />
                                     Devolver
                                   </button>
                                   <button
@@ -732,7 +732,7 @@ function Management() {
                                       handleStatusChange(subtask.id, 'approved', true);
                                     }}
                                   >
-                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    <CheckCircle className="w-2.5 h-2.5 mr-1" />
                                     Aprobar
                                   </button>
                                 </div>
@@ -745,7 +745,7 @@ function Management() {
                         {tasksWithoutSubtasks.map(task => (
                           <div 
                             key={task.id}
-                            className={`bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
+                            className={`bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 ${
                               task.status === 'returned' 
                                 ? 'border-orange-500' 
                                 : task.status === 'approved' 
@@ -763,8 +763,8 @@ function Management() {
                             }}
                             onClick={() => handleViewTaskDetails(task.id, 'task')}
                           >
-                            <div className="flex justify-between items-start">
-                              <h5 className="font-medium text-gray-800">
+                            <div className="flex justify-between items-start gap-2">
+                              <h5 className="font-medium text-gray-800 flex-1 min-w-0">
                                 {task.title}
                                 {task.status === 'returned' && (
                                   <span 
@@ -779,7 +779,7 @@ function Management() {
                                   </span>
                                 )}
                               </h5>
-                              <span className={`text-xs px-2 py-1 rounded-full ${
+                              <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
                                 task.priority === 'high' ? 'bg-red-100 text-red-800' :
                                 task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
                                 'bg-green-100 text-green-800'
@@ -788,18 +788,18 @@ function Management() {
                                   task.priority === 'medium' ? 'Media' : 'Baja'}
                               </span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-3 flex flex-wrap gap-2">
-                              <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                <Clock className="w-3 h-3 mr-1" />
+                            <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-1.5">
+                              <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                <Clock className="w-2.5 h-2.5 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
-                              <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                <Calendar className="w-3 h-3 mr-1" />
+                              <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                <Calendar className="w-2.5 h-2.5 mr-1" />
                                 <span>{new Date(task.deadline).toLocaleDateString()}</span>
                               </div>
                               {task.project_id && (
-                                <div className="flex items-center bg-gray-50 rounded px-2 py-1">
-                                  <FolderOpen className="w-3 h-3 mr-1" />
+                                <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                  <FolderOpen className="w-2.5 h-2.5 mr-1" />
                                   <span className="truncate max-w-[120px]">
                                     {projects.find(p => p.id === task.project_id)?.name || 'Proyecto'}
                                   </span>
@@ -807,7 +807,7 @@ function Management() {
                               )}
                             </div>
                             {task.status === 'completed' || task.status === 'blocked' ? (
-                              <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                              <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                 <button
                                   className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                   onClick={(e) => {
@@ -815,12 +815,12 @@ function Management() {
                                     handleStatusChange(task.id, 'in_review', false);
                                   }}
                                 >
-                                  <ArrowRight className="w-3 h-3 mr-1" />
+                                  <ArrowRight className="w-2.5 h-2.5 mr-1" />
                                   En revisión
                                 </button>
                               </div>
                             ) : task.status === 'in_review' ? (
-                              <div className="mt-3 flex flex-wrap gap-2 border-t pt-2">
+                              <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                 <button
                                   className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
                                   onClick={(e) => {
@@ -828,7 +828,7 @@ function Management() {
                                     handleStatusChange(task.id, 'returned', false);
                                   }}
                                 >
-                                  <AlertTriangle className="w-3 h-3 mr-1" />
+                                  <AlertTriangle className="w-2.5 h-2.5 mr-1" />
                                   Devolver
                                 </button>
                                 <button
@@ -838,7 +838,7 @@ function Management() {
                                     handleStatusChange(task.id, 'approved', false);
                                   }}
                                 >
-                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  <CheckCircle className="w-2.5 h-2.5 mr-1" />
                                   Aprobar
                                 </button>
                               </div>
