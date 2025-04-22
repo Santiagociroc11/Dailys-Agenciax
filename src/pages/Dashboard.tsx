@@ -12,7 +12,7 @@ const Dashboard = () => {
           <h2 className="text-lg font-semibold mb-4">Resumen de Tareas</h2>
           <div className="space-y-2">
             <p className="text-gray-600">Bienvenido/a, {user?.email}</p>
-            <p className="text-gray-600">No tienes tareas pendientes.</p>
+            <p className="text-gray-600 italic">✨ Estamos trabajando en traerte indicadores y métricas importantes para ayudarte a gestionar mejor tus tareas y proyectos. ¡Muy pronto!</p>
           </div>
         </div>
       </div>
