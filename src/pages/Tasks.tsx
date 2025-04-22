@@ -21,6 +21,7 @@ interface Task {
   project_id: string | null;
   status?: string;
   assigned_to?: string;
+  assigned_users?: string[];
 }
 
 interface Subtask {
@@ -404,7 +405,8 @@ function Tasks() {
           estimated_duration: editedTask.estimated_duration,
           priority: editedTask.priority,
           is_sequential: editedTask.is_sequential,
-          project_id: editedTask.project_id
+          project_id: editedTask.project_id,
+          assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
       
@@ -681,7 +683,8 @@ function Tasks() {
                         status: task.status,
                         created_by: task.created_by,
                         created_at: task.created_at,
-                        assigned_to: task.assigned_to
+                        assigned_to: task.assigned_to,
+                        assigned_users: task.assigned_users
                       });
                       setShowTaskDetailModal(true);
                     }}
@@ -717,7 +720,44 @@ function Tasks() {
                   <span>Secuencial</span>
                 </>
               )}
-              </div>
+            </div>
+            
+            {/* Mostrar usuarios asignados a la tarea principal */}
+            <div className="flex items-center mb-3">
+              <Users className="w-4 h-4 mr-1 text-indigo-500" />
+              <span className="text-sm text-gray-600 mr-1">Asignados:</span>
+              {task.assigned_users ? (
+                <div className="flex flex-wrap gap-1">
+                  {Array.isArray(task.assigned_users) ? 
+                    task.assigned_users.map(userId => (
+                      <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                        {users.find(u => u.id === userId)?.name || userId}
+                      </span>
+                    ))
+                    : 
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                      {users.find(u => u.id === String(task.assigned_users))?.name || task.assigned_users}
+                    </span>
+                  }
+                </div>
+              ) : task.assigned_to ? (
+                <div className="flex flex-wrap gap-1">
+                  {Array.isArray(task.assigned_to) ? 
+                    task.assigned_to.map(userId => (
+                      <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                        {users.find(u => u.id === userId)?.name || userId}
+                      </span>
+                    ))
+                    : 
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                      {users.find(u => u.id === String(task.assigned_to))?.name || task.assigned_to}
+                    </span>
+                  }
+                </div>
+              ) : (
+                <span className="text-xs text-gray-500">Sin asignaciones</span>
+              )}
+            </div>
               
               {subtasks[task.id]?.length > 0 && (
                 <div className="mt-2">
@@ -801,7 +841,7 @@ function Tasks() {
                                     </div>
                                   
                                   <div className="flex items-center text-indigo-600">
-                                    <span>Asignada a: {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignada'}</span>
+                                    <span>Asignada a: {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignada'}</span>
                                   </div>
                                 </div>
                               </div>
@@ -1239,7 +1279,7 @@ function Tasks() {
                               }}
                             />
                             <label htmlFor={`assign-${user.id}`} className="text-sm text-gray-700">
-                              {user.name || user.email}
+                              {user.name || user.name}
                             </label>
                           </div>
                         ))}
@@ -1357,7 +1397,7 @@ function Tasks() {
                                   <option value="">Seleccionar usuario</option>
                                   {getAvailableUsers(newTask.project_id).map((user) => (
                                     <option key={user.id} value={user.id}>
-                                      {user.name || user.email}
+                                      {user.name || user.name}
                                     </option>
                                   ))}
                                 </select>
@@ -1664,7 +1704,7 @@ function Tasks() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <span className="block text-gray-500">Creada por:</span>
-                      <span>{users.find(u => u.id === selectedTask.created_by)?.email || 'Desconocido'}</span>
+                      <span>{users.find(u => u.id === selectedTask.created_by)?.name || 'Desconocido'}</span>
                     </div>
                     <div>
                       <span className="block text-gray-500">Fecha de creación:</span>
@@ -1672,6 +1712,93 @@ function Tasks() {
                     </div>
                   </div>
                 </div>
+                
+                {/* Mostrar usuarios asignados en el modal de detalles */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Usuarios asignados:</h3>
+                  
+                  {editMode && isAdmin && (!subtasks[selectedTask.id] || subtasks[selectedTask.id].length === 0) ? (
+                    <div className="bg-gray-50 p-4 rounded-md">
+                      <p className="text-sm text-gray-600 mb-3">Selecciona los usuarios para esta tarea:</p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {getAvailableUsers(selectedTask.project_id).map((user) => (
+                          <div key={user.id} className="flex items-center space-x-2 bg-white px-3 py-2 rounded shadow-sm">
+                            <input
+                              type="checkbox"
+                              id={`assign-task-${user.id}`}
+                              checked={
+                                editedTask.assigned_users 
+                                  ? Array.isArray(editedTask.assigned_users) 
+                                    ? editedTask.assigned_users.includes(user.id)
+                                    : editedTask.assigned_users === user.id
+                                  : false
+                              }
+                              onChange={(e) => {
+                                let newAssignedUsers: string[] = Array.isArray(editedTask.assigned_users) 
+                                  ? [...editedTask.assigned_users]
+                                  : editedTask.assigned_users 
+                                    ? [String(editedTask.assigned_users)] 
+                                    : [];
+                                
+                                if (e.target.checked) {
+                                  if (!newAssignedUsers.includes(user.id)) {
+                                    newAssignedUsers.push(user.id);
+                                  }
+                                } else {
+                                  newAssignedUsers = newAssignedUsers.filter(id => id !== user.id);
+                                }
+                                
+                                setEditedTask({
+                                  ...editedTask,
+                                  assigned_users: newAssignedUsers
+                                });
+                              }}
+                              className="form-checkbox h-4 w-4 text-indigo-600 rounded"
+                            />
+                            <label htmlFor={`assign-task-${user.id}`} className="text-sm text-gray-700">
+                              {user.name || user.email}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                      {(!editedTask.assigned_users || 
+                        (Array.isArray(editedTask.assigned_users) && editedTask.assigned_users.length === 0)) && (
+                        <p className="text-xs text-amber-600 mt-2">
+                          Nota: Si no asignas usuarios, la tarea quedará sin asignar.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedTask.assigned_users ? (
+                        Array.isArray(selectedTask.assigned_users) ? 
+                          selectedTask.assigned_users.map(userId => (
+                            <span key={userId} className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
+                              {users.find(u => u.id === userId)?.name || userId}
+                            </span>
+                          ))
+                          : 
+                          <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
+                            {users.find(u => u.id === String(selectedTask.assigned_users))?.name || selectedTask.assigned_users}
+                          </span>
+                      ) : selectedTask.assigned_to ? (
+                        Array.isArray(selectedTask.assigned_to) ? 
+                          selectedTask.assigned_to.map(userId => (
+                            <span key={userId} className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
+                              {users.find(u => u.id === userId)?.name || userId}
+                            </span>
+                          ))
+                          : 
+                          <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
+                            {users.find(u => u.id === String(selectedTask.assigned_to))?.name || selectedTask.assigned_to}
+                          </span>
+                      ) : (
+                        <span className="text-gray-500">No hay usuarios asignados</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Subtareas asociadas:</h3>
                   <div className="space-y-2">
@@ -1801,7 +1928,7 @@ function Tasks() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-indigo-600">
-                                    {users.find(u => u.id === subtask.assigned_to)?.email || "No asignada"}
+                                    {users.find(u => u.id === subtask.assigned_to)?.name || "No asignada"}
                                   </span>
                                   <span className={`text-xs px-2 py-1 rounded ${
                                     subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
@@ -1878,7 +2005,8 @@ function Tasks() {
                           status: selectedTask.status,
                           created_by: selectedTask.created_by,
                           created_at: selectedTask.created_at,
-                          assigned_to: selectedTask.assigned_to
+                          assigned_to: selectedTask.assigned_to,
+                          assigned_users: selectedTask.assigned_users
                         });
                       }}
                       className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
@@ -2078,7 +2206,7 @@ function Tasks() {
                       </select>
                     ) : (
                       <p className="p-2 bg-gray-50 rounded-md">
-                        {users.find(u => u.id === selectedSubtask.assigned_to)?.email || "No asignada"}
+                        {users.find(u => u.id === selectedSubtask.assigned_to)?.name || "No asignada"}
                       </p>
                     )}
                   </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
@@ -126,12 +126,12 @@ function Management() {
     const refreshInterval = setInterval(() => {
       console.log('Auto-refrescando datos del tablero Kanban...');
       fetchData();
-    }, 5000); // 10000 ms = 10 segundos
+    }, 5000); // 5000 ms = 5 segundos
     
-    // Limpiar el intervalo cuando el componente se desmonte o autoRefresh cambie
+    // Limpiar el intervalo cuando el componente se desmonte o las dependencias cambien
     return () => clearInterval(refreshInterval);
-  }, [autoRefresh]);
-
+  }, [autoRefresh, selectedProject, selectedPriority, selectedAssignee]);
+  
   async function fetchProjects() {
     try {
       const { data, error } = await supabase
@@ -149,7 +149,7 @@ function Management() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email');
+        .select('id, email, name');
 
       if (error) throw error;
       setUsers(data || []);
@@ -180,6 +180,21 @@ function Management() {
       
       // Fetch subtasks
       let subtasksQuery = supabase.from('subtasks').select('*');
+      
+      // Si hay un proyecto seleccionado, filtrar subtareas por las tareas de ese proyecto
+      if (selectedProject && tasksData) {
+        const taskIds = tasksData.map(task => task.id);
+        if (taskIds.length > 0) {
+          subtasksQuery = subtasksQuery.in('task_id', taskIds);
+        } else {
+          // Si no hay tareas en el proyecto, no deberíamos mostrar subtareas
+          setTasks([]);
+          setSubtasks([]);
+          setRefreshing(false);
+          setLoading(false);
+          return;
+        }
+      }
       
       if (selectedAssignee) {
         subtasksQuery = subtasksQuery.eq('assigned_to', selectedAssignee);
@@ -566,7 +581,7 @@ function Management() {
     } else if (groupByAssignee) {
       if (groupId === 'unassigned') return 'No Asignado';
       const assignee = users.find(u => u.id === groupId);
-      return assignee ? assignee.email : 'Usuario Desconocido';
+      return assignee ? assignee.name : 'Usuario Desconocido';
     } else if (groupByDeadline) {
       const deadlineGroups: Record<string, string> = {
         'today': 'Hoy',
@@ -689,7 +704,7 @@ function Management() {
                                 <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
                                   <Users className="w-2.5 h-2.5 mr-1" />
                                   <span className="truncate max-w-[120px]">
-                                    {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignado'}
+                                    {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignado'}
                                   </span>
                                 </div>
                                 {parentTask && parentTask.project_id && (
@@ -1148,7 +1163,7 @@ function Management() {
                   >
                     <option value="">Todos los usuarios</option>
                     {users.map(user => (
-                      <option key={user.id} value={user.id}>{user.email}</option>
+                      <option key={user.id} value={user.id}>{user.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1554,7 +1569,7 @@ function Management() {
                         <div className="text-xs text-gray-500 mt-2">
                           Devuelta el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
                           {taskDetails.feedback.reviewed_by && (
-                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.email || 'Usuario'}</span>
+                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.name || 'Usuario'}</span>
                           )}
                         </div>
                       )}
@@ -1636,7 +1651,7 @@ function Management() {
                         <div className="text-xs text-gray-500 mt-2">
                           Aprobada el: {new Date(taskDetails.feedback.reviewed_at).toLocaleString()}
                           {taskDetails.feedback.reviewed_by && (
-                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.email || 'Usuario'}</span>
+                            <span> por {users.find(u => u.id === taskDetails.feedback.reviewed_by)?.name || 'Usuario'}</span>
                           )}
                         </div>
                       )}
@@ -1696,7 +1711,7 @@ function Management() {
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-600">Asignada a:</span>
                           <span className="font-medium">
-                            {users.find(u => u.id === taskDetails.assigned_to)?.email || 'No asignada'}
+                            {users.find(u => u.id === taskDetails.assigned_to)?.name || 'No asignada'}
                           </span>
                         </div>
                       )}
@@ -1719,7 +1734,7 @@ function Management() {
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-600">Creada por:</span>
                           <span className="font-medium">
-                            {users.find(u => u.id === taskDetails.created_by)?.email || 'Usuario'}
+                            {users.find(u => u.id === taskDetails.created_by)?.name || 'Usuario'}
                           </span>
                         </div>
                       )}
@@ -1892,7 +1907,7 @@ function Management() {
                               )}
                               <td className="px-4 py-2">
                                 <div className="text-sm text-gray-500">
-                                  {users.find(u => u.id === subtask.assigned_to)?.email || 'No asignada'}
+                                  {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignada'}
                                 </div>
                               </td>
                               <td className="px-4 py-2 text-sm text-gray-500">

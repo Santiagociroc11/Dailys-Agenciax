@@ -687,7 +687,7 @@ function Projects() {
                           className="mr-2"
                         />
                         <label htmlFor={`user-${u.id}`} className="text-sm">
-                          {u.email}
+                          {u.name}
                         </label>
                       </div>
                     ))}
@@ -859,7 +859,7 @@ function Projects() {
                             disabled={u.id === selectedProject.created_by} // El creador siempre está involucrado
                           />
                           <label htmlFor={`edit-user-${u.id}`} className="text-sm">
-                            {u.email}
+                            {u.name}
                             {u.id === selectedProject.created_by ? " (Creador)" : ""}
                           </label>
                         </div>
@@ -879,7 +879,7 @@ function Projects() {
                         <div className="flex flex-wrap gap-2">
                           {getUsersWithAccessToProject(selectedProject.id).map(usr => (
                             <span key={usr.id} className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs">
-                              {usr.email} {usr.id === selectedProject.created_by ? "(Creador)" : ""}
+                              {usr.name} {usr.id === selectedProject.created_by ? "(Creador)" : ""}
                             </span>
                           ))}
                         </div>
