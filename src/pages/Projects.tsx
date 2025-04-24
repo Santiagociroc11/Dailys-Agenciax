@@ -131,19 +131,22 @@ function Projects() {
 
   async function fetchProjectUsers(projectId: string) {
     try {
+      // En lugar de consultar una tabla project_users inexistente,
+      // obtenemos los usuarios que tienen este proyecto en su array assigned_projects
       const { data, error } = await supabase
-        .from('project_users')
-        .select('user_id')
-        .eq('project_id', projectId);
+        .from('users')
+        .select('id, name, email')
+        .filter('assigned_projects', 'cs', `{${projectId}}`); // Busca el projectId en el array
       
       if (error) throw error;
       
       setProjectUsers(prev => ({
         ...prev,
-        [projectId]: data?.map(item => item.user_id) || []
+        [projectId]: data?.map(user => user.id) || []
       }));
     } catch (error) {
       console.error(`Error al cargar usuarios del proyecto ${projectId}:`, error);
+      // No interrumpir la carga de la aplicación por este error
     }
   }
 
