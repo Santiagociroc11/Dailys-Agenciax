@@ -227,6 +227,36 @@ function SubtaskSequenceDisplay({
   );
 }
 
+// Función para generar un color consistente a partir del nombre o ID del proyecto
+function getProjectColor(projectName: string, projectId: string): { bg: string, text: string } {
+  // Lista de combinaciones de colores predefinidas para que se vean bien
+  const colorPairs = [
+    { bg: 'bg-blue-100', text: 'text-blue-800' },
+    { bg: 'bg-purple-100', text: 'text-purple-800' },
+    { bg: 'bg-green-100', text: 'text-green-800' },
+    { bg: 'bg-pink-100', text: 'text-pink-800' },
+    { bg: 'bg-yellow-100', text: 'text-yellow-800' },
+    { bg: 'bg-indigo-100', text: 'text-indigo-800' },
+    { bg: 'bg-red-100', text: 'text-red-800' },
+    { bg: 'bg-teal-100', text: 'text-teal-800' },
+    { bg: 'bg-orange-100', text: 'text-orange-800' },
+    { bg: 'bg-cyan-100', text: 'text-cyan-800' }
+  ];
+  
+  // Usar el nombre del proyecto o el ID para generar un índice consistente
+  const str = projectName || projectId || 'default';
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = hash & hash; // Convertir a entero de 32 bits
+  }
+  
+  // Asegurar que el índice sea positivo y dentro del rango
+  const index = Math.abs(hash) % colorPairs.length;
+  
+  return colorPairs[index];
+}
+
 export default function UserProjectView() {
   const { user } = useAuth();
   const { projectId } = useParams();
@@ -1235,7 +1265,7 @@ export default function UserProjectView() {
         .eq("user_id", user.id)
         .not("status", "eq", "completed");
 
-      // Solo aplicar filtro de proyecto si no estamos en “all”
+      // Solo aplicar filtro de proyecto si no estamos en "all"
       if (projectId !== "all") {
         assignmentsQ = assignmentsQ.in("project_id", [projectId]);
       }
@@ -1339,6 +1369,27 @@ export default function UserProjectView() {
       let totalDelayDays = 0;
       let delayCount = 0;
 
+      // Construir Set de project_ids para luego pedir sus nombres
+      const projectIds = new Set<string>();
+      
+      // Recopilar IDs de proyectos de todas las asignaciones
+      assignments?.forEach(a => {
+        if (a.project_id) projectIds.add(a.project_id);
+      });
+
+      // Cargar nombre de cada proyecto
+      const { data: projects, error: projectsError } = await supabase
+        .from('projects')
+        .select('id, name')
+        .in('id', Array.from(projectIds));
+      
+      if (projectsError) {
+        console.error('Error cargando nombres de proyectos:', projectsError);
+      }
+
+      const projectMap: Record<string, string> = {};
+      projects?.forEach(p => projectMap[p.id] = p.name);
+
       // ... resto del código como antes para obtener detalles de tareas normales ...
 
       // Obtener detalles de tareas normales
@@ -1379,6 +1430,7 @@ export default function UserProjectView() {
               status: taskStatus, // Usar el estado actualizado
               is_sequential: task.is_sequential,
               project_id: task.project_id,
+              projectName: projectMap[task.project_id] || 'Sin proyecto',
               type: 'task',
               assignment_date: assignment?.date || today,
               notes: taskNotes || null
@@ -1464,6 +1516,7 @@ export default function UserProjectView() {
               status: subtaskStatus, // Usar el estado actualizado
               is_sequential: false,
               project_id: subtask.tasks?.project_id || '',
+              projectName: projectMap[subtask.tasks?.project_id || ''] || 'Sin proyecto',
               type: 'subtask',
               assignment_date: assignment?.date || today,
               notes: subtaskNotes || null
@@ -1806,6 +1859,27 @@ export default function UserProjectView() {
         if (taskError) {
           console.error('Error al cargar tareas completadas:', taskError);
         } else if (taskData && taskData.length > 0) {
+          // Construir Set de project_ids para luego pedir sus nombres
+          const projectIds = new Set<string>();
+          
+          // Recopilar IDs de proyectos
+          taskData.forEach(task => {
+            if (task.project_id) projectIds.add(task.project_id);
+          });
+          
+          // Cargar nombre de cada proyecto
+          const { data: projects, error: projectsError } = await supabase
+            .from('projects')
+            .select('id, name')
+            .in('id', Array.from(projectIds));
+          
+          if (projectsError) {
+            console.error('Error cargando nombres de proyectos:', projectsError);
+          }
+
+          const projectMap: Record<string, string> = {};
+          projects?.forEach(p => projectMap[p.id] = p.name);
+
           const formattedTasks = taskData.map(task => {
             // Buscar la asignación correspondiente para obtener metadata
             const assignment = completedTaskAssignments.find(a =>
@@ -1824,6 +1898,7 @@ export default function UserProjectView() {
               status: 'completed',
               is_sequential: task.is_sequential,
               project_id: task.project_id,
+              projectName: projectMap[task.project_id] || 'Sin proyecto',
               type: 'task' as const,
               assignment_date: assignment?.date || '',
               notes: assignment?.notes || task.notes || '',
@@ -1849,6 +1924,27 @@ export default function UserProjectView() {
         if (subtaskError) {
           console.error('Error al cargar subtareas completadas:', subtaskError);
         } else if (subtaskData && subtaskData.length > 0) {
+          // Construir Set de project_ids para luego pedir sus nombres
+          const projectIds = new Set<string>();
+          
+          // Recopilar IDs de proyectos de subtareas
+          subtaskData.forEach(subtask => {
+            if (subtask.tasks?.project_id) projectIds.add(subtask.tasks.project_id);
+          });
+          
+          // Cargar nombre de cada proyecto
+          const { data: projects, error: projectsError } = await supabase
+            .from('projects')
+            .select('id, name')
+            .in('id', Array.from(projectIds));
+          
+          if (projectsError) {
+            console.error('Error cargando nombres de proyectos:', projectsError);
+          }
+
+          const projectMap: Record<string, string> = {};
+          projects?.forEach(p => projectMap[p.id] = p.name);
+
           const formattedSubtasks = subtaskData.map(subtask => {
             // Buscar la asignación correspondiente para obtener metadata
             const assignment = completedTaskAssignments.find(a =>
@@ -1868,6 +1964,7 @@ export default function UserProjectView() {
               status: 'completed',
               is_sequential: false,
               project_id: subtask.tasks?.project_id || '',
+              projectName: projectMap[subtask.tasks?.project_id || ''] || 'Sin proyecto',
               type: 'subtask' as const,
               assignment_date: assignment?.date || '',
               notes: assignment?.notes || subtask.notes || '',
@@ -2285,7 +2382,16 @@ export default function UserProjectView() {
                         className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500"
                       />
                     </div>
-                    <div className="text-sm text-gray-600">{task.projectName}</div>
+                    <div className="text-sm text-gray-700 py-1">
+                      {(() => {
+                        const { bg, text } = getProjectColor(task.projectName || 'Sin proyecto', task.project_id);
+                        return (
+                          <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                            {task.projectName || 'Sin proyecto'}
+                          </span>
+                        );
+                      })()}
+                    </div>
                     <div className="font-medium">
                       {task.type === 'subtask' ? (
                         <div>
@@ -2450,6 +2556,16 @@ export default function UserProjectView() {
                     <div className="divide-y divide-orange-200">
                       {returnedTaskItems.map((task) => (
                         <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-orange-50 px-3">
+                          <div className="text-sm text-gray-700 py-1">
+                            {(() => {
+                              const { bg, text } = getProjectColor(task.projectName || 'Sin proyecto', task.project_id);
+                              return (
+                                <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                                  {task.projectName || 'Sin proyecto'}
+                                </span>
+                              );
+                            })()}
+                          </div>
                           <div className="font-medium">
                             {task.type === 'subtask' ? (
                               <div>
@@ -2566,7 +2682,8 @@ export default function UserProjectView() {
 
                   <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
                     {/* Task list header */}
-                    <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
+                    <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
+                      <div>PROYECTO</div>
                       <div>ACTIVIDAD</div>
                       <div>DESCRIPCION</div>
                       <div>INICIO</div>
@@ -2585,7 +2702,19 @@ export default function UserProjectView() {
                         const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
 
                         return (
-                          <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
+                          <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
+                            <div className="text-sm text-gray-700 py-1">
+                              {(() => {
+                                const { bg, text } = getProjectColor(task.projectName || 'Sin proyecto', task.project_id);
+                                return (
+                                  <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                                    {task.projectName || 'Sin proyecto'}
+                                  </span>
+                                );
+                              })()}
+                            </div>
+
+
                             <div className="font-medium">
                               {task.type === 'subtask' ? (
                                 <div>
@@ -2698,7 +2827,8 @@ export default function UserProjectView() {
 
               <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
                 {/* Task list header */}
-                <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                  <div>PROYECTO</div>
                   <div>ACTIVIDAD</div>
                   <div>DESCRIPCION</div>
                   <div>INICIO</div>
@@ -2717,7 +2847,19 @@ export default function UserProjectView() {
                     </div>
                   ) : assignedTaskItems.length > 0 ? (
                     assignedTaskItems.map((task) => (
-                      <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                      <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                        <div className="text-sm text-gray-700 py-1">
+                          {(() => {
+                            const { bg, text } = getProjectColor(task.projectName || 'Sin proyecto', task.project_id);
+                            return (
+                              <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                                {task.projectName || 'Sin proyecto'}
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+
                         <div className="font-medium">
                           {task.type === 'subtask' ? (
                             <div>
@@ -2850,7 +2992,8 @@ export default function UserProjectView() {
 
               <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
                 {/* Task list header */}
-                <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                  <div>PROYECTO</div>
                   <div>ACTIVIDAD</div>
                   <div>DESCRIPCION</div>
                   <div>FECHA FIN</div>
@@ -2877,7 +3020,19 @@ export default function UserProjectView() {
                       const completionDate = task.assignment_date || '-';
 
                       return (
-                        <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                        <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                          <div className="text-sm text-gray-700 py-1">
+                            {(() => {
+                              const { bg, text } = getProjectColor(task.projectName || 'Sin proyecto', task.project_id);
+                              return (
+                                <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                                  {task.projectName || 'Sin proyecto'}
+                                </span>
+                              );
+                            })()}
+                          </div>
+
+
                           <div className="font-medium">
                             {task.type === 'subtask' ? (
                               <div>
@@ -3129,12 +3284,19 @@ export default function UserProjectView() {
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-medium">
-                {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.subtask_title ?
-                  `${selectedTaskDetails.subtask_title} - ${selectedTaskDetails.title}` :
-                  selectedTaskDetails.title
-                }
-              </h3>
+              <div>
+                <h3 className="text-lg font-medium">
+                  {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.subtask_title ?
+                    `${selectedTaskDetails.subtask_title} - ${selectedTaskDetails.title}` :
+                    selectedTaskDetails.title
+                  }
+                </h3>
+                {selectedTaskDetails.projectName && (
+                  <div className="text-sm text-blue-600 mt-1">
+                    Proyecto: {selectedTaskDetails.projectName}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={closeTaskDetailModal}
                 className="text-gray-400 hover:text-gray-500 focus:outline-none"
@@ -3243,9 +3405,16 @@ export default function UserProjectView() {
               {/* Proyecto */}
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-1">Proyecto:</h4>
-                <p className="text-blue-600">
-                  {selectedTaskDetails.projectName || 'No especificado'}
-                </p>
+                {selectedTaskDetails && 
+                  (() => {
+                    const { bg, text } = getProjectColor(selectedTaskDetails.projectName || 'Sin proyecto', selectedTaskDetails.project_id);
+                    return (
+                      <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>
+                        {selectedTaskDetails.projectName || 'No especificado'}
+                      </span>
+                    );
+                  })()
+                }
               </div>
 
               {/* Secuencial */}
