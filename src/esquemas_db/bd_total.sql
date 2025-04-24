@@ -398,6 +398,52 @@ BEGIN
 END;
 
 $$;
+CREATE VIEW "public"."inconsistent_task_assignments"
+AS
+ SELECT twa.id AS assignment_id,
+    twa.task_id,
+    twa.task_type,
+    twa.project_id AS assignment_project_id,
+    t.project_id AS task_project_id,
+    'task'::text AS inconsistency_type
+   FROM (task_work_assignments twa
+     JOIN tasks t ON ((twa.task_id = t.id)))
+  WHERE (((twa.task_type)::text = 'task'::text) AND (twa.project_id IS DISTINCT FROM t.project_id))
+UNION ALL
+ SELECT twa.id AS assignment_id,
+    twa.task_id,
+    twa.task_type,
+    twa.project_id AS assignment_project_id,
+    t.project_id AS task_project_id,
+    'subtask'::text AS inconsistency_type
+   FROM ((task_work_assignments twa
+     JOIN subtasks s ON ((twa.task_id = s.id)))
+     JOIN tasks t ON ((s.task_id = t.id)))
+  WHERE (((twa.task_type)::text = 'subtask'::text) AND (twa.project_id IS DISTINCT FROM t.project_id));;
+CREATE VIEW "public"."daily_work_statistics"
+AS
+ SELECT task_work_assignments.user_id,
+    task_work_assignments.date,
+    count(task_work_assignments.id) AS total_tasks,
+    sum(
+        CASE
+            WHEN ((task_work_assignments.status)::text = 'completed'::text) THEN 1
+            ELSE 0
+        END) AS completed_tasks,
+    sum(task_work_assignments.estimated_duration) AS total_estimated_minutes,
+    sum(task_work_assignments.actual_duration) AS total_actual_minutes,
+    (sum(
+        CASE
+            WHEN (task_work_assignments.actual_duration IS NOT NULL) THEN task_work_assignments.actual_duration
+            ELSE 0
+        END) / NULLIF(sum(
+        CASE
+            WHEN (task_work_assignments.actual_duration IS NOT NULL) THEN task_work_assignments.estimated_duration
+            ELSE 0
+        END), 0)) AS efficiency_ratio
+   FROM task_work_assignments
+  GROUP BY task_work_assignments.user_id, task_work_assignments.date
+  ORDER BY task_work_assignments.date DESC;;
 CREATE TRIGGER update_task_assigned_users_trigger AFTER INSERT OR DELETE OR UPDATE ON public.subtasks FOR EACH ROW EXECUTE FUNCTION update_task_assigned_users();
 CREATE TRIGGER update_task_duration_trigger AFTER INSERT OR DELETE OR UPDATE ON public.subtasks FOR EACH ROW EXECUTE FUNCTION update_task_duration();
 CREATE TRIGGER update_parent_task_status AFTER UPDATE OF status ON public.subtasks FOR EACH ROW WHEN (((old.status)::text IS DISTINCT FROM (new.status)::text)) EXECUTE FUNCTION update_task_status_from_subtasks();

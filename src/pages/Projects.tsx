@@ -340,29 +340,56 @@ function Projects() {
     }
     
     try {
-      // First delete all task work assignments related to this project
+      // 1. Primero eliminar las asignaciones de trabajo
       const { error: workAssignmentsError } = await supabase
         .from('task_work_assignments')
         .delete()
         .eq('project_id', selectedProject.id);
       
       if (workAssignmentsError) {
-        console.error("Error al eliminar asignaciones de trabajo del proyecto:", workAssignmentsError);
+        console.error("Error al eliminar asignaciones de trabajo:", workAssignmentsError);
         throw workAssignmentsError;
       }
       
-      // Second delete all tasks associated with this project
-      const { error: tasksError } = await supabase
+      // 2. Obtener todas las tareas del proyecto
+      const { data: projectTasks, error: tasksQueryError } = await supabase
         .from('tasks')
-        .delete()
+        .select('id')
         .eq('project_id', selectedProject.id);
       
-      if (tasksError) {
-        console.error("Error al eliminar tareas del proyecto:", tasksError);
-        throw tasksError;
+      if (tasksQueryError) {
+        console.error("Error al consultar tareas del proyecto:", tasksQueryError);
+        throw tasksQueryError;
       }
       
-      // Then delete the project itself
+      // 3. Si hay tareas, eliminar primero sus subtareas
+      if (projectTasks && projectTasks.length > 0) {
+        const taskIds = projectTasks.map(task => task.id);
+        
+        // Eliminar subtareas asociadas a estas tareas
+        const { error: subtasksError } = await supabase
+          .from('subtasks')
+          .delete()
+          .in('task_id', taskIds);
+        
+        if (subtasksError) {
+          console.error("Error al eliminar subtareas:", subtasksError);
+          throw subtasksError;
+        }
+        
+        // 4. Ahora eliminar las tareas
+        const { error: tasksError } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('project_id', selectedProject.id);
+        
+        if (tasksError) {
+          console.error("Error al eliminar tareas:", tasksError);
+          throw tasksError;
+        }
+      }
+      
+      // 5. Finalmente eliminar el proyecto
       const { error } = await supabase
         .from('projects')
         .delete()
@@ -373,17 +400,15 @@ function Projects() {
         throw error;
       }
       
-      // Remove project from assigned_projects array for all users
+      // 6. Actualizar asignaciones de usuario
       for (const usr of users) {
         if (userProjectAssignments[usr.id]?.includes(selectedProject.id)) {
           const currentProjects = userProjectAssignments[usr.id] || [];
-          const updatedProjects = currentProjects.filter((id: string) => id !== selectedProject.id);
+          const updatedProjects = currentProjects.filter((id) => id !== selectedProject.id);
           
           const { error: updateError } = await supabase
             .from('users')
-            .update({ 
-              assigned_projects: updatedProjects 
-            })
+            .update({ assigned_projects: updatedProjects })
             .eq('id', usr.id);
             
           if (updateError) {
@@ -394,15 +419,11 @@ function Projects() {
       
       await fetchProjects();
       setShowDetailModal(false);
-      
-      // Mostrar mensaje de éxito
       alert('Proyecto eliminado correctamente');
     } catch (error) {
       console.error('Error al eliminar el proyecto:', error);
       setError('Error al eliminar el proyecto. Por favor, inténtalo de nuevo.');
-      
-      // Mostrar mensaje de error más claro
-      alert('No se pudo eliminar el proyecto. Puede que existan otras dependencias en la base de datos.');
+      alert('No se pudo eliminar el proyecto. Error: ' + JSON.stringify(error));
     }
   }
 
