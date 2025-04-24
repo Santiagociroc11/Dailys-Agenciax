@@ -718,7 +718,7 @@ export default function UserProjectView() {
 
       // 10. Convertir subtareas al formato de tarea para mostrarlas
       const subtasksAsTaskItems: Task[] = allRelevantSubtasks.map(subtask => {
- 
+      
 
         return {
           id: `subtask-${subtask.id}`,
@@ -765,6 +765,7 @@ export default function UserProjectView() {
         // Verificar si esta tarea ya está asignada hoy
         const isAlreadyAssigned = dailyTasksIds?.includes(idToCompare) || false;
 
+        // SUPER IMPORTANTE: log detallado para depuración
 
 
         // Retornar el resultado de la comparación (false significa que se filtra = no aparece)
