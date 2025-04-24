@@ -77,25 +77,16 @@ export default function UserSidebar() {
             <span className="font-medium">PROYECTOS</span>
           </div>
           <div className="mt-2 pl-8 space-y-1">
-            {loading ? (
-              <p className="text-sm text-gray-500">Cargando...</p>
-            ) : projects.length > 0 ? (
-              projects.map((project) => (
-                <NavLink
-                  key={project.id}
-                  to={`/user/projects/${project.id}`}
-                  className={({ isActive }) =>
-                    `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 ${
-                      isActive ? 'bg-gray-100 font-medium' : ''
-                    }`
-                  }
-                >
-                  {project.name}
-                </NavLink>
-              ))
-            ) : (
-              <p className="text-sm text-gray-500">No hay proyectos asignados</p>
-            )}
+          <NavLink
+            to="/user/projects/all"
+            className={({ isActive }) =>
+              `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 ${
+                isActive ? 'bg-gray-100 font-medium' : ''
+              }`
+            }
+          >
+            Todos los proyectos
+          </NavLink>
           </div>
         </div>
       </nav>
