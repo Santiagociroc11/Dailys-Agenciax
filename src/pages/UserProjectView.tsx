@@ -318,6 +318,14 @@ export default function UserProjectView() {
   }, [projectId]);
 
   useEffect(() => {
+    if (activeTab === 'gestion' && activeGestionSubTab === 'pendientes') {
+      setLoadingAssigned(true);
+      fetchAssignedTasks();
+    }
+  }, [activeTab, activeGestionSubTab]);
+
+
+  useEffect(() => {
     if (projectId && dailyTasksIds !== undefined) {
       console.log('🔄 [DEBUG] dailyTasksIds actualizados:', dailyTasksIds?.length || 0);
 
@@ -539,15 +547,15 @@ export default function UserProjectView() {
       setIsDataInitialized(true);
       return;
     }
-  
+
     try {
       setLoading(true);
       setIsFiltering(true);
       setError(null);
       console.log('🔍 [DEBUG] Iniciando fetchProjectTasksAndSubtasks...');
-  
+
       const isAll = projectId === 'all';
-  
+
       // 1️⃣ Todas las tareas (sin importar si están asignadas al usuario)
       let allTasksQ = supabase
         .from('tasks')
@@ -559,7 +567,7 @@ export default function UserProjectView() {
       }
       const { data: allTasksData, error: allTasksError } = await allTasksQ;
       if (allTasksError) throw allTasksError;
-  
+
       // 2️⃣ Tareas que ya están asignadas al usuario (pendientes/in_progress)
       let taskDataQ = supabase
         .from('tasks')
@@ -572,7 +580,7 @@ export default function UserProjectView() {
       }
       const { data: taskData, error: taskError } = await taskDataQ;
       if (taskError) throw taskError;
-  
+
       // 3️⃣ Todas las subtareas del/los proyecto(s)
       let allSubtasksQ = supabase
         .from('subtasks')
@@ -589,7 +597,7 @@ export default function UserProjectView() {
       }
       const { data: allSubtasksData, error: allSubtasksError } = await allSubtasksQ;
       if (allSubtasksError) throw allSubtasksError;
-  
+
       // 4️⃣ Construir Set de project_ids para luego pedir sus nombres
       const projectIds = new Set<string>();
       allTasksData?.forEach(t => {
@@ -599,17 +607,17 @@ export default function UserProjectView() {
         const pid = s.tasks?.project_id;
         if (pid) projectIds.add(pid);
       });
-  
+
       // 5️⃣ Cargar nombre de cada proyecto
       const { data: projects, error: projectsError } = await supabase
         .from('projects')
         .select('id, name')
         .in('id', Array.from(projectIds));
       if (projectsError) console.error('Error cargando proyectos:', projectsError);
-  
-      const projectMap: Record<string,string> = {};
+
+      const projectMap: Record<string, string> = {};
       projects?.forEach(p => projectMap[p.id] = p.name);
-  
+
       // 6️⃣ Subtareas asignadas al usuario
       let subtaskDataQ = supabase
         .from('subtasks')
@@ -627,27 +635,27 @@ export default function UserProjectView() {
       }
       const { data: subtaskData, error: subtaskError } = await subtaskDataQ;
       if (subtaskError) throw subtaskError;
-  
+
       // 7️⃣ Filtrar tareas sin subtareas propias
       const tasksWithSubs = new Set<string>();
       allSubtasksData?.forEach(s => tasksWithSubs.add(s.task_id));
       const tasksWithoutSubs = taskData?.filter(t => !tasksWithSubs.has(t.id)) || [];
-  
+
       // 8️⃣ Agrupar las subtareas del usuario por tarea padre
       const grouped: Record<string, Subtask[]> = {};
       subtaskData?.forEach(s => {
         if (!grouped[s.task_id]) grouped[s.task_id] = [];
         grouped[s.task_id].push({ ...s, task_title: s.tasks?.title || '—' });
       });
-  
+
       // 9️⃣ Seleccionar sólo las subtareas relevantes (siguiente si es secuencial, todas si no)
       const relevantSubs: Subtask[] = [];
       Object.entries(grouped).forEach(([taskId, subs]) => {
         if (subs[0].tasks?.is_sequential) {
           const allForThis = allSubtasksData!
             .filter(x => x.task_id === taskId)
-            .sort((a,b) => (a.sequence_order||0) - (b.sequence_order||0));
-          const idx = allForThis.findIndex(x => !['completed','approved'].includes(x.status));
+            .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+          const idx = allForThis.findIndex(x => !['completed', 'approved'].includes(x.status));
           if (idx >= 0 && allForThis[idx].assigned_to === user.id) {
             relevantSubs.push(allForThis[idx]);
           }
@@ -655,7 +663,7 @@ export default function UserProjectView() {
           relevantSubs.push(...subs);
         }
       });
-  
+
       // 🔟 Mapear subtareas a Task[]
       const subtasksAsTasks: Task[] = relevantSubs.map(s => ({
         id: `subtask-${s.id}`,
@@ -670,10 +678,10 @@ export default function UserProjectView() {
         status: s.status,
         is_sequential: false,
         project_id: s.tasks?.project_id || '',
-        projectName: projectMap[s.tasks?.project_id||''] || 'Sin proyecto',
+        projectName: projectMap[s.tasks?.project_id || ''] || 'Sin proyecto',
         type: 'subtask'
       }));
-  
+
       // 1️⃣1️⃣ Mapear tareas a Task[]
       const tasksAsTasks: Task[] = tasksWithoutSubs.map(t => ({
         id: t.id,
@@ -687,38 +695,38 @@ export default function UserProjectView() {
         status: t.status,
         is_sequential: t.is_sequential,
         project_id: t.project_id || '',
-        projectName: projectMap[t.project_id||''] || 'Sin proyecto',
+        projectName: projectMap[t.project_id || ''] || 'Sin proyecto',
         type: 'task'
       }));
-  
+
       // 1️⃣2️⃣ Filtrar las ya asignadas hoy o en curso
       const available = [...tasksAsTasks, ...subtasksAsTasks].filter(task => {
         const key = task.type === 'subtask'
           ? `subtask-${task.original_id}`
           : task.id;
-        const already   = dailyTasksIds?.includes(key);
-        const inProg    = ['assigned','in_progress'].includes(task.status);
+        const already = dailyTasksIds?.includes(key);
+        const inProg = ['assigned', 'in_progress'].includes(task.status);
         return !already && !inProg;
       });
-  
+
       // 1️⃣3️⃣ Ordenar
-      const sorted = available.sort((a,b) => {
+      const sorted = available.sort((a, b) => {
         if (sortBy === 'deadline') {
           const da = a.deadline ? +new Date(a.deadline) : Infinity;
           const db = b.deadline ? +new Date(b.deadline) : Infinity;
-          return sortOrder==='asc' ? da-db : db-da;
+          return sortOrder === 'asc' ? da - db : db - da;
         }
         if (sortBy === 'priority') {
-          const V = { high:3, medium:2, low:1 };
-          return sortOrder==='asc'
-            ? V[a.priority]-V[b.priority]
-            : V[b.priority]-V[a.priority];
+          const V = { high: 3, medium: 2, low: 1 };
+          return sortOrder === 'asc'
+            ? V[a.priority] - V[b.priority]
+            : V[b.priority] - V[a.priority];
         }
-        return sortOrder==='asc'
+        return sortOrder === 'asc'
           ? a.estimated_duration - b.estimated_duration
           : b.estimated_duration - a.estimated_duration;
       });
-  
+
       console.log('✅ [DEBUG] fetchProjectTasksAndSubtasks finalizado, tareas disponibles:', sorted.length);
       setTaskItems(sorted);
       setIsDataInitialized(true);
@@ -733,7 +741,7 @@ export default function UserProjectView() {
       setLoading(false);
     }
   }
-  
+
 
   function handleTaskSelection(taskId: string) {
     setSelectedTasks(prev => {
@@ -1221,17 +1229,19 @@ export default function UserProjectView() {
       const today = format(new Date(), 'yyyy-MM-dd');
 
       // 1. Primero, obtener todas las asignaciones de trabajo desde task_work_assignments
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from('task_work_assignments')
-        .select('*')
-        .eq('user_id', user.id)
-        .in(
-          'project_id',
-          projectId === 'all'
-            ? user.assigned_projects || []    // asumiendo que el contexto Auth te da assigned_projects
-            : [projectId]
-        )
-        .not('status', 'eq', 'completed'); // Excluir las tareas completadas
+      let assignmentsQ = supabase
+        .from("task_work_assignments")
+        .select("*")
+        .eq("user_id", user.id)
+        .not("status", "eq", "completed");
+
+      // Solo aplicar filtro de proyecto si no estamos en “all”
+      if (projectId !== "all") {
+        assignmentsQ = assignmentsQ.in("project_id", [projectId]);
+      }
+
+      const { data: assignments, assignmentsError } = await assignmentsQ;
+
 
       if (assignmentsError) {
         console.error('Error al cargar asignaciones:', assignmentsError);
