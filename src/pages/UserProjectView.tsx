@@ -1177,7 +1177,8 @@ export default function UserProjectView() {
       const { error: taskUpdateError } = await supabase
         .from(table)
         .update({ status: newStatus })
-        .eq('id', originalId);
+        .eq('id', originalId)
+        .eq('project_id', projectId);  // Añadir filtro por project_id
 
       if (taskUpdateError) throw taskUpdateError;
 
@@ -1195,7 +1196,8 @@ export default function UserProjectView() {
         .eq('user_id', user.id)
         .eq('date', today)
         .eq('task_id', originalId)
-        .eq('task_type', taskType);
+        .eq('task_type', taskType)
+        .eq('project_id', projectId);  // Añadir filtro por project_id
 
       if (assignmentUpdateError) {
         console.error('Error al actualizar estado en asignaciones:', assignmentUpdateError);
@@ -1234,7 +1236,8 @@ export default function UserProjectView() {
               const { error: updateParentError } = await supabase
                 .from('tasks')
                 .update({ status: 'completed' })
-                .eq('id', parentTaskId);
+                .eq('id', parentTaskId)
+                .eq('project_id', projectId);  // Añadir filtro por project_id
 
               if (updateParentError) {
                 console.error('Error al actualizar estado de tarea principal:', updateParentError);
@@ -1255,7 +1258,8 @@ export default function UserProjectView() {
               const { error: updateParentError } = await supabase
                 .from('tasks')
                 .update({ status: 'in_progress' })
-                .eq('id', parentTaskId);
+                .eq('id', parentTaskId)
+                .eq('project_id', projectId);  // Añadir filtro por project_id
 
               if (updateParentError) {
                 console.error('Error al actualizar estado de tarea principal:', updateParentError);
@@ -1647,7 +1651,8 @@ export default function UserProjectView() {
       const { error: taskError } = await supabase
         .from('tasks')
         .update({ status: newStatus })
-        .eq('id', parentId);
+        .eq('id', parentId)
+        .eq('project_id', projectId);  // Añadir filtro por project_id
       if (taskError) throw taskError;
     } catch (e) {
       console.error('Error actualizando tarea padre:', e);
@@ -1710,7 +1715,8 @@ export default function UserProjectView() {
             status: selectedStatus,
             notes: typeof metadata === 'string' ? metadata : JSON.stringify(metadata)
           })
-          .eq('id', originalId),
+          .eq('id', originalId)
+          .eq('project_id', projectId),  // Añadir filtro por project_id
 
         // Actualizar la asignación en task_work_assignments
         supabase
@@ -1726,6 +1732,7 @@ export default function UserProjectView() {
           .eq('user_id', user!.id)
           .eq('task_id', originalId)
           .eq('task_type', taskType)
+          .eq('project_id', projectId)  // Añadir filtro por project_id
           .select()
       ];
 

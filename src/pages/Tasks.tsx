@@ -404,10 +404,30 @@ function Tasks() {
   async function handleStatusUpdate(subtaskId: string, newStatus: 'pending' | 'in_progress' | 'completed' | 'approved') {
     try {
       console.log('Updating subtask status:', { subtaskId, newStatus });
+      
+      // Primero, obtener la subtarea para conocer su task_id
+      const { data: subtaskData, error: subtaskFetchError } = await supabase
+        .from('subtasks')
+        .select(`*, tasks(project_id)`)
+        .eq('id', subtaskId)
+        .single();
+        
+      if (subtaskFetchError) {
+        console.error('Error fetching subtask info:', subtaskFetchError);
+        throw subtaskFetchError;
+      }
+      
+      if (!subtaskData?.tasks?.project_id) {
+        console.error('No se encontró el project_id para esta subtarea');
+        throw new Error('No se encontró el project_id para esta subtarea');
+      }
+      
+      // Actualizar el estado con el filtro de task_id (que indirectamente filtra por proyecto)
       const { error } = await supabase
         .from('subtasks')
         .update({ status: newStatus })
-        .eq('id', subtaskId);
+        .eq('id', subtaskId)
+        .eq('task_id', subtaskData.task_id);
 
       if (error) {
         console.error('Error updating subtask status:', error);

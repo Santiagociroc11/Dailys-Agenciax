@@ -366,6 +366,24 @@ function Management() {
         updateData.feedback = feedbackData;
       }
       
+      // Encontrar el item en los datos locales para obtener el project_id
+      let projectId: string | null = null;
+      
+      if (isSubtask) {
+        const subtask = subtasks.find(st => st.id === itemId);
+        if (subtask) {
+          const parentTask = tasks.find(t => t.id === subtask.task_id);
+          projectId = parentTask?.project_id || null;
+        }
+      } else {
+        const task = tasks.find(t => t.id === itemId);
+        projectId = task?.project_id || null;
+      }
+      
+      if (!projectId) {
+        console.error('No se pudo determinar el project_id');
+      }
+      
       // Actualizar primero la UI localmente (optimistic update)
       if (isSubtask) {
         setSubtasks(prev => prev.map(subtask => 
@@ -392,10 +410,23 @@ function Management() {
       }
       
       // Luego actualizar en el servidor
-      const { error } = await supabase
+      let query = supabase
         .from(table)
         .update(updateData)
         .eq('id', itemId);
+        
+      // Si tenemos project_id, filtrar también por él
+      if (projectId && !isSubtask) {
+        query = query.eq('project_id', projectId);
+      } else if (projectId && isSubtask) {
+        // En caso de subtarea, necesitaríamos filtrar por task_id que ya sabemos que pertenece al proyecto correcto
+        const subtask = subtasks.find(st => st.id === itemId);
+        if (subtask) {
+          query = query.eq('task_id', subtask.task_id);
+        }
+      }
+      
+      const { error } = await query;
       
       if (error) {
         // Si hay error, revertir la actualización local
@@ -463,20 +494,40 @@ function Management() {
   // Función para actualizar el task_work_assignment
   async function updateTaskWorkAssignment(itemId: string, itemType: 'task' | 'subtask') {
     try {
+      // Encontrar el project_id correspondiente
+      let projectId: string | null = null;
+      
+      if (itemType === 'subtask') {
+        const subtask = subtasks.find(st => st.id === itemId);
+        if (subtask) {
+          const parentTask = tasks.find(t => t.id === subtask.task_id);
+          projectId = parentTask?.project_id || null;
+        }
+      } else {
+        const task = tasks.find(t => t.id === itemId);
+        projectId = task?.project_id || null;
+      }
+      
       // Obtener la asignación actual para acceder a las notas existentes
-      const { data: assignmentData, error: fetchError } = await supabase
+      let query = supabase
         .from('task_work_assignments')
         .select('id, notes')
         .eq('task_id', itemId)
-        .eq('task_type', itemType)
-        .single();
+        .eq('task_type', itemType);
+        
+      // Añadir filtro por project_id si está disponible
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+      
+      const { data: assignmentData, error: fetchError } = await query.single();
       
       if (fetchError) {
         console.error('Error al buscar task_work_assignment:', fetchError);
         toast.error('Error al buscar la asignación de trabajo');
         return;
       }
-      
+
       if (!assignmentData) {
         console.error('No se encontró la asignación de trabajo');
         toast.error('No se encontró la asignación de trabajo');
