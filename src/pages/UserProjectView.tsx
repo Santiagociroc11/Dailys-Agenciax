@@ -651,6 +651,7 @@ export default function UserProjectView() {
       const taskToSubtasks: Record<string, Subtask[]> = {};
       subtaskData?.forEach(subtask => {
 
+
         if (!taskToSubtasks[subtask.task_id]) {
           taskToSubtasks[subtask.task_id] = [];
         }
@@ -717,6 +718,7 @@ export default function UserProjectView() {
 
       // 10. Convertir subtareas al formato de tarea para mostrarlas
       const subtasksAsTaskItems: Task[] = allRelevantSubtasks.map(subtask => {
+ 
 
         return {
           id: `subtask-${subtask.id}`,
@@ -763,6 +765,10 @@ export default function UserProjectView() {
         // Verificar si esta tarea ya está asignada hoy
         const isAlreadyAssigned = dailyTasksIds?.includes(idToCompare) || false;
 
+
+
+        // Retornar el resultado de la comparación (false significa que se filtra = no aparece)
+        // SOLO filtramos por si ya está asignada hoy, mostramos todas las demás sin importar estado o fecha
         return !isAlreadyAssigned;
       });
 
@@ -1153,8 +1159,7 @@ export default function UserProjectView() {
       const { error: taskUpdateError } = await supabase
         .from(table)
         .update({ status: newStatus })
-        .eq('id', originalId)
-        .eq('project_id', projectId);  // Añadir filtro por project_id
+        .eq('id', originalId);
 
       if (taskUpdateError) throw taskUpdateError;
 
@@ -1172,8 +1177,7 @@ export default function UserProjectView() {
         .eq('user_id', user.id)
         .eq('date', today)
         .eq('task_id', originalId)
-        .eq('task_type', taskType)
-        .eq('project_id', projectId);  // Añadir filtro por project_id
+        .eq('task_type', taskType);
 
       if (assignmentUpdateError) {
         console.error('Error al actualizar estado en asignaciones:', assignmentUpdateError);
@@ -1212,8 +1216,7 @@ export default function UserProjectView() {
               const { error: updateParentError } = await supabase
                 .from('tasks')
                 .update({ status: 'completed' })
-                .eq('id', parentTaskId)
-                .eq('project_id', projectId);  // Añadir filtro por project_id
+                .eq('id', parentTaskId);
 
               if (updateParentError) {
                 console.error('Error al actualizar estado de tarea principal:', updateParentError);
@@ -1234,8 +1237,7 @@ export default function UserProjectView() {
               const { error: updateParentError } = await supabase
                 .from('tasks')
                 .update({ status: 'in_progress' })
-                .eq('id', parentTaskId)
-                .eq('project_id', projectId);  // Añadir filtro por project_id
+                .eq('id', parentTaskId);
 
               if (updateParentError) {
                 console.error('Error al actualizar estado de tarea principal:', updateParentError);
@@ -1627,8 +1629,7 @@ export default function UserProjectView() {
       const { error: taskError } = await supabase
         .from('tasks')
         .update({ status: newStatus })
-        .eq('id', parentId)
-        .eq('project_id', projectId);  // Añadir filtro por project_id
+        .eq('id', parentId);
       if (taskError) throw taskError;
     } catch (e) {
       console.error('Error actualizando tarea padre:', e);
@@ -1691,8 +1692,7 @@ export default function UserProjectView() {
             status: selectedStatus,
             notes: typeof metadata === 'string' ? metadata : JSON.stringify(metadata)
           })
-          .eq('id', originalId)
-          .eq('project_id', projectId),  // Añadir filtro por project_id
+          .eq('id', originalId),
 
         // Actualizar la asignación en task_work_assignments
         supabase
@@ -1708,7 +1708,6 @@ export default function UserProjectView() {
           .eq('user_id', user!.id)
           .eq('task_id', originalId)
           .eq('task_type', taskType)
-          .eq('project_id', projectId)  // Añadir filtro por project_id
           .select()
       ];
 
