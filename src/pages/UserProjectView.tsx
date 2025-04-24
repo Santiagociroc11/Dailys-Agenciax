@@ -650,11 +650,6 @@ export default function UserProjectView() {
       // Agrupar subtareas por tarea_id
       const taskToSubtasks: Record<string, Subtask[]> = {};
       subtaskData?.forEach(subtask => {
-        console.log('Procesando subtarea:', {
-          id: subtask.id,
-          title: subtask.title,
-          task: subtask.tasks
-        });
 
         if (!taskToSubtasks[subtask.task_id]) {
           taskToSubtasks[subtask.task_id] = [];
@@ -722,12 +717,6 @@ export default function UserProjectView() {
 
       // 10. Convertir subtareas al formato de tarea para mostrarlas
       const subtasksAsTaskItems: Task[] = allRelevantSubtasks.map(subtask => {
-        console.log('Datos de subtarea:', {
-          id: subtask.id,
-          title: subtask.title,
-          task_title: subtask.task_title,
-          task_info: subtask.tasks
-        });
 
         return {
           id: `subtask-${subtask.id}`,
@@ -774,19 +763,6 @@ export default function UserProjectView() {
         // Verificar si esta tarea ya está asignada hoy
         const isAlreadyAssigned = dailyTasksIds?.includes(idToCompare) || false;
 
-        // SUPER IMPORTANTE: log detallado para depuración
-        console.log(`🔍 [DEBUG] Verificando tarea: ${task.title} (${idToCompare})`, {
-          isSubtask,
-          id: task.id,
-          originalId: task.original_id,
-          idToCompare,
-          estaAsignada: isAlreadyAssigned,
-          estado: task.status,
-          dailyTasksIds
-        });
-
-        // Retornar el resultado de la comparación (false significa que se filtra = no aparece)
-        // SOLO filtramos por si ya está asignada hoy, mostramos todas las demás sin importar estado o fecha
         return !isAlreadyAssigned;
       });
 
