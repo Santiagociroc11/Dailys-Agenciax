@@ -5,6 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen } from 'lucide-react';
 import { format } from 'date-fns';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import RichTextDisplay from '../components/RichTextDisplay';
+import RichTextSummary from '../components/RichTextSummary';
+import QuillEditor from '../components/QuillEditor';
 
 
 interface Task {
@@ -791,7 +794,13 @@ function Tasks() {
               </span>
             </div>
             {task.description && (
-              <p className="text-gray-600 mb-3">{task.description}</p>
+              <div className="mb-3">
+                <RichTextSummary 
+                  text={task.description} 
+                  className="text-sm"
+                  maxLength={150}
+                />
+              </div>
             )}
               <div className="flex items-center text-sm text-gray-500 mb-3">
               <span>Fecha límite: {new Date(task.deadline).toLocaleDateString()}</span>
@@ -892,7 +901,13 @@ function Tasks() {
                                 </div>
                                 
                                       {subtask.description && (
-                                  <p className="text-sm text-gray-600 mt-1">{subtask.description}</p>
+                                  <div className="mt-1">
+                                    <RichTextSummary 
+                                      text={subtask.description} 
+                                      className="text-sm"
+                                      maxLength={80}
+                                    />
+                                  </div>
                                 )}
                                 
                                 <div className="flex flex-wrap items-center text-xs text-gray-500 mt-2 gap-x-3 gap-y-1">
@@ -1232,11 +1247,11 @@ function Tasks() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Descripción
                       </label>
-                      <textarea
+                      <QuillEditor
                         value={newTask.description}
-                        onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                        className="w-full p-2 border rounded-md"
-                        rows={3}
+                        onChange={(value: string) => setNewTask({ ...newTask, description: value })}
+                        placeholder="Describe la tarea..."
+                        minHeight="120px"
                       />
                     </div>
                     
@@ -1433,16 +1448,16 @@ function Tasks() {
                                 <label className="block text-xs font-medium text-gray-700 mb-1">
                                   Descripción
                                 </label>
-                                <textarea
+                                <QuillEditor
                                   value={subtask.description}
-                                  onChange={(e) => {
+                                  onChange={(value: string) => {
                                     const updatedSubtasks = [...newTask.subtasks];
-                                    updatedSubtasks[index] = { ...subtask, description: e.target.value };
+                                    updatedSubtasks[index] = { ...subtask, description: value };
                                     setNewTask({ ...newTask, subtasks: updatedSubtasks });
                                   }}
-                                  placeholder="Descripción de la subtarea"
-                                  className="w-full p-2 border rounded-md"
-                                  rows={2}
+                                  placeholder="Describe la subtarea..."
+                                  minHeight="80px"
+                                  className="text-sm"
                                 />
                               </div>
                             <div className="grid grid-cols-2 gap-3">
@@ -1663,17 +1678,20 @@ function Tasks() {
                     Descripción
                   </label>
                   {editMode ? (
-                    <textarea
-                      value={editedTask.description}
-                      onChange={(e) => setEditedTask({ ...editedTask, description: e.target.value })}
-                      className="w-full p-2 border rounded-md"
-                      rows={3}
+                    <QuillEditor
+                      value={editedTask.description || ""}
+                      onChange={(value: string) => setEditedTask({ ...editedTask, description: value })}
+                      placeholder="Describe la tarea..."
+                      minHeight="120px"
                       disabled={!isAdmin}
                     />
                   ) : (
-                    <p className="p-2 bg-gray-50 rounded-md whitespace-pre-line min-h-[4rem]">
-                      {selectedTask.description || "Sin descripción"}
-                    </p>
+                    <div className="p-3 bg-gray-50 rounded-md min-h-[4rem] border">
+                      <RichTextDisplay 
+                        text={selectedTask.description || ""} 
+                        className="text-gray-700 leading-relaxed"
+                      />
+                    </div>
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2177,17 +2195,20 @@ function Tasks() {
                     Descripción
                   </label>
                   {editMode ? (
-                    <textarea
-                      value={editedSubtask.description}
-                      onChange={(e) => setEditedSubtask({ ...editedSubtask, description: e.target.value })}
-                      className="w-full p-2 border rounded-md"
-                      rows={3}
+                    <QuillEditor
+                      value={editedSubtask.description || ""}
+                      onChange={(value: string) => setEditedSubtask({ ...editedSubtask, description: value })}
+                      placeholder="Describe la subtarea..."
+                      minHeight="100px"
                       disabled={!isAdmin}
                     />
                   ) : (
-                    <p className="p-2 bg-gray-50 rounded-md whitespace-pre-line min-h-[4rem]">
-                      {selectedSubtask.description || "Sin descripción"}
-                    </p>
+                    <div className="p-3 bg-gray-50 rounded-md min-h-[4rem] border">
+                      <RichTextDisplay 
+                        text={selectedSubtask.description || ""} 
+                        className="text-gray-700 leading-relaxed"
+                      />
+                    </div>
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

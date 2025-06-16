@@ -6,6 +6,8 @@ import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter
 import { es } from 'date-fns/locale';
 import { toast } from 'react-hot-toast';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import RichTextDisplay from '../components/RichTextDisplay';
+import RichTextSummary from '../components/RichTextSummary';
 
 interface Task {
   id: string;
@@ -2424,8 +2426,8 @@ export default function UserProjectView() {
                         </div>
                       )}
                     </div>
-                    <div className="text-sm text-gray-600 truncate">
-                      {task.description || '-'}
+                    <div className="text-sm text-gray-600">
+                      <RichTextSummary text={task.description || '-'} maxLength={80} />
                     </div>
                     <div className="text-sm text-gray-700">
                       {task.start_date ? (
@@ -2610,8 +2612,8 @@ export default function UserProjectView() {
                               </div>
                             )}
                           </div>
-                          <div className="text-sm text-gray-600 truncate">
-                            {task.description || '-'}
+                          <div className="text-sm text-gray-600">
+                            <RichTextSummary text={task.description || '-'} maxLength={80} />
                           </div>
                           <div className="text-sm text-gray-700">
                             {task.start_date ? (
@@ -2747,8 +2749,8 @@ export default function UserProjectView() {
                                 </div>
                               )}
                             </div>
-                            <div className="text-sm text-gray-600 truncate">
-                              {task.description || '-'}
+                            <div className="text-sm text-gray-600">
+                              <RichTextSummary text={task.description || '-'} maxLength={80} />
                             </div>
                             <div className="text-sm text-gray-700">
                               {task.start_date ? (
@@ -2910,8 +2912,8 @@ export default function UserProjectView() {
                             </div>
                           )}
                         </div>
-                        <div className="text-sm text-gray-600 truncate">
-                          {task.description || '-'}
+                        <div className="text-sm text-gray-600">
+                          <RichTextSummary text={task.description || '-'} maxLength={80} />
                         </div>
                         <div className="text-sm text-gray-700">
                           {task.start_date ? (
@@ -3065,8 +3067,8 @@ export default function UserProjectView() {
                               </div>
                             )}
                           </div>
-                          <div className="text-sm text-gray-600 truncate">
-                            {task.description || '-'}
+                          <div className="text-sm text-gray-600">
+                            <RichTextSummary text={task.description || '-'} maxLength={80} />
                           </div>
                           <div className="text-sm text-gray-700">
                             {task.deadline ? format(new Date(task.deadline), 'dd/MM/yyyy') : '-'}
@@ -3353,9 +3355,9 @@ export default function UserProjectView() {
               {/* Descripción */}
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-1">Descripción:</h4>
-                <p className="text-gray-600">
-                  {selectedTaskDetails.description || 'Sin descripción'}
-                </p>
+                <div className="text-gray-600">
+                  <RichTextDisplay text={selectedTaskDetails.description || 'Sin descripción'} />
+                </div>
               </div>
 
               {/* Fechas con indicadores */}
@@ -3444,9 +3446,9 @@ export default function UserProjectView() {
                       <div className="space-y-3">
                         <div>
                           <h5 className="text-sm font-medium text-green-700 mb-1">Entregables:</h5>
-                          <p className="text-sm bg-white p-2 rounded border border-green-200 whitespace-pre-wrap">
-                            {entregables}
-                          </p>
+                          <div className="text-sm bg-white p-2 rounded border border-green-200">
+                            <RichTextDisplay text={entregables} />
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
@@ -3472,9 +3474,9 @@ export default function UserProjectView() {
                         {razonDuracion && (
                           <div>
                             <h5 className="text-sm font-medium text-green-700 mb-1">Razón de Variación:</h5>
-                            <p className="text-sm bg-white p-2 rounded border border-green-200">
-                              {razonDuracion}
-                            </p>
+                            <div className="text-sm bg-white p-2 rounded border border-green-200">
+                              <RichTextDisplay text={razonDuracion} />
+                            </div>
                           </div>
                         )}
 
