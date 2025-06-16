@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import VersionInfo from './VersionInfo';
 
 export default function Sidebar() {
   const { signOut, isAdmin, user } = useAuth();
@@ -99,6 +100,8 @@ export default function Sidebar() {
         )}
       </nav>
       <div className="absolute bottom-0 w-64 p-6">
+        <VersionInfo />
+        
         {user && (
           <div className="mb-4 border-t pt-4">
             <div className="flex items-center mb-2">

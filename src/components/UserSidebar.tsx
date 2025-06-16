@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { FolderOpen, LogOut, CheckSquare, Calendar, User, SwitchCamera } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import VersionInfo from './VersionInfo';
 
 interface Project {
   id: string;
@@ -91,6 +92,8 @@ export default function UserSidebar() {
         </div>
       </nav>
       <div className="absolute bottom-0 w-64 p-6">
+        <VersionInfo />
+        
         {user && (
           <div className="mb-4 border-t pt-4">
             <div className="flex items-center mb-2">
