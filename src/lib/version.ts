@@ -1,6 +1,6 @@
 // Version configuration
 export const VERSION_INFO = {
-  version: '1.0.0',
+  version: '1.0.1',
   buildDate: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
   releaseNotes: [
     'Sistema de versionado implementado',
