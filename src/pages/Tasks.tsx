@@ -491,6 +491,46 @@ function Tasks() {
     }
     
     try {
+      // 1. Primero obtener todos los IDs de subtareas para eliminar sus asignaciones de trabajo
+      const { data: subtasksData, error: subtasksQueryError } = await supabase
+        .from('subtasks')
+        .select('id')
+        .eq('task_id', selectedTask.id);
+      
+      if (subtasksQueryError) {
+        console.error("Error al consultar subtareas:", subtasksQueryError);
+        throw subtasksQueryError;
+      }
+      
+      // 2. Eliminar asignaciones de trabajo para las subtareas
+      if (subtasksData && subtasksData.length > 0) {
+        const subtaskIds = subtasksData.map(s => s.id);
+        
+        const { error: subtaskWorkAssignmentsError } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .in('task_id', subtaskIds)
+          .eq('task_type', 'subtask');
+        
+        if (subtaskWorkAssignmentsError) {
+          console.error("Error al eliminar asignaciones de trabajo de subtareas:", subtaskWorkAssignmentsError);
+          throw subtaskWorkAssignmentsError;
+        }
+      }
+      
+      // 3. Eliminar asignaciones de trabajo de la tarea principal
+      const { error: taskWorkAssignmentsError } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq('task_id', selectedTask.id)
+        .eq('task_type', 'task');
+      
+      if (taskWorkAssignmentsError) {
+        console.error("Error al eliminar asignaciones de trabajo de la tarea:", taskWorkAssignmentsError);
+        throw taskWorkAssignmentsError;
+      }
+      
+      // 4. Eliminar subtareas
       const { error: subtasksError } = await supabase
         .from('subtasks')
         .delete()
@@ -501,6 +541,7 @@ function Tasks() {
         throw subtasksError;
       }
       
+      // 5. Finalmente eliminar la tarea
       const { error } = await supabase
         .from('tasks')
         .delete()
@@ -528,6 +569,19 @@ function Tasks() {
     }
     
     try {
+      // 1. Primero eliminar asignaciones de trabajo de la subtarea
+      const { error: workAssignmentsError } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq('task_id', selectedSubtask.id)
+        .eq('task_type', 'subtask');
+      
+      if (workAssignmentsError) {
+        console.error("Error al eliminar asignaciones de trabajo de la subtarea:", workAssignmentsError);
+        throw workAssignmentsError;
+      }
+      
+      // 2. Luego eliminar la subtarea
       const { error } = await supabase
         .from('subtasks')
         .delete()
