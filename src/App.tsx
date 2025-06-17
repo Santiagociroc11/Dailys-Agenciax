@@ -10,6 +10,7 @@ import Users from './pages/Users';
 import Projects from './pages/Projects';
 import Areas from './pages/Areas';
 import Management from './pages/Management';
+import Reports from './pages/Reports';
 import UserProjectView from './pages/UserProjectView';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -65,6 +66,7 @@ function App() {
             <Route path="tasks" element={<Tasks />} />
             <Route path="users" element={<Users />} />
             <Route path="areas" element={<Areas />} />
+            <Route path="reports" element={<Reports />} />
           </Route>
 
           {/* User routes */}
