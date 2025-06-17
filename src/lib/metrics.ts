@@ -40,6 +40,17 @@ export interface AreaMetrics {
   averageEfficiency: number;
   averageTasksPerUser: number;
   topPerformers: string[];
+  // Nuevas métricas de utilización y capacidad
+  averageUtilizationRate: number; // % promedio de utilización del área
+  totalHoursWorked: number; // Horas totales trabajadas en el área
+  totalCapacityHours: number; // Capacidad total del área (usuarios × horas estándar)
+  capacityUtilization: number; // % de capacidad utilizada
+  workloadDistribution: number; // Qué tan equilibrada está la carga (0-100)
+  isOverloaded: boolean; // >95% utilización
+  isUnderloaded: boolean; // <60% utilización
+  recommendedAction: 'hire' | 'redistribute' | 'optimal' | 'consider_reduction';
+  workloadPressure: 'high' | 'medium' | 'low';
+  utilizationTrend: 'increasing' | 'stable' | 'decreasing';
 }
 
 export interface UtilizationMetrics {
@@ -817,9 +828,9 @@ export function exportUtilizationToCSV(metrics: UtilizationMetrics[], filename: 
 }
 
 /**
- * Obtiene métricas por áreas de trabajo
+ * Obtiene métricas por áreas de trabajo con enfoque en utilización y capacidad
  */
-export async function getAreaMetrics(): Promise<AreaMetrics[]> {
+export async function getAreaMetrics(workingHoursPerDay: number = 8): Promise<AreaMetrics[]> {
   try {
     const { data: areas } = await supabase
       .from('areas')
@@ -840,56 +851,145 @@ export async function getAreaMetrics(): Promise<AreaMetrics[]> {
       const totalUsers = areaUsers?.length || 0;
       const userIds = areaUsers?.map(au => au.user_id) || [];
 
-      // Obtener métricas de usuarios del área
-      let totalTasks = 0;
-      let completedTasks = 0;
-      let totalEfficiency = 0;
-      let activeUsers = 0;
-      const userMetrics: { userId: string; name: string; efficiency: number; tasks: number }[] = [];
-
-      for (const userId of userIds) {
-        const metrics = await getUserMetrics(userId);
-        if (metrics.tasksAssigned > 0) {
-          activeUsers++;
-          totalTasks += metrics.tasksAssigned;
-          completedTasks += metrics.tasksCompleted;
-          totalEfficiency += metrics.efficiencyRatio;
-          
-          const userName = areaUsers?.find(au => au.user_id === userId)?.users?.name || 'Usuario';
-          userMetrics.push({
-            userId,
-            name: userName,
-            efficiency: metrics.efficiencyRatio,
-            tasks: metrics.tasksCompleted
-          });
-        }
+      if (userIds.length === 0) {
+        areaMetrics.push({
+          areaId: area.id,
+          areaName: area.name,
+          totalUsers: 0,
+          activeUsers: 0,
+          totalTasks: 0,
+          completedTasks: 0,
+          completionRate: 0,
+          averageEfficiency: 0,
+          averageTasksPerUser: 0,
+          topPerformers: [],
+          averageUtilizationRate: 0,
+          totalHoursWorked: 0,
+          totalCapacityHours: 0,
+          capacityUtilization: 0,
+          workloadDistribution: 0,
+          isOverloaded: false,
+          isUnderloaded: true,
+          recommendedAction: 'hire',
+          workloadPressure: 'low',
+          utilizationTrend: 'stable'
+        });
+        continue;
       }
 
-      const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-      const averageEfficiency = activeUsers > 0 ? totalEfficiency / activeUsers : 0;
-      const averageTasksPerUser = activeUsers > 0 ? totalTasks / activeUsers : 0;
+      // Obtener métricas de rendimiento de todos los usuarios del área
+      const userMetrics = await Promise.all(
+        userIds.map(userId => getUserMetrics(userId))
+      );
 
-      // Top 3 performers del área
-      const topPerformers = userMetrics
-        .sort((a, b) => b.efficiency - a.efficiency)
+      // Obtener métricas de utilización de todos los usuarios del área
+      const utilizationMetrics = await Promise.all(
+        userIds.map(userId => getUserUtilizationMetrics(userId, workingHoursPerDay))
+      );
+
+      // Filtrar usuarios activos (que tienen al menos una tarea)
+      const activeUserMetrics = userMetrics.filter(m => m.tasksAssigned > 0);
+      const activeUtilizationMetrics = utilizationMetrics.filter(m => m.workingDaysThisMonth > 0);
+
+      // Calcular métricas básicas del área
+      const totalTasks = userMetrics.reduce((acc, m) => acc + m.tasksAssigned, 0);
+      const completedTasks = userMetrics.reduce((acc, m) => acc + m.tasksCompleted, 0);
+      const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+      
+      const averageEfficiency = activeUserMetrics.length > 0
+        ? activeUserMetrics.reduce((acc, m) => acc + m.efficiencyRatio, 0) / activeUserMetrics.length
+        : 0;
+
+      const averageTasksPerUser = userIds.length > 0 ? totalTasks / userIds.length : 0;
+
+      // Top performers (usuarios con mejor eficiencia)
+      const topPerformers = activeUserMetrics
+        .sort((a, b) => b.efficiencyRatio - a.efficiencyRatio)
         .slice(0, 3)
-        .map(u => u.name);
+        .map(m => m.userName);
+
+      // NUEVAS MÉTRICAS DE UTILIZACIÓN Y CAPACIDAD
+      
+      // Utilización promedio del área
+      const averageUtilizationRate = activeUtilizationMetrics.length > 0
+        ? activeUtilizationMetrics.reduce((acc, m) => acc + m.utilizationRate, 0) / activeUtilizationMetrics.length
+        : 0;
+
+      // Horas trabajadas y capacidad total
+      const totalHoursWorked = utilizationMetrics.reduce((acc, m) => acc + m.totalHoursThisMonth, 0);
+      const workingDaysThisMonth = Math.max(...utilizationMetrics.map(m => m.workingDaysThisMonth), 1);
+      const totalCapacityHours = userIds.length * workingDaysThisMonth * workingHoursPerDay;
+      const capacityUtilization = totalCapacityHours > 0 ? (totalHoursWorked / totalCapacityHours) * 100 : 0;
+
+      // Distribución de carga de trabajo (qué tan equilibrada está)
+      const utilizationRates = activeUtilizationMetrics.map(m => m.utilizationRate);
+      const avgUtilization = utilizationRates.reduce((acc, rate) => acc + rate, 0) / utilizationRates.length || 0;
+      const variance = utilizationRates.reduce((acc, rate) => acc + Math.pow(rate - avgUtilization, 2), 0) / utilizationRates.length || 0;
+      const standardDeviation = Math.sqrt(variance);
+      const workloadDistribution = Math.max(0, 100 - (standardDeviation / avgUtilization * 100)) || 0;
+
+      // Indicadores de sobrecarga y subcarga
+      const isOverloaded = capacityUtilization > 95;
+      const isUnderloaded = capacityUtilization < 60;
+
+      // Determinar presión de carga de trabajo
+      let workloadPressure: 'high' | 'medium' | 'low';
+      if (capacityUtilization > 90) workloadPressure = 'high';
+      else if (capacityUtilization > 70) workloadPressure = 'medium';
+      else workloadPressure = 'low';
+
+      // Recomendación de acción
+      let recommendedAction: 'hire' | 'redistribute' | 'optimal' | 'consider_reduction';
+      if (isOverloaded && workloadDistribution < 60) {
+        recommendedAction = 'hire'; // Sobrecarga general, necesita más personal
+      } else if (isOverloaded && workloadDistribution >= 60) {
+        recommendedAction = 'redistribute'; // Sobrecarga pero mal distribuida
+      } else if (isUnderloaded && capacityUtilization < 40) {
+        recommendedAction = 'consider_reduction'; // Muy poca utilización
+      } else {
+        recommendedAction = 'optimal'; // En rango aceptable
+      }
+
+      // Tendencia de utilización (simplificada, podrías mejorarla con datos históricos)
+      let utilizationTrend: 'increasing' | 'stable' | 'decreasing';
+      if (capacityUtilization > 85) utilizationTrend = 'increasing';
+      else if (capacityUtilization < 50) utilizationTrend = 'decreasing';
+      else utilizationTrend = 'stable';
 
       areaMetrics.push({
         areaId: area.id,
         areaName: area.name,
         totalUsers,
-        activeUsers,
+        activeUsers: activeUserMetrics.length,
         totalTasks,
         completedTasks,
         completionRate,
         averageEfficiency,
         averageTasksPerUser,
-        topPerformers
+        topPerformers,
+        averageUtilizationRate,
+        totalHoursWorked,
+        totalCapacityHours,
+        capacityUtilization,
+        workloadDistribution,
+        isOverloaded,
+        isUnderloaded,
+        recommendedAction,
+        workloadPressure,
+        utilizationTrend
       });
     }
 
-    return areaMetrics.sort((a, b) => b.completionRate - a.completionRate);
+    // Ordenar por capacidad de utilización (más críticas primero)
+    return areaMetrics.sort((a, b) => {
+      // Priorizar áreas sobrecargadas o con problemas
+      if (a.isOverloaded && !b.isOverloaded) return -1;
+      if (!a.isOverloaded && b.isOverloaded) return 1;
+      if (a.isUnderloaded && !b.isUnderloaded) return 1;
+      if (!a.isUnderloaded && b.isUnderloaded) return -1;
+      // Luego por utilización de capacidad
+      return b.capacityUtilization - a.capacityUtilization;
+    });
   } catch (error) {
     console.error('Error getting area metrics:', error);
     return [];
