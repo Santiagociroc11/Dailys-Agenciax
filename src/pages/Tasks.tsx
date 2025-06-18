@@ -97,6 +97,7 @@ function Tasks() {
   const [editedSubtask, setEditedSubtask] = useState<any>(null);
   const [editedSubtasks, setEditedSubtasks] = useState<Record<string, any>>({});
   const [editMode, setEditMode] = useState(false);
+  const [newSubtasksInEdit, setNewSubtasksInEdit] = useState<any[]>([]);
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
@@ -626,6 +627,7 @@ function Tasks() {
         throw taskError;
       }
       
+      // Actualizar subtareas existentes
       const subtasksToUpdate = Object.entries(editedSubtasks).map(([id, data]) => ({
         id,
         sequence_order: data.sequence_order,
@@ -647,11 +649,37 @@ function Tasks() {
         }
       }
       
+      // Crear nuevas subtareas si existen
+      if (newSubtasksInEdit.length > 0) {
+        const currentSubtasksCount = subtasks[selectedTask.id]?.length || 0;
+        const subtasksToInsert = newSubtasksInEdit.map((newSubtask, index) => ({
+          task_id: selectedTask.id,
+          title: newSubtask.title,
+          description: newSubtask.description || '',
+          estimated_duration: newSubtask.estimated_duration || 0,
+          sequence_order: currentSubtasksCount + index + 1,
+          assigned_to: newSubtask.assigned_to || user?.id,
+          status: 'pending',
+          start_date: newSubtask.start_date || null,
+          deadline: newSubtask.deadline || null
+        }));
+
+        const { error: newSubtasksError } = await supabase
+          .from('subtasks')
+          .insert(subtasksToInsert);
+
+        if (newSubtasksError) {
+          console.error("Error al crear nuevas subtareas:", newSubtasksError);
+          throw newSubtasksError;
+        }
+      }
+      
       await fetchTasks();
       await fetchSubtasks();
       setShowTaskDetailModal(false);
       setEditMode(false);
       setEditedSubtasks({});
+      setNewSubtasksInEdit([]);
       
     } catch (error) {
       console.error('Error al actualizar la tarea y subtareas:', error);
@@ -1644,6 +1672,7 @@ function Tasks() {
                 onClick={() => {
                   setShowTaskDetailModal(false);
                   setEditMode(false);
+                  setNewSubtasksInEdit([]);
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -2015,6 +2044,169 @@ function Tasks() {
                             <div className="mt-3 text-xs text-gray-500">
                               Los cambios en el orden se aplicarán al guardar la tarea.
                             </div>
+                            
+                            {/* Nuevas subtareas en modo edición */}
+                            {newSubtasksInEdit.length > 0 && (
+                              <div className="mt-4 pt-4 border-t border-gray-200">
+                                <h4 className="text-sm font-medium text-gray-700 mb-3">Nuevas subtareas a crear:</h4>
+                                <div className="space-y-4">
+                                  {newSubtasksInEdit.map((newSubtask, index) => (
+                                    <div key={`new-subtask-${index}`} className="border border-green-200 bg-green-50 p-4 rounded-md">
+                                      <div className="flex justify-between items-center mb-3">
+                                        <h5 className="font-medium text-green-800">Nueva Subtarea {index + 1}</h5>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedNewSubtasks = [...newSubtasksInEdit];
+                                            updatedNewSubtasks.splice(index, 1);
+                                            setNewSubtasksInEdit(updatedNewSubtasks);
+                                          }}
+                                          className="text-red-600 hover:text-red-800"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                      <div className="space-y-3">
+                                        <div>
+                                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                                            Título <span className="text-red-500">*</span>
+                                          </label>
+                                          <input
+                                            type="text"
+                                            value={newSubtask.title}
+                                            onChange={(e) => {
+                                              const updatedNewSubtasks = [...newSubtasksInEdit];
+                                              updatedNewSubtasks[index] = { ...newSubtask, title: e.target.value };
+                                              setNewSubtasksInEdit(updatedNewSubtasks);
+                                            }}
+                                            placeholder="Título de la nueva subtarea"
+                                            className="w-full p-2 border rounded-md"
+                                            required
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                                            Descripción
+                                          </label>
+                                          <QuillEditor
+                                            value={newSubtask.description}
+                                            onChange={(value: string) => {
+                                              const updatedNewSubtasks = [...newSubtasksInEdit];
+                                              updatedNewSubtasks[index] = { ...newSubtask, description: value };
+                                              setNewSubtasksInEdit(updatedNewSubtasks);
+                                            }}
+                                            placeholder="Describe la nueva subtarea..."
+                                            minHeight="80px"
+                                            className="text-sm"
+                                          />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                              Duración (minutos) <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                              type="number"
+                                              value={newSubtask.estimated_duration}
+                                              onChange={(e) => {
+                                                const updatedNewSubtasks = [...newSubtasksInEdit];
+                                                updatedNewSubtasks[index] = { ...newSubtask, estimated_duration: Number(e.target.value) };
+                                                setNewSubtasksInEdit(updatedNewSubtasks);
+                                              }}
+                                              className="w-full p-2 border rounded-md"
+                                              min="1"
+                                              required
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                              Asignar a <span className="text-red-500">*</span>
+                                            </label>
+                                            <select
+                                              value={newSubtask.assigned_to || ''}
+                                              onChange={(e) => {
+                                                const updatedNewSubtasks = [...newSubtasksInEdit];
+                                                updatedNewSubtasks[index] = { ...newSubtask, assigned_to: e.target.value };
+                                                setNewSubtasksInEdit(updatedNewSubtasks);
+                                              }}
+                                              className="w-full p-2 border rounded-md"
+                                              required
+                                            >
+                                              <option value="">Seleccionar usuario</option>
+                                              {getAvailableUsers(selectedTask?.project_id || null).map((user) => (
+                                                <option key={user.id} value={user.id}>
+                                                  {user.name || user.email}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                              Fecha de inicio
+                                            </label>
+                                            <input
+                                              type="datetime-local"
+                                              value={newSubtask.start_date || editedTask.start_date}
+                                              onChange={(e) => {
+                                                const updatedNewSubtasks = [...newSubtasksInEdit];
+                                                updatedNewSubtasks[index] = { ...newSubtask, start_date: e.target.value };
+                                                setNewSubtasksInEdit(updatedNewSubtasks);
+                                              }}
+                                              className="w-full p-2 border rounded-md"
+                                              min={editedTask.start_date}
+                                              max={editedTask.deadline}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                                              Fecha límite
+                                            </label>
+                                            <input
+                                              type="datetime-local"
+                                              value={newSubtask.deadline || editedTask.deadline}
+                                              onChange={(e) => {
+                                                const updatedNewSubtasks = [...newSubtasksInEdit];
+                                                updatedNewSubtasks[index] = { ...newSubtask, deadline: e.target.value };
+                                                setNewSubtasksInEdit(updatedNewSubtasks);
+                                              }}
+                                              className="w-full p-2 border rounded-md"
+                                              min={newSubtask.start_date || editedTask.start_date}
+                                              max={editedTask.deadline}
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Botón para agregar nueva subtarea */}
+                            <div className="mt-4 pt-4 border-t border-gray-200">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewSubtasksInEdit([
+                                    ...newSubtasksInEdit,
+                                    {
+                                      title: '',
+                                      description: '',
+                                      estimated_duration: 30,
+                                      assigned_to: '',
+                                      start_date: editedTask.start_date,
+                                      deadline: editedTask.deadline,
+                                    },
+                                  ]);
+                                }}
+                                className="flex items-center text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-3 py-2 rounded-md transition-colors"
+                              >
+                                <Plus className="w-4 h-4 mr-1" />
+                                Agregar Nueva Subtarea
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           subtasks[selectedTask.id]
@@ -2094,6 +2286,7 @@ function Tasks() {
                       type="button"
                       onClick={() => {
                         setEditMode(false);
+                        setNewSubtasksInEdit([]);
                         setEditedTask({
                           title: selectedTask.title,
                           description: selectedTask.description || '',
@@ -2128,7 +2321,10 @@ function Tasks() {
                   <>
                     <button
                       type="button"
-                      onClick={() => setShowTaskDetailModal(false)}
+                      onClick={() => {
+                        setShowTaskDetailModal(false);
+                        setNewSubtasksInEdit([]);
+                      }}
                       className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
                     >
                       Cerrar
