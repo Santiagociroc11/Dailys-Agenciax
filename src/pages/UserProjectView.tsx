@@ -689,14 +689,30 @@ export default function UserProjectView() {
       const relevantSubs: Subtask[] = [];
       Object.entries(grouped).forEach(([taskId, subs]) => {
         if (subs[0].tasks?.is_sequential) {
+          // Para tareas secuenciales, solo mostrar la siguiente subtarea que debe ejecutarse
+          // basándose en que las anteriores estén APROBADAS (no solo completadas)
           const allForThis = allSubtasksData!
             .filter(x => x.task_id === taskId)
             .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+          
+          // Buscar la primera subtarea que NO esté aprobada
           const idx = allForThis.findIndex(x => !['approved'].includes(x.status));
+          
+          // Solo incluir si:
+          // 1. Existe una subtarea pendiente de aprobación
+          // 2. Esa subtarea está asignada al usuario actual
+          // 3. Todas las subtareas anteriores están aprobadas
           if (idx >= 0 && allForThis[idx].assigned_to === user.id) {
-            relevantSubs.push(allForThis[idx]);
+            // Verificar que todas las subtareas anteriores estén aprobadas
+            const previousSubtasks = allForThis.slice(0, idx);
+            const allPreviousApproved = previousSubtasks.every(sub => sub.status === 'approved');
+            
+            if (allPreviousApproved) {
+              relevantSubs.push(allForThis[idx]);
+            }
           }
         } else {
+          // Para tareas no secuenciales, incluir todas las subtareas asignadas al usuario
           relevantSubs.push(...subs);
         }
       });
@@ -1161,9 +1177,11 @@ export default function UserProjectView() {
         console.error('Error al actualizar estado en asignaciones:', assignmentUpdateError);
       }
 
-      // Si es una subtarea y se ha completado, verificar si todas las subtareas de la tarea principal están completadas
+      // Si es una subtarea y se ha completado, actualizar el estado de la tarea principal
+      // NOTA: La tarea principal solo se marca como "completada" cuando TODAS las subtareas están "aprobadas"
+      // El estado "completed" de una subtarea es solo una marca del usuario, la finalización real es "approved"
       if (isSubtask && newStatus === 'completed') {
-        // Obtener el ID de la tarea principal
+        // Obtener el ID de la tarea principal y actualizar su estado según las reglas de secuencialidad
         const { data: subtaskData, error: subtaskError } = await supabase
           .from('subtasks')
           .select('task_id')
@@ -1173,55 +1191,20 @@ export default function UserProjectView() {
         if (subtaskError) {
           console.error('Error al obtener tarea principal:', subtaskError);
         } else if (subtaskData && subtaskData.task_id) {
-          const parentTaskId = subtaskData.task_id;
-
-          // Verificar el estado de todas las subtareas de esta tarea principal
-          const { data: allSubtasks, error: allSubtasksError } = await supabase
-            .from('subtasks')
-            .select('id, status')
-            .eq('task_id', parentTaskId);
-
-          if (allSubtasksError) {
-            console.error('Error al verificar estado de subtareas:', allSubtasksError);
-          } else if (allSubtasks && allSubtasks.length > 0) {
-            // Verificar si todas las subtareas están completadas
-            const allCompleted = allSubtasks.every(subtask =>
-              subtask.status === 'completed' || subtask.status === 'approved'
-            );
-
-            // Si todas las subtareas están completadas, actualizar la tarea principal a completada
-            if (allCompleted) {
-              const { error: updateParentError } = await supabase
-                .from('tasks')
-                .update({ status: 'completed' })
-                .eq('id', parentTaskId);
-
-              if (updateParentError) {
-                console.error('Error al actualizar estado de tarea principal:', updateParentError);
-              } else {
-                console.log('Tarea principal actualizada a completada:', parentTaskId);
-
-                // También actualizar el estado local si la tarea principal está en la lista
-                setAssignedTaskItems(prev =>
-                  prev.map(task =>
-                    task.id === parentTaskId
-                      ? { ...task, status: 'completed' }
-                      : task
-                  )
-                );
+          // Usar la función helper que respeta la lógica de aprobación
+          await updateParentTaskStatus(subtaskData.task_id);
+          
+          // Actualizar estado local para reflejar el cambio
+          setAssignedTaskItems(prev =>
+            prev.map(task => {
+              if (task.id === subtaskData.task_id) {
+                // La tarea principal puede estar en diferentes estados según las subtareas
+                // No asumimos que está "completed" hasta que todas estén "approved"
+                return { ...task, status: 'in_progress' }; // Estado temporal hasta verificación
               }
-            } else {
-              // Si no todas están completadas, asegurar que la tarea principal esté en "in_progress"
-              const { error: updateParentError } = await supabase
-                .from('tasks')
-                .update({ status: 'in_progress' })
-                .eq('id', parentTaskId);
-
-              if (updateParentError) {
-                console.error('Error al actualizar estado de tarea principal:', updateParentError);
-              }
-            }
-          }
+              return task;
+            })
+          );
         }
       }
 
@@ -1653,9 +1636,18 @@ export default function UserProjectView() {
         .eq('task_id', parentId);
       if (subError) throw subError;
 
-      // ¿Todas completadas o aprobadas?
-      const allDone = subtasks!.every(s => ['approved'].includes(s.status));
-      const newStatus = allDone ? 'completed' : 'in_progress';
+      // ¿Todas aprobadas? Solo cuando todas estén aprobadas la tarea padre se marca como completada
+      const allApproved = subtasks!.every(s => s.status === 'approved');
+      // Si hay al menos una subtarea en progreso o asignada, la tarea padre debe estar en progreso
+      const hasInProgress = subtasks!.some(s => ['in_progress', 'assigned', 'completed', 'returned'].includes(s.status));
+      
+      let newStatus = 'pending'; // Estado por defecto
+      
+      if (allApproved) {
+        newStatus = 'completed'; // Solo si todas están aprobadas
+      } else if (hasInProgress) {
+        newStatus = 'in_progress'; // Si hay alguna en proceso
+      }
 
       // Actualizar la tarea padre
       const { error: taskError } = await supabase
@@ -1663,6 +1655,8 @@ export default function UserProjectView() {
         .update({ status: newStatus })
         .eq('id', parentId);
       if (taskError) throw taskError;
+      
+      console.log(`Tarea padre ${parentId} actualizada a estado: ${newStatus}`);
     } catch (e) {
       console.error('Error actualizando tarea padre:', e);
     }
