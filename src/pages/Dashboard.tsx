@@ -55,8 +55,8 @@ const Dashboard = () => {
     try {
       if (isAdmin) {
         await fetchTeamMetrics();
-      } else {
-        await fetchUserMetrics(user?.id);
+      } else if (user?.id) {
+        await fetchUserMetrics(user.id);
       }
     } catch (error) {
       console.error('Error fetching metrics:', error);
@@ -74,12 +74,12 @@ const Dashboard = () => {
       .order('date', { ascending: false })
       .limit(30);
 
-    // Obtener tareas completadas
+    // Obtener tareas completadas (incluyendo aprobadas)
     const { data: completedTasks } = await supabase
       .from('task_work_assignments')
       .select('*, tasks(deadline, status_history)')
       .eq('user_id', userId)
-      .eq('status', 'completed');
+      .in('status', ['completed', 'approved']);
 
     // Obtener tareas activas
     const { data: activeTasks } = await supabase
@@ -89,7 +89,7 @@ const Dashboard = () => {
       .in('status', ['pending', 'in_progress']);
 
     // Calcular métricas
-    const metrics = calculateUserMetrics(stats, completedTasks, activeTasks);
+    const metrics = calculateUserMetrics(stats || [], completedTasks || [], activeTasks || []);
     setUserMetrics(metrics);
   }
 

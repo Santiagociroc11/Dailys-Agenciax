@@ -148,7 +148,7 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 
     // Calcular métricas básicas
     const tasksCompleted = allTasks.filter(t => 
-      t.taskStatus === 'completed' || t.status === 'completed'
+      ['approved'].includes(t.taskStatus || t.status)
     ).length;
 
     const tasksAssigned = allTasks.length;
@@ -156,14 +156,14 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 
     // Tareas completadas esta semana
     const tasksCompletedThisWeek = allTasks.filter(t => {
-      const isCompleted = t.taskStatus === 'completed' || t.status === 'completed';
+      const isCompleted = ['approved'].includes(t.taskStatus || t.status);
       const completedRecently = t.updated_at && new Date(t.updated_at) >= weekAgo;
       return isCompleted && completedRecently;
     }).length;
 
     // Tareas completadas este mes
     const tasksCompletedThisMonth = allTasks.filter(t => {
-      const isCompleted = t.taskStatus === 'completed' || t.status === 'completed';
+      const isCompleted = ['approved'].includes(t.taskStatus || t.status);
       const completedRecently = t.updated_at && new Date(t.updated_at) >= monthAgo;
       return isCompleted && completedRecently;
     }).length;
@@ -186,7 +186,7 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 
     // Calcular entrega a tiempo
     const completedTasksWithDeadline = allTasks.filter(t => {
-      const isCompleted = t.taskStatus === 'completed' || t.status === 'completed';
+      const isCompleted = ['approved'].includes(t.taskStatus || t.status);
       return isCompleted && t.deadline;
     });
 
@@ -201,7 +201,7 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 
     // Tareas atrasadas (activas y con deadline pasado)
     const overdueTasks = allTasks.filter(t => {
-      const isActive = !['completed', 'approved'].includes(t.taskStatus || t.status);
+      const isActive = !['approved'].includes(t.taskStatus || t.status);
       const isOverdue = t.deadline && new Date(t.deadline) < now;
       return isActive && isOverdue;
     }).length;
@@ -209,7 +209,7 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
     // Próximos vencimientos (próximos 3 días)
     const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
     const upcomingDeadlines = allTasks.filter(t => {
-      const isActive = !['completed', 'approved'].includes(t.taskStatus || t.status);
+      const isActive = !['approved'].includes(t.taskStatus || t.status);
       const hasUpcomingDeadline = t.deadline && 
         new Date(t.deadline) >= now && 
         new Date(t.deadline) <= threeDaysFromNow;
@@ -334,13 +334,13 @@ export async function getProjectMetrics(): Promise<ProjectMetrics[]> {
 
       // Contar todas las tareas y subtareas
       let totalTasks = tasks?.length || 0;
-      let completedTasks = tasks?.filter(t => t.status === 'completed').length || 0;
+      let completedTasks = tasks?.filter(t => ['approved'].includes(t.status)).length || 0;
 
       // Agregar subtareas al conteo
       tasks?.forEach(task => {
         if (task.subtasks) {
           totalTasks += task.subtasks.length;
-          completedTasks += task.subtasks.filter((s: any) => s.status === 'completed').length;
+          completedTasks += task.subtasks.filter((s: any) => ['approved'].includes(s.status)).length;
         }
       });
 
