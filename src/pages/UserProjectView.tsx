@@ -376,7 +376,12 @@ export default function UserProjectView() {
 
   useEffect(() => {
     if (activeTab === 'gestion' && activeGestionSubTab === 'completadas' && projectId && user) {
-      console.log('🔄 [DEBUG] Recargando tareas completadas por cambio de tab');
+      console.log('🔄 [DEBUG] Recargando tareas completadas por cambio de tab', {
+        activeTab,
+        activeGestionSubTab,
+        projectId,
+        userId: user.id
+      });
       fetchCompletedTasks();
     }
   }, [activeTab, activeGestionSubTab, projectId, user]);
@@ -705,8 +710,8 @@ export default function UserProjectView() {
         description: s.description,
         priority: 'medium',
         estimated_duration: s.estimated_duration,
-        start_date: s.start_date,
-        deadline: s.deadline,
+        start_date: s.start_date || '',
+        deadline: s.deadline || '',
         status: s.status,
         is_sequential: false,
         project_id: s.tasks?.project_id || '',
@@ -1272,11 +1277,19 @@ export default function UserProjectView() {
         assignmentsQ = assignmentsQ.in("project_id", [projectId]);
       }
 
-      const { data: assignments, assignmentsError } = await assignmentsQ;
-
+      const { data: assignments, error: assignmentsError } = await assignmentsQ;
 
       if (assignmentsError) {
         console.error('Error al cargar asignaciones:', assignmentsError);
+        setAssignedTaskItems([]);
+        setDelayedTaskItems([]);
+        setReturnedTaskItems([]);
+        setLoadingAssigned(false);
+        return;
+      }
+
+      if (!assignments) {
+        console.log('No hay asignaciones para mostrar');
         setAssignedTaskItems([]);
         setDelayedTaskItems([]);
         setReturnedTaskItems([]);
@@ -1727,7 +1740,6 @@ export default function UserProjectView() {
           .eq('user_id', user!.id)
           .eq('task_type', taskType)
           .eq(isSubtask ? 'subtask_id' : 'task_id', originalId)
-          .select()
       ];
 
       // Ejecutar todas las actualizaciones en paralelo
@@ -1740,7 +1752,9 @@ export default function UserProjectView() {
       console.log('✅ [SUBMIT STATUS] Actualizaciones de BD completadas:', {
         taskId: selectedTaskId,
         taskResult: taskRes,
-        assignmentResult: assignRes
+        assignmentResult: assignRes,
+        assignmentData: assignRes.data,
+        newStatus: selectedStatus
       });
 
       // 5️⃣ Si era subtarea completada, actualiza la tarea padre
@@ -1772,6 +1786,7 @@ export default function UserProjectView() {
         }
 
         // Recargar las tareas completadas para incluir la nueva
+        console.log('🔄 [SUBMIT STATUS] Recargando tareas completadas después de marcar como completada');
         fetchCompletedTasks();
       } else {
         // Si se marcó con otro estado, actualizar el estado en la lista correspondiente
@@ -1814,17 +1829,19 @@ export default function UserProjectView() {
 
     try {
       setLoadingCompleted(true);
-      const { data: completedTaskAssignments, error: assignmentsError } = await supabase
+      
+      let completedTaskAssignmentsQuery = supabase
         .from('task_work_assignments')
         .select('*')
         .eq('user_id', user.id)
-        .in(
-          'project_id',
-          projectId === 'all'
-            ? user.assigned_projects || []    // asumiendo que el contexto Auth te da assigned_projects
-            : [projectId]
-        )
         .eq('status', 'completed');
+
+      // Solo aplicar filtro de proyecto si no estamos en "all"
+      if (projectId !== 'all') {
+        completedTaskAssignmentsQuery = completedTaskAssignmentsQuery.eq('project_id', projectId);
+      }
+
+      const { data: completedTaskAssignments, error: assignmentsError } = await completedTaskAssignmentsQuery;
 
       if (assignmentsError) {
         console.error('Error al cargar tareas completadas:', assignmentsError);
@@ -1833,10 +1850,19 @@ export default function UserProjectView() {
         return;
       }
 
+      // Verificar si hay datos
+      if (!completedTaskAssignments) {
+        console.log('📥 [FETCH COMPLETED] No hay asignaciones completadas');
+        setCompletedTaskItems([]);
+        setLoadingCompleted(false);
+        return;
+      }
+
       // Registrar las IDs de las tareas completadas según la base de datos
       console.log('🔍 [FETCH COMPLETED] Tareas completadas en BD:', {
-        total: completedTaskAssignments?.length || 0,
-        ids: completedTaskAssignments?.map(t => t.task_id) || []
+        total: completedTaskAssignments.length,
+        asignaciones: completedTaskAssignments,
+        ids: completedTaskAssignments.map(t => t.task_id || t.subtask_id)
       });
 
       // Array para todas las tareas completadas
