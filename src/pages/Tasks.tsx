@@ -495,34 +495,54 @@ function Tasks() {
     }
     
     try {
-      // 1. Primero obtener todos los IDs de subtareas para eliminar sus asignaciones de trabajo
+      console.log('🗑️ Iniciando eliminación de tarea:', selectedTask.id);
+      
+      // 1. Primero obtener todos los IDs de subtareas
       const { data: subtasksData, error: subtasksQueryError } = await supabase
         .from('subtasks')
         .select('id')
         .eq('task_id', selectedTask.id);
       
       if (subtasksQueryError) {
-        console.error("Error al consultar subtareas:", subtasksQueryError);
+        console.error("❌ Error al consultar subtareas:", subtasksQueryError);
         throw subtasksQueryError;
       }
       
-      // 2. Eliminar asignaciones de trabajo para las subtareas
+      console.log('📝 Subtareas encontradas:', subtasksData?.length || 0);
+      
+      // 2. Eliminar TODAS las asignaciones de trabajo relacionadas (con diferentes criterios)
       if (subtasksData && subtasksData.length > 0) {
         const subtaskIds = subtasksData.map(s => s.id);
+        console.log('🔗 Eliminando asignaciones de trabajo para subtareas:', subtaskIds);
         
-        const { error: subtaskWorkAssignmentsError } = await supabase
+        // Eliminar por subtask_id (cuando task_type = 'subtask')
+        const { error: subtaskWorkAssignmentsError1 } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .in('subtask_id', subtaskIds);
+        
+        if (subtaskWorkAssignmentsError1) {
+          console.error("❌ Error al eliminar asignaciones por subtask_id:", subtaskWorkAssignmentsError1);
+          throw subtaskWorkAssignmentsError1;
+        }
+        
+        // También eliminar por task_id cuando se refiere a subtareas
+        const { error: subtaskWorkAssignmentsError2 } = await supabase
           .from('task_work_assignments')
           .delete()
           .in('task_id', subtaskIds)
           .eq('task_type', 'subtask');
         
-        if (subtaskWorkAssignmentsError) {
-          console.error("Error al eliminar asignaciones de trabajo de subtareas:", subtaskWorkAssignmentsError);
-          throw subtaskWorkAssignmentsError;
+        if (subtaskWorkAssignmentsError2) {
+          console.error("❌ Error al eliminar asignaciones por task_id (subtareas):", subtaskWorkAssignmentsError2);
+          throw subtaskWorkAssignmentsError2;
         }
+        
+        console.log('✅ Asignaciones de subtareas eliminadas');
       }
       
       // 3. Eliminar asignaciones de trabajo de la tarea principal
+      console.log('🔗 Eliminando asignaciones de la tarea principal:', selectedTask.id);
       const { error: taskWorkAssignmentsError } = await supabase
         .from('task_work_assignments')
         .delete()
@@ -530,38 +550,50 @@ function Tasks() {
         .eq('task_type', 'task');
       
       if (taskWorkAssignmentsError) {
-        console.error("Error al eliminar asignaciones de trabajo de la tarea:", taskWorkAssignmentsError);
+        console.error("❌ Error al eliminar asignaciones de la tarea principal:", taskWorkAssignmentsError);
         throw taskWorkAssignmentsError;
       }
       
-      // 4. Eliminar subtareas
-      const { error: subtasksError } = await supabase
-        .from('subtasks')
-        .delete()
-        .eq('task_id', selectedTask.id);
+      console.log('✅ Asignaciones de tarea principal eliminadas');
       
-      if (subtasksError) {
-        console.error("Error al eliminar subtareas:", subtasksError);
-        throw subtasksError;
+      // 4. Eliminar subtareas
+      if (subtasksData && subtasksData.length > 0) {
+        console.log('🗑️ Eliminando subtareas');
+        const { error: subtasksError } = await supabase
+          .from('subtasks')
+          .delete()
+          .eq('task_id', selectedTask.id);
+        
+        if (subtasksError) {
+          console.error("❌ Error al eliminar subtareas:", subtasksError);
+          throw subtasksError;
+        }
+        
+        console.log('✅ Subtareas eliminadas');
       }
       
-      // 5. Finalmente eliminar la tarea
-      const { error } = await supabase
+      // 5. Finalmente eliminar la tarea principal
+      console.log('🗑️ Eliminando tarea principal');
+      const { error: taskError } = await supabase
         .from('tasks')
         .delete()
         .eq('id', selectedTask.id);
       
-      if (error) {
-        console.error("Error al eliminar la tarea:", error);
-        throw error;
+      if (taskError) {
+        console.error("❌ Error al eliminar la tarea principal:", taskError);
+        throw taskError;
       }
+      
+      console.log('✅ Tarea principal eliminada exitosamente');
       
       await fetchTasks();
       await fetchSubtasks();
       setShowTaskDetailModal(false);
+      setError(''); // Limpiar cualquier error previo
+      
     } catch (error) {
-      console.error('Error al eliminar la tarea:', error);
-      setError('Error al eliminar la tarea. Por favor, inténtalo de nuevo.');
+      console.error('💥 Error al eliminar la tarea:', error);
+      setError(`Error al eliminar la tarea: ${error instanceof Error ? error.message : 'Por favor, inténtalo de nuevo.'}`);
     }
   }
   
@@ -573,34 +605,57 @@ function Tasks() {
     }
     
     try {
-      // 1. Primero eliminar asignaciones de trabajo de la subtarea
-      const { error: workAssignmentsError } = await supabase
+      console.log('🗑️ Iniciando eliminación de subtarea:', selectedSubtask.id);
+      
+      // 1. Eliminar TODAS las asignaciones de trabajo de la subtarea (con diferentes criterios)
+      console.log('🔗 Eliminando asignaciones de trabajo para subtarea:', selectedSubtask.id);
+      
+      // Eliminar por subtask_id
+      const { error: workAssignmentsError1 } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq('subtask_id', selectedSubtask.id);
+      
+      if (workAssignmentsError1) {
+        console.error("❌ Error al eliminar asignaciones por subtask_id:", workAssignmentsError1);
+        throw workAssignmentsError1;
+      }
+      
+      // También eliminar por task_id cuando se refiere a esta subtarea
+      const { error: workAssignmentsError2 } = await supabase
         .from('task_work_assignments')
         .delete()
         .eq('task_id', selectedSubtask.id)
         .eq('task_type', 'subtask');
       
-      if (workAssignmentsError) {
-        console.error("Error al eliminar asignaciones de trabajo de la subtarea:", workAssignmentsError);
-        throw workAssignmentsError;
+      if (workAssignmentsError2) {
+        console.error("❌ Error al eliminar asignaciones por task_id:", workAssignmentsError2);
+        throw workAssignmentsError2;
       }
       
+      console.log('✅ Asignaciones de subtarea eliminadas');
+      
       // 2. Luego eliminar la subtarea
-      const { error } = await supabase
+      console.log('🗑️ Eliminando subtarea');
+      const { error: subtaskError } = await supabase
         .from('subtasks')
         .delete()
         .eq('id', selectedSubtask.id);
       
-      if (error) {
-        console.error("Error al eliminar la subtarea:", error);
-        throw error;
+      if (subtaskError) {
+        console.error("❌ Error al eliminar la subtarea:", subtaskError);
+        throw subtaskError;
       }
+      
+      console.log('✅ Subtarea eliminada exitosamente');
       
       await fetchSubtasks();
       setShowSubtaskDetailModal(false);
+      setError(''); // Limpiar cualquier error previo
+      
     } catch (error) {
-      console.error('Error al eliminar la subtarea:', error);
-      setError('Error al eliminar la subtarea. Por favor, inténtalo de nuevo.');
+      console.error('💥 Error al eliminar la subtarea:', error);
+      setError(`Error al eliminar la subtarea: ${error instanceof Error ? error.message : 'Por favor, inténtalo de nuevo.'}`);
     }
   }
 
