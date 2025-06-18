@@ -22,17 +22,14 @@ const RichTextSummary: React.FC<RichTextSummaryProps> = ({
     let processedContent = content.replace(urlRegex, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 underline">$2</a>');
     
     // Luego, asegurar que todos los enlaces existentes tengan las clases correctas
-    // Buscar todos los tags <a> y asegurar que tengan las clases de Tailwind
     processedContent = processedContent.replace(
       /<a([^>]*?)>/g, 
       (match, attributes) => {
         // Si ya tiene class, agregar nuestras clases
         if (attributes.includes('class=')) {
-          // Reemplazar o agregar las clases de color
           attributes = attributes.replace(
             /class="([^"]*?)"/g, 
             (_classMatch: string, existingClasses: string) => {
-              // Remover clases de color existentes y agregar las nuestras
               const cleanClasses = existingClasses
                 .replace(/text-blue-\d+/g, '')
                 .replace(/hover:text-blue-\d+/g, '')
@@ -45,11 +42,9 @@ const RichTextSummary: React.FC<RichTextSummaryProps> = ({
             }
           );
         } else {
-          // Si no tiene class, agregarla
           attributes += ' class="text-blue-600 hover:text-blue-800 underline"';
         }
         
-        // Asegurar que tenga target="_blank" y rel
         if (!attributes.includes('target=')) {
           attributes += ' target="_blank"';
         }
@@ -64,17 +59,104 @@ const RichTextSummary: React.FC<RichTextSummaryProps> = ({
     return processedContent;
   };
 
-  // Extraer solo el texto plano del HTML
+  // Extraer solo el texto plano del HTML para verificar la longitud
   const getPlainText = (html: string) => {
-    // Crear un elemento temporal para extraer el texto
     const temp = document.createElement('div');
     temp.innerHTML = html;
     return temp.textContent || temp.innerText || '';
   };
 
+  // Función para truncar HTML manteniendo las etiquetas
+  const truncateHtml = (html: string, maxLength: number) => {
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    const textContent = temp.textContent || temp.innerText || '';
+    
+    // Si el texto no necesita truncado, devolver el HTML original
+    if (textContent.length <= maxLength) {
+      return html;
+    }
+
+    // Función recursiva para truncar manteniendo las etiquetas
+    const truncateNode = (node: Node, currentLength: number): { html: string; length: number; truncated: boolean } => {
+      if (currentLength >= maxLength) {
+        return { html: '', length: currentLength, truncated: true };
+      }
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || '';
+        const remainingLength = maxLength - currentLength;
+        
+        if (text.length <= remainingLength) {
+          return { html: text, length: currentLength + text.length, truncated: false };
+        } else {
+          const truncatedText = text.substring(0, remainingLength).trim();
+          return { html: truncatedText, length: currentLength + truncatedText.length, truncated: true };
+        }
+      }
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as Element;
+        const tagName = element.tagName.toLowerCase();
+        let html = `<${tagName}`;
+        
+        // Copiar atributos
+        for (let i = 0; i < element.attributes.length; i++) {
+          const attr = element.attributes[i];
+          html += ` ${attr.name}="${attr.value}"`;
+        }
+        html += '>';
+
+        let totalLength = currentLength;
+        let childrenHtml = '';
+        let wasTruncated = false;
+
+        // Procesar nodos hijos
+        for (let i = 0; i < node.childNodes.length; i++) {
+          const child = node.childNodes[i];
+          const result = truncateNode(child, totalLength);
+          
+          childrenHtml += result.html;
+          totalLength = result.length;
+          
+          if (result.truncated) {
+            wasTruncated = true;
+            break;
+          }
+        }
+
+        html += childrenHtml + `</${tagName}>`;
+        
+        return { html, length: totalLength, truncated: wasTruncated };
+      }
+
+      return { html: '', length: currentLength, truncated: false };
+    };
+
+    let result = '';
+    let totalLength = 0;
+    let wasTruncated = false;
+
+    for (let i = 0; i < temp.childNodes.length; i++) {
+      const child = temp.childNodes[i];
+      const nodeResult = truncateNode(child, totalLength);
+      
+      result += nodeResult.html;
+      totalLength = nodeResult.length;
+      
+      if (nodeResult.truncated) {
+        wasTruncated = true;
+        break;
+      }
+    }
+
+    return wasTruncated ? result + '...' : result;
+  };
+
   const plainText = getPlainText(text);
   
-  // Si el texto es corto, mostrarlo completo con procesamiento de enlaces
+  // Si el texto es corto, mostrarlo completo
   if (plainText.length <= maxLength) {
     const processedText = processLinks(text);
     return (
@@ -86,14 +168,14 @@ const RichTextSummary: React.FC<RichTextSummaryProps> = ({
     );
   }
 
-  // Si es largo, mostrar resumen con procesamiento de enlaces
-  const summary = plainText.substring(0, maxLength).trim() + '...';
-  const processedSummary = processLinks(summary);
+  // Si es largo, truncar manteniendo el HTML
+  const truncatedHtml = truncateHtml(text, maxLength);
+  const processedHtml = processLinks(truncatedHtml);
   
   return (
     <div 
       className={`${className} text-gray-600`}
-      dangerouslySetInnerHTML={{ __html: processedSummary }}
+      dangerouslySetInnerHTML={{ __html: processedHtml }}
       style={{ wordBreak: 'break-word' }}
     />
   );

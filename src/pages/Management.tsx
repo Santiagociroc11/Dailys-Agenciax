@@ -6,8 +6,7 @@ import { format } from 'date-fns';
 import toast, { Toaster } from 'react-hot-toast';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import RichTextDisplay from '../components/RichTextDisplay';
 
 interface TaskFeedback {
   feedback?: string;
@@ -1578,25 +1577,9 @@ function Management() {
                       <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
                         <h4 className="text-base font-semibold text-gray-700">Descripción</h4>
                       </div>
-                      {/* Apply specific link styles using ReactMarkdown components prop */}
-                      <div className="p-4 text-gray-700 text-sm prose prose-sm max-w-none"> {/* Remove prose-a styles */}
+                      <div className="p-4 text-gray-700 text-sm">
                         {taskDetails.description ? (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              // Sobrescribir el renderizador para la etiqueta 'a' (enlace)
-                              a: ({node, ...props}) => (
-                                <a
-                                  {...props}
-                                  className="text-blue-600 hover:underline" // Aplicar estilos directamente
-                                  target="_blank" // Abrir enlaces en nueva pestaña por defecto
-                                  rel="noopener noreferrer" // Seguridad para target="_blank"
-                                />
-                              )
-                            }}
-                          >
-                            {taskDetails.description}
-                          </ReactMarkdown>
+                          <RichTextDisplay text={taskDetails.description} />
                         ) : (
                           <span className="italic text-gray-500">Sin descripción disponible</span>
                         )}
