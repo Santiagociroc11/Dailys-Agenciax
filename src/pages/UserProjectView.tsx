@@ -692,7 +692,7 @@ export default function UserProjectView() {
           const allForThis = allSubtasksData!
             .filter(x => x.task_id === taskId)
             .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
-          const idx = allForThis.findIndex(x => !['completed', 'approved'].includes(x.status));
+          const idx = allForThis.findIndex(x => !['approved'].includes(x.status));
           if (idx >= 0 && allForThis[idx].assigned_to === user.id) {
             relevantSubs.push(allForThis[idx]);
           }
@@ -1654,7 +1654,7 @@ export default function UserProjectView() {
       if (subError) throw subError;
 
       // ¿Todas completadas o aprobadas?
-      const allDone = subtasks!.every(s => ['completed', 'approved'].includes(s.status));
+      const allDone = subtasks!.every(s => ['approved'].includes(s.status));
       const newStatus = allDone ? 'completed' : 'in_progress';
 
       // Actualizar la tarea padre
