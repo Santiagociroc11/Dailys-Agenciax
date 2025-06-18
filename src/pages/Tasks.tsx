@@ -559,16 +559,16 @@ function Tasks() {
       // 4. Eliminar subtareas
       if (subtasksData && subtasksData.length > 0) {
         console.log('🗑️ Eliminando subtareas');
-        const { error: subtasksError } = await supabase
-          .from('subtasks')
-          .delete()
-          .eq('task_id', selectedTask.id);
-        
-        if (subtasksError) {
+      const { error: subtasksError } = await supabase
+        .from('subtasks')
+        .delete()
+        .eq('task_id', selectedTask.id);
+      
+      if (subtasksError) {
           console.error("❌ Error al eliminar subtareas:", subtasksError);
-          throw subtasksError;
-        }
-        
+        throw subtasksError;
+      }
+      
         console.log('✅ Subtareas eliminadas');
       }
       
