@@ -351,8 +351,11 @@ export default function UserProjectView() {
 
   useEffect(() => {
     if (activeTab === 'gestion' && activeGestionSubTab === 'pendientes') {
-      setLoadingAssigned(true);
-      fetchAssignedTasks();
+      // Solo cargar si no hay datos o si el loading no está activo
+      if (!loadingAssigned && (assignedTaskItems.length === 0 && delayedTaskItems.length === 0 && returnedTaskItems.length === 0)) {
+        setLoadingAssigned(true);
+        fetchAssignedTasks();
+      }
     }
   }, [activeTab, activeGestionSubTab]);
 
@@ -695,36 +698,78 @@ export default function UserProjectView() {
           // DEBUG: Verificar secuencia completa
           console.log(`🔍 [SECUENCIAL] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - Tarea "${subs[0].tasks?.title}" - Total subtareas: ${allForThis.length}`);
           if (allForThis.length > 1) {
-            console.log(`   Secuencia:`, allForThis.map((s, idx) => `${idx}: "${s.title.substring(0, 30)}..." (${s.status}) ${s.assigned_to === user.id ? '👤' : ''}`));
+            console.log(`   Secuencia:`, allForThis.map((s, idx) => `${idx}: "${s.title.substring(0, 30)}..." (order:${s.sequence_order}) (${s.status}) ${s.assigned_to === user.id ? '👤' : ''}`));
           }
           
-          // Para tareas secuenciales: encontrar la primera subtarea donde todas las anteriores estén "approved"
-          let nextAvailableIdx = -1;
-          for (let i = 0; i < allForThis.length; i++) {
-            const currentSubtask = allForThis[i];
+          // NUEVA LÓGICA: Agrupar por sequence_order y manejar paralelismo
+          const groupedByOrder = new Map<number, Subtask[]>();
+          allForThis.forEach(subtask => {
+            const order = subtask.sequence_order || 0;
+            if (!groupedByOrder.has(order)) {
+              groupedByOrder.set(order, []);
+            }
+            groupedByOrder.get(order)!.push(subtask);
+          });
+
+          // Ordenar los grupos por sequence_order
+          const sortedOrders = Array.from(groupedByOrder.keys()).sort((a, b) => a - b);
+          
+          // Encontrar el primer nivel donde el usuario puede trabajar
+          let userCanWorkOnLevel = false;
+          for (const currentOrder of sortedOrders) {
+            const currentLevelSubtasks = groupedByOrder.get(currentOrder)!;
             
-            // Si la subtarea actual no está aprobada
-            if (currentSubtask.status !== 'approved') {
-              // Verificar que todas las anteriores estén aprobadas
-              const previousSubtasks = allForThis.slice(0, i);
-              const allPreviousApproved = i === 0 || previousSubtasks.every(prev => prev.status === 'approved');
-              
-              if (allPreviousApproved && currentSubtask.assigned_to === user.id) {
-                nextAvailableIdx = i;
-                // Solo logear cuando se selecciona una subtarea
-                console.log(`✅ [SECUENCIAL] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - Subtarea seleccionada: "${currentSubtask.title}" (posición ${i})`);
-                break;
-              } else if (!allPreviousApproved && currentSubtask.assigned_to === user.id) {
-                // Solo logear cuando hay un problema: subtarea del usuario pero anteriores no aprobadas
-                const nonApprovedPrevious = previousSubtasks.filter(p => p.status !== 'approved');
-                console.warn(`⚠️ [PROBLEMA SECUENCIAL] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - "${currentSubtask.title}" no disponible - Anteriores no aprobadas:`, 
-                  nonApprovedPrevious.map(p => `"${p.title}" (estado: ${p.status})`));
+            // Verificar si hay subtareas no aprobadas en este nivel
+            const hasIncompleteSubtasks = currentLevelSubtasks.some(s => s.status !== 'approved');
+            
+            if (hasIncompleteSubtasks) {
+              // Verificar que todos los niveles anteriores estén completamente aprobados
+              let allPreviousLevelsComplete = true;
+              for (const prevOrder of sortedOrders) {
+                if (prevOrder >= currentOrder) break;
+                
+                const prevLevelSubtasks = groupedByOrder.get(prevOrder)!;
+                const allPrevApproved = prevLevelSubtasks.every(s => s.status === 'approved');
+                
+                if (!allPrevApproved) {
+                  allPreviousLevelsComplete = false;
+                  break;
+                }
               }
+              
+              if (allPreviousLevelsComplete) {
+                // El usuario puede trabajar en este nivel - añadir TODAS sus subtareas disponibles
+                const userSubtasksInLevel = currentLevelSubtasks.filter(s => 
+                  s.assigned_to === user.id && s.status !== 'approved'
+                );
+                
+                if (userSubtasksInLevel.length > 0) {
+                  console.log(`✅ [SECUENCIAL PARALELO] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - Nivel ${currentOrder} disponible con ${userSubtasksInLevel.length} subtarea(s) para el usuario`);
+                  userSubtasksInLevel.forEach(subtask => {
+                    console.log(`   📌 Subtarea disponible: "${subtask.title}"`);
+                  });
+                  relevantSubs.push(...userSubtasksInLevel);
+                  userCanWorkOnLevel = true;
+                }
+              } else {
+                // Hay niveles anteriores sin completar, informar al usuario
+                const incompletePrevLevels = sortedOrders
+                  .filter(order => order < currentOrder)
+                  .filter(order => !groupedByOrder.get(order)!.every(s => s.status === 'approved'));
+                
+                const userSubtasksInLevel = currentLevelSubtasks.filter(s => s.assigned_to === user.id);
+                if (userSubtasksInLevel.length > 0) {
+                  console.warn(`⚠️ [SECUENCIAL BLOQUEADO] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - Nivel ${currentOrder} bloqueado. Niveles anteriores incompletos: ${incompletePrevLevels.join(', ')}`);
+                }
+              }
+              
+              // Solo procesar el primer nivel con subtareas incompletas
+              break;
             }
           }
           
-          if (nextAvailableIdx >= 0) {
-            relevantSubs.push(allForThis[nextAvailableIdx]);
+          if (!userCanWorkOnLevel) {
+            console.log(`ℹ️ [SECUENCIAL] Proyecto "${projectMap[subs[0].tasks?.project_id || ''] || 'Sin proyecto'}" - No hay subtareas disponibles para el usuario en este momento`);
           }
         } else {
           relevantSubs.push(...subs);
@@ -1132,12 +1177,17 @@ export default function UserProjectView() {
       // Limpiar las tareas seleccionadas
       setSelectedTasks([]);
 
-      // Cambiar a la pestaña de gestión
-      setActiveTab('gestion');
+      // Actualizar ambas listas de tareas ANTES de cambiar de pestaña
+      await Promise.all([
+        fetchProjectTasksAndSubtasks(),
+        fetchAssignedTasks()
+      ]);
 
-      // Actualizar ambas listas de tareas
-      await fetchProjectTasksAndSubtasks();
-      await fetchAssignedTasks();
+      // Pequeño delay para asegurar que todos los estados se actualicen
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Cambiar a la pestaña de gestión DESPUÉS de que se actualicen los datos
+      setActiveTab('gestion');
 
       // Forzar una segunda actualización para asegurar que la UI refleje el cambio de estado
       setTimeout(async () => {
