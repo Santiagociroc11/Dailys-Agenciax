@@ -74,6 +74,14 @@ const columns = [
   { id: 'approved', name: statusTextMap['approved'].toUpperCase() }
 ];
 
+const mainTaskColumns = [
+  { id: 'main_pending', name: 'PENDIENTE' },
+  { id: 'main_in_progress', name: 'EN PROCESO' },
+  { id: 'main_blocked', name: 'BLOQUEADA' },
+  { id: 'main_in_review', name: 'EN REVISIÓN' },
+  { id: 'main_completed', name: 'COMPLETADA' }
+];
+
 // Helper function to parse notes and feedback
 const getItemDetails = (item: Task | Subtask | null): {
   description: string | null;
@@ -151,6 +159,55 @@ const getItemDetails = (item: Task | Subtask | null): {
   return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration };
 };
 
+const determineMainTaskStatus = (task: Task, subtasksOfTask: Subtask[]): string => {
+  // If the task has subtasks, use the aggregation logic
+  if (subtasksOfTask && subtasksOfTask.length > 0) {
+    const allApproved = subtasksOfTask.every(st => st.status === 'approved');
+    if (allApproved) {
+      return 'main_completed';
+    }
+
+    const anyInReview = subtasksOfTask.some(st => st.status === 'in_review');
+    if (anyInReview) {
+      return 'main_in_review';
+    }
+
+    const anyBlockedOrReturned = subtasksOfTask.some(st => st.status === 'blocked' || st.status === 'returned');
+    if (anyBlockedOrReturned) {
+      return 'main_blocked';
+    }
+    
+    const anyInProgress = subtasksOfTask.some(st => ['in_progress', 'completed'].includes(st.status));
+    if(anyInProgress) {
+        return 'main_in_progress';
+    }
+
+    const anyAssigned = subtasksOfTask.some(st => !!st.assigned_to);
+    if (anyAssigned) {
+      return 'main_in_progress';
+    }
+    
+    return 'main_pending';
+  }
+
+  // If the task has NO subtasks, map its own status
+  switch (task.status) {
+    case 'approved':
+      return 'main_completed';
+    case 'in_review':
+    case 'completed':
+      return 'main_in_review';
+    case 'blocked':
+    case 'returned':
+      return 'main_blocked';
+    case 'assigned':
+      return 'main_in_progress';
+    case 'pending':
+    default:
+      return 'main_pending';
+  }
+};
+
 function Management() {
   const { isAdmin, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -166,6 +223,8 @@ function Management() {
   const [groupByPriority, setGroupByPriority] = useState(false);
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
+  const [view, setView] = useState<'subtasks' | 'main_tasks'>('subtasks');
+  const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { main_task_status: string })[]>([]);
   
   // Estados para los modales
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -188,6 +247,17 @@ function Management() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const processMainTasks = useCallback((allTasks: Task[], allSubtasks: Subtask[]) => {
+    if (!allTasks) return;
+    
+    const tasksWithStatus = allTasks.map(task => {
+        const relatedSubtasks = allSubtasks.filter(st => st.task_id === task.id);
+        const main_task_status = determineMainTaskStatus(task, relatedSubtasks);
+        return { ...task, main_task_status };
+    });
+    setProcessedMainTasks(tasksWithStatus);
+  }, []);
+
   useEffect(() => {
     fetchProjects();
     fetchUsers();
@@ -197,6 +267,12 @@ function Management() {
   useEffect(() => {
     fetchData();
   }, [selectedProject, selectedPriority, selectedAssignee]);
+  
+  useEffect(() => {
+    if (tasks.length > 0 || subtasks.length > 0) {
+        processMainTasks(tasks, subtasks);
+    }
+  }, [tasks, subtasks, processMainTasks]);
 
   useEffect(() => {
     // Solo configurar el intervalo si autoRefresh está activado
@@ -294,6 +370,7 @@ function Management() {
       setSubtasks(subtasksData || []);
     } catch (error) {
       console.error('Error al cargar datos:', error);
+      toast.error('No se pudieron cargar los datos.');
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -1067,6 +1144,86 @@ function Management() {
     }
   }
 
+  const groupMainTasks = () => {
+    let grouped: { [key: string]: (Task & { main_task_status: string })[] } = { 
+      'main_pending': [], 
+      'main_in_progress': [], 
+      'main_blocked': [], 
+      'main_in_review': [], 
+      'main_completed': [] 
+    };
+
+    processedMainTasks.forEach(task => {
+        if (grouped[task.main_task_status]) {
+            grouped[task.main_task_status].push(task);
+        } else {
+            grouped[task.main_task_status] = [task];
+        }
+    });
+    
+    return grouped;
+  };
+
+  const renderMainTaskKanbanBoard = () => {
+    const groupedTasks = groupMainTasks();
+
+    return (
+      <div className="overflow-auto h-full">
+        <div className="grid grid-cols-5 gap-4">
+          {mainTaskColumns.map(column => (
+            <div 
+              key={column.id} 
+              className="bg-gray-50 rounded-lg p-2 min-h-[300px]"
+            >
+              <h4 className="font-medium text-center py-2 border-b mb-2">{column.name} ({groupedTasks[column.id]?.length || 0})</h4>
+              <div className="space-y-2">
+                {(groupedTasks[column.id] || []).map(task => (
+                  <div 
+                    key={task.id}
+                    className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
+                    onClick={() => handleViewTaskDetails(task.id, 'task')}
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <h5 className="font-medium text-gray-800 flex-1 min-w-0">
+                        {task.title}
+                      </h5>
+                      <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
+                        task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                        task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        {task.priority === 'high' ? 'Alta' :
+                         task.priority === 'medium' ? 'Media' : 'Baja'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-1.5">
+                      <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                        <Clock className="w-2.5 h-2.5 mr-1" />
+                        <span>{task.estimated_duration} min</span>
+                      </div>
+                      <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                        <Calendar className="w-2.5 h-2.5 mr-1" />
+                        <span>{new Date(task.deadline).toLocaleDateString()}</span>
+                      </div>
+                      {task.project_id && (
+                        <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                          <FolderOpen className="w-2.5 h-2.5 mr-1" />
+                          <span className="truncate max-w-[120px]">
+                            {projects.find(p => p.id === task.project_id)?.name || 'Proyecto'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col p-4">
       <div className="flex justify-between items-center mb-6">
@@ -1130,10 +1287,24 @@ function Management() {
             </span>
           </div>
         </div>
-        <div>
+        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+          <div className="inline-flex rounded-md shadow-sm mr-4">
+              <button
+                onClick={() => setView('subtasks')}
+                className={`px-4 py-2 text-sm font-medium border rounded-l-md ${view === 'subtasks' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                Subtareas
+              </button>
+              <button
+                onClick={() => setView('main_tasks')}
+                className={`-ml-px px-4 py-2 text-sm font-medium border rounded-r-md ${view === 'main_tasks' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                Tareas Principales
+              </button>
+          </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-md flex items-center"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           >
             <Filter className="w-5 h-5 mr-2" />
             Filtros y Agrupación
@@ -1307,59 +1478,11 @@ function Management() {
 
       <div className="flex-1 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+          <div className="text-center py-10">
+            <p className="text-gray-500">Cargando tablero...</p>
           </div>
         ) : (
-          <div 
-            className="h-full"
-            onDragOver={(e) => {
-              e.preventDefault();
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              
-              try {
-                const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-                const dropColumn = (e.target as Element).closest('[data-column-id]');
-                
-                if (dropColumn) {
-                  const newStatus = dropColumn.getAttribute('data-column-id');
-                  if (newStatus) {
-                    // En vez de llamar directamente a handleStatusChange, que valide primero
-                    // el estado actual del elemento y si es una transición válida
-                    const isSubtask = data.type === 'subtask';
-                    const currentItem = isSubtask 
-                      ? subtasks.find(s => s.id === data.id)
-                      : tasks.find(t => t.id === data.id);
-                      
-                    if (!currentItem) return;
-                    
-                    const currentStatus = currentItem.status;
-                    
-                    // Las mismas validaciones que en handleStatusChange
-                    const allowedTransitions: Record<string, string[]> = {
-                      'completed': ['in_review'],
-                      'blocked': ['in_review'],
-                      'in_review': ['returned', 'approved']
-                    };
-                    
-                    if (!allowedTransitions[currentStatus as keyof typeof allowedTransitions]?.includes(newStatus)) {
-                      toast.error(`No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
-                      return;
-                    }
-                    
-                    // Ahora sí podemos llamar a handleStatusChange
-                    handleStatusChange(data.id, newStatus, isSubtask);
-                  }
-                }
-              } catch (error) {
-                console.error('Error al procesar el drop:', error);
-              }
-            }}
-          >
-            {renderKanbanBoard()}
-          </div>
+          view === 'subtasks' ? renderKanbanBoard() : renderMainTaskKanbanBoard()
         )}
       </div>
 
@@ -1683,16 +1806,16 @@ function Management() {
                            <h4 className="text-base font-semibold text-gray-700">Subtareas ({relatedSubtasks.length})</h4>
                          </div>
                          <div className="overflow-x-auto">
-                           <table className="min-w-full divide-y divide-gray-200">
+                           <table className="w-full table-fixed divide-y divide-gray-200">
                              <thead className="bg-gray-100">
                                <tr>
-                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Título</th>
-                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Título</th>
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Estado</th>
                                  {taskDetails.is_sequential && (
-                                   <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Orden</th>
+                                   <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-[50px]">Orden</th>
                                  )}
-                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
-                                 <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Duración</th>
+                                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Asignado a</th>
+                                 <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Duración</th>
                                </tr>
                              </thead>
                              <tbody className="bg-white divide-y divide-gray-200">
@@ -1705,17 +1828,17 @@ function Management() {
                                      onClick={() => handleViewTaskDetails(subtask.id, 'subtask')} // Allow drilling down
                                      title={`Ver detalles de ${subtask.title}`}
                                    >
-                                     <td className="px-4 py-3 whitespace-nowrap">
-                                       <div className="text-sm font-medium text-gray-900">{subtask.title}</div>
+                                     <td className="px-4 py-3">
+                                       <div className="text-sm font-medium text-gray-900 line-clamp-5" title={subtask.title}>{subtask.title}</div>
                                         {subtask.status === 'returned' && (
                                           <span className="text-xs text-orange-600">(Devuelta)</span>
                                         )}
                                      </td>
-                                     <td className="px-4 py-3 whitespace-nowrap">
+                                     <td className="px-4 py-3">
                                        <TaskStatusDisplay status={subtask.status} />
                                      </td>
                                      {taskDetails.is_sequential && (
-                                       <td className="px-4 py-3 whitespace-nowrap text-center text-sm text-gray-500">
+                                       <td className="px-4 py-3 text-center text-sm text-gray-500">
                                          {subtask.sequence_order ?? '-'}
                                        </td>
                                      )}
