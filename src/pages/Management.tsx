@@ -1145,81 +1145,139 @@ function Management() {
   }
 
   const groupMainTasks = () => {
-    let grouped: { [key: string]: (Task & { main_task_status: string })[] } = { 
-      'main_pending': [], 
-      'main_in_progress': [], 
-      'main_blocked': [], 
-      'main_in_review': [], 
-      'main_completed': [] 
-    };
+    let grouped: { [key: string]: (Task & { main_task_status: string })[] } = {};
 
-    processedMainTasks.forEach(task => {
-        if (grouped[task.main_task_status]) {
-            grouped[task.main_task_status].push(task);
-        } else {
-            grouped[task.main_task_status] = [task];
-        }
+    const sourceTasks = processedMainTasks;
+
+    if (groupByProject) {
+      projects.forEach(project => {
+        grouped[project.id] = sourceTasks.filter(task => task.project_id === project.id);
+      });
+      grouped['no_project'] = sourceTasks.filter(task => !task.project_id);
+    } else if (groupByPriority) {
+      const priorities = ['high', 'medium', 'low'];
+      priorities.forEach(priority => {
+        grouped[priority] = sourceTasks.filter(task => task.priority === priority);
+      });
+    } else if (groupByAssignee) {
+      users.forEach(user => {
+        const tasksForUser = new Set<string>();
+        const userSubtasks = subtasks.filter(st => st.assigned_to === user.id);
+        userSubtasks.forEach(st => tasksForUser.add(st.task_id));
+        grouped[user.id] = sourceTasks.filter(task => tasksForUser.has(task.id));
+      });
+      const assignedTaskIds = new Set(subtasks.filter(st => st.assigned_to).map(st => st.task_id));
+      grouped['unassigned'] = sourceTasks.filter(task => {
+        const relatedSubtasks = subtasks.filter(st => st.task_id === task.id);
+        if (relatedSubtasks.length === 0) return true; // Standalone tasks are unassigned in this context
+        return !assignedTaskIds.has(task.id);
+      });
+    } else if (groupByDeadline) {
+      const today = new Date();
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      
+      const nextWeek = new Date();
+      nextWeek.setDate(today.getDate() + 7);
+      const nextWeekStr = format(nextWeek, 'yyyy-MM-dd');
+      
+      const nextMonth = new Date();
+      nextMonth.setMonth(today.getMonth() + 1);
+      const nextMonthStr = format(nextMonth, 'yyyy-MM-dd');
+
+      grouped['today'] = sourceTasks.filter(t => t.deadline && t.deadline.startsWith(todayStr));
+      grouped['this_week'] = sourceTasks.filter(t => t.deadline && t.deadline > todayStr && t.deadline <= nextWeekStr);
+      grouped['this_month'] = sourceTasks.filter(t => t.deadline && t.deadline > nextWeekStr && t.deadline <= nextMonthStr);
+      grouped['later'] = sourceTasks.filter(t => t.deadline && t.deadline > nextMonthStr);
+      grouped['no_deadline'] = sourceTasks.filter(t => !t.deadline);
+    } else {
+      grouped['all'] = sourceTasks;
+    }
+
+    // Filter out empty groups
+    Object.keys(grouped).forEach(key => {
+      if (grouped[key].length === 0) {
+        delete grouped[key];
+      }
     });
-    
+
     return grouped;
   };
 
   const renderMainTaskKanbanBoard = () => {
-    const groupedTasks = groupMainTasks();
+    const groupedTasksByCriteria = groupMainTasks();
 
     return (
       <div className="overflow-auto h-full">
-        <div className="grid grid-cols-5 gap-4">
-          {mainTaskColumns.map(column => (
-            <div 
-              key={column.id} 
-              className="bg-gray-50 rounded-lg p-2 min-h-[300px]"
-            >
-              <h4 className="font-medium text-center py-2 border-b mb-2">{column.name} ({groupedTasks[column.id]?.length || 0})</h4>
-              <div className="space-y-2">
-                {(groupedTasks[column.id] || []).map(task => (
-                  <div 
-                    key={task.id}
-                    className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
-                    onClick={() => handleViewTaskDetails(task.id, 'task')}
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <h5 className="font-medium text-gray-800 flex-1 min-w-0">
-                        {task.title}
-                      </h5>
-                      <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
-                        task.priority === 'high' ? 'bg-red-100 text-red-800' :
-                        task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {task.priority === 'high' ? 'Alta' :
-                         task.priority === 'medium' ? 'Media' : 'Baja'}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-1.5">
-                      <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
-                        <Clock className="w-2.5 h-2.5 mr-1" />
-                        <span>{task.estimated_duration} min</span>
+        {Object.keys(groupedTasksByCriteria).map(groupId => {
+          const groupTasks = groupedTasksByCriteria[groupId];
+          
+          if (groupTasks.length === 0) {
+            return null;
+          }
+          
+          return (
+            <div key={groupId} className="mb-8">
+              <h3 className="text-lg font-semibold mb-4 bg-gray-100 p-2 rounded">
+                {getGroupTitle(groupId)}
+              </h3>
+              <div className="grid grid-cols-5 gap-4">
+                {mainTaskColumns.map(column => {
+                  const columnTasks = groupTasks.filter(task => task.main_task_status === column.id);
+                  
+                  return (
+                    <div 
+                      key={column.id} 
+                      className="bg-gray-50 rounded-lg p-2 min-h-[300px]"
+                    >
+                      <h4 className="font-medium text-center py-2 border-b mb-2">{column.name} ({columnTasks.length || 0})</h4>
+                      <div className="space-y-2">
+                        {columnTasks.map(task => (
+                          <div 
+                            key={task.id}
+                            className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
+                            onClick={() => handleViewTaskDetails(task.id, 'task')}
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <h5 className="font-medium text-gray-800 flex-1 min-w-0">
+                                {task.title}
+                              </h5>
+                              <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
+                                task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                                task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-green-100 text-green-800'
+                              }`}>
+                                {task.priority === 'high' ? 'Alta' :
+                                 task.priority === 'medium' ? 'Media' : 'Baja'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-1.5">
+                              <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                <Clock className="w-2.5 h-2.5 mr-1" />
+                                <span>{task.estimated_duration} min</span>
+                              </div>
+                              <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                <Calendar className="w-2.5 h-2.5 mr-1" />
+                                <span>{new Date(task.deadline).toLocaleDateString()}</span>
+                              </div>
+                              {task.project_id && (
+                                <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
+                                  <FolderOpen className="w-2.5 h-2.5 mr-1" />
+                                  <span className="truncate max-w-[120px]">
+                                    {projects.find(p => p.id === task.project_id)?.name || 'Proyecto'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
-                        <Calendar className="w-2.5 h-2.5 mr-1" />
-                        <span>{new Date(task.deadline).toLocaleDateString()}</span>
-                      </div>
-                      {task.project_id && (
-                        <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
-                          <FolderOpen className="w-2.5 h-2.5 mr-1" />
-                          <span className="truncate max-w-[120px]">
-                            {projects.find(p => p.id === task.project_id)?.name || 'Proyecto'}
-                          </span>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     );
   };
