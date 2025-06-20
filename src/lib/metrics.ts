@@ -270,89 +270,108 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
  */
 export async function getAllUsersMetrics(): Promise<UserMetrics[]> {
   try {
-    // 1. Carga masiva de datos
+    // 1. Carga masiva de datos necesarios, similar a como lo hacía la lógica anterior que funcionaba.
     const [
       { data: users, error: usersError },
-      { data: history, error: historyError }
+      { data: allTasks, error: tasksError },
+      { data: allSubtasks, error: subtasksError }
     ] = await Promise.all([
       supabase.from('users').select('id, name, email'),
-      supabase.from('status_history').select('*')
+      supabase.from('tasks').select('id, assigned_users, status'),
+      supabase.from('subtasks').select('id, task_id, assigned_to, status')
     ]);
 
-    if (usersError || historyError) {
-      console.error("Error fetching data for metrics:", { usersError, historyError });
+    if (usersError || tasksError || subtasksError) {
+      console.error("Error fetching batch data for metrics:", { usersError, tasksError, subtasksError });
       return [];
     }
 
-    // 2. Procesar el historial para cada usuario
-    const metricsMap = new Map<string, any>();
+    // Mapa para saber qué tareas tienen subtareas y no contarlas dos veces
+    const tasksWithSubtasks = new Set(allSubtasks.map(st => st.task_id));
+    const userMetrics = new Map<string, any>();
 
-    for (const user of users) {
-      metricsMap.set(user.id, {
+    // 2. Inicializar contadores para todos los usuarios
+    users.forEach(user => {
+      userMetrics.set(user.id, {
         userId: user.id,
         userName: user.name || 'Sin nombre',
         userEmail: user.email || 'Sin email',
-        tasksDelivered: 0, // Tareas que el usuario ha puesto en 'completed' o 'in_review'
-        tasksReturned: 0,  // De las entregadas, cuántas se devolvieron
-        tasksApproved: 0,  // De las entregadas, cuántas se aprobaron
-        uniqueTasksWorkedOn: new Set(),
+        tasksAssigned: 0,
+        tasksApproved: 0,
+        tasksReturned: 0,
+        tasksDelivered: 0, // Tareas que han sido entregadas (completed o in_review)
       });
-    }
+    });
 
-    for (const event of history) {
-      const userId = event.changed_by;
-      if (!metricsMap.has(userId)) continue;
-
-      const userMetrics = metricsMap.get(userId);
-      const item_id = event.subtask_id || event.task_id;
-
-      // Contar como "entregada" si el usuario la marcó como completada/en revisión
-      if (['completed', 'in_review'].includes(event.new_status)) {
-        userMetrics.tasksDelivered++;
-        userMetrics.uniqueTasksWorkedOn.add(item_id);
-      }
-
-      // Contar como "devuelta" si estaba en revisión y pasó a "returned"
-      if (['completed', 'in_review'].includes(event.previous_status) && event.new_status === 'returned') {
-        userMetrics.tasksReturned++;
-      }
-        
-      // Contar como "aprobada" si estaba en revisión y pasó a "approved"
-      if (['completed', 'in_review'].includes(event.previous_status) && event.new_status === 'approved') {
-        userMetrics.tasksApproved++;
+    // 3. Procesar subtareas (la unidad de trabajo principal)
+    for (const subtask of allSubtasks) {
+      if (subtask.assigned_to) {
+        const metrics = userMetrics.get(subtask.assigned_to);
+        if (metrics) {
+          metrics.tasksAssigned++;
+          if (subtask.status === 'approved') {
+            metrics.tasksApproved++;
+            metrics.tasksDelivered++; // Una tarea aprobada obviamente fue entregada primero
+          } else if (subtask.status === 'returned') {
+            metrics.tasksReturned++;
+            metrics.tasksDelivered++; // Una tarea devuelta también fue entregada
+          } else if (['completed', 'in_review'].includes(subtask.status)) {
+            metrics.tasksDelivered++;
+          }
+        }
       }
     }
 
-    // 3. Calcular métricas finales y devolver el resultado
+    // 4. Procesar tareas que no tienen subtareas (trabajo independiente)
+    for (const task of allTasks) {
+      if (!tasksWithSubtasks.has(task.id) && task.assigned_users && task.assigned_users.length > 0) {
+         for (const userId of task.assigned_users) {
+            const metrics = userMetrics.get(userId);
+            if (metrics) {
+                metrics.tasksAssigned++;
+                 if (task.status === 'approved') {
+                    metrics.tasksApproved++;
+                    metrics.tasksDelivered++;
+                } else if (task.status === 'returned') {
+                    metrics.tasksReturned++;
+                    metrics.tasksDelivered++;
+                } else if (['completed', 'in_review'].includes(task.status)) {
+                    metrics.tasksDelivered++;
+                }
+            }
+        }
+      }
+    }
+
+    // 5. Calcular las tasas y métricas finales
     const finalMetrics: UserMetrics[] = [];
-    for (const userMetric of metricsMap.values()) {
-      const { tasksDelivered, tasksReturned, tasksApproved } = userMetric;
+    for (const metrics of userMetrics.values()) {
+        const { tasksDelivered, tasksReturned, tasksApproved } = metrics;
+        
+        // El total de trabajo revisado es la suma de lo aprobado y lo devuelto.
+        const totalReviewed = tasksApproved + tasksReturned;
+        
+        // La tasa de aprobación se calcula sobre el total revisado. Si no se ha revisado nada, es 100%.
+        const approvalRate = totalReviewed > 0 ? (tasksApproved / totalReviewed) * 100 : 100;
+        
+        // La tasa de retrabajo se calcula sobre el total entregado.
+        const reworkRate = tasksDelivered > 0 ? (tasksReturned / tasksDelivered) * 100 : 0;
       
-      const totalReviewed = tasksReturned + tasksApproved;
-      
-      const approvalRate = totalReviewed > 0 ? (tasksApproved / totalReviewed) * 100 : 100;
-      const reworkRate = tasksDelivered > 0 ? (tasksReturned / tasksDelivered) * 100 : 0;
-      
-      finalMetrics.push({
-        ...userMetric,
-        tasksCompleted: tasksApproved, // Consideramos "completadas" las aprobadas
-        tasksAssigned: userMetric.uniqueTasksWorkedOn.size,
-        completionRate: userMetric.uniqueTasksWorkedOn.size > 0 ? (tasksApproved / userMetric.uniqueTasksWorkedOn.size) * 100 : 0,
-        approvalRate: approvalRate,
-        reworkRate: reworkRate,
-        // Métricas que ya no se calculan aquí o requieren otra fuente
-        averageCompletionTime: 0,
-        efficiencyRatio: 0,
-        onTimeDeliveryRate: 0,
-        overdueTasks: 0,
-        upcomingDeadlines: 0,
-        averageTasksPerDay: 0,
-        tasksCompletedThisWeek: 0,
-        tasksCompletedThisMonth: 0,
-      });
+        finalMetrics.push({
+            ...metrics,
+            tasksCompleted: tasksApproved, // Para la vista, las "completadas" son las que están aprobadas.
+            completionRate: metrics.tasksAssigned > 0 ? (tasksApproved / metrics.tasksAssigned) * 100 : 0,
+            approvalRate,
+            reworkRate,
+            // Métricas no relevantes para esta vista
+            averageCompletionTime: 0, efficiencyRatio: 0, onTimeDeliveryRate: 0, overdueTasks: 0, upcomingDeadlines: 0, averageTasksPerDay: 0, tasksCompletedThisWeek: 0, tasksCompletedThisMonth: 0,
+        });
     }
 
-    return finalMetrics;
+    // Devolver solo usuarios con tareas asignadas para no poblar la tabla con ceros.
+    return finalMetrics
+      .filter(m => m.tasksAssigned > 0)
+      .sort((a, b) => (b.tasksApproved / b.tasksAssigned) - (a.tasksApproved / a.tasksAssigned));
 
   } catch (error) {
     console.error("Error in getAllUsersMetrics:", error);
