@@ -433,16 +433,63 @@ function Management() {
     feedbackData: TaskFeedback | null = null,
     additionalData: any = null
   ) {
+    const table = isSubtask ? 'subtasks' : 'tasks';
+    
+    // 1. Obtener el estado actual para registrarlo en el historial
+    const { data: currentItem, error: fetchError } = await supabase
+        .from(table)
+        .select('status')
+        .eq('id', itemId)
+        .single();
+
+    if (fetchError) {
+        console.error(`[HISTORY] No se pudo obtener el estado actual para ${table}#${itemId}:`, fetchError);
+        // Si no podemos obtener el estado anterior, no podemos registrar el historial, pero continuamos con la actualización.
+    }
+    const previousStatus = currentItem?.status || 'unknown';
+
+
+    const updateData: any = { status: newStatus };
+
+    if (feedbackData) {
+      updateData.feedback = feedbackData;
+    }
+
     try {
-      const table = isSubtask ? 'subtasks' : 'tasks';
-      const updateData: any = additionalData || { status: newStatus };
+      const { data, error } = await supabase
+        .from(table)
+        .update(updateData)
+        .eq('id', itemId)
+        .select('*, task_id') // Asegurarse de que task_id se devuelva para las subtareas
+        .single();
+
+      if (error) throw error;
       
-      // Si hay datos de feedback y no vienen en additionalData, añadirlos
-      if (feedbackData && !additionalData) {
-        updateData.feedback = feedbackData;
+      // 2. Registrar el cambio de estado en la tabla de historial
+      if (previousStatus !== 'unknown' && user) {
+        const historyRecord = {
+            task_id: isSubtask ? (data as Subtask).task_id : itemId,
+            subtask_id: isSubtask ? itemId : null,
+            changed_by: user.id,
+            previous_status: previousStatus,
+            new_status: newStatus,
+            metadata: feedbackData, // El feedback es una buena metadata para este evento
+        };
+
+        const { error: historyError } = await supabase
+            .from('status_history')
+            .insert([historyRecord]);
+
+        if (historyError) {
+            console.error('⚠️ [HISTORY] No se pudo registrar el cambio de estado en Management:', historyError);
+        } else {
+            console.log('✅ [HISTORY] Cambio de estado registrado con éxito desde Management.');
+        }
       }
-      
-      // Actualizar primero la UI localmente (optimistic update)
+
+      toast.success('Estado actualizado correctamente');
+
+      // Actualizar la UI
       if (isSubtask) {
         setSubtasks(prev => prev.map(subtask => 
           subtask.id === itemId 
@@ -467,25 +514,14 @@ function Management() {
         ));
       }
       
-      // Luego actualizar en el servidor
-      const { error } = await supabase
-        .from(table)
-        .update(updateData)
-        .eq('id', itemId);
-      
-      if (error) {
-        // Si hay error, revertir la actualización local
-        toast.error('Error al actualizar el estado');
-        console.error('Error al actualizar estado:', error);
-        
-        // Recargar datos para asegurar consistencia
-        fetchData();
-        return;
+      // Si se aprobó una subtarea, verificar si la tarea padre debe ser aprobada
+      if (isSubtask && newStatus === 'approved') {
+        const parentTaskId = (data as Subtask)?.task_id;
+        if (parentTaskId) {
+          await checkAndApproveParentTask(parentTaskId);
+        }
       }
-      
-      // Mostrar mensaje de éxito si todo fue bien
-      toast.success(`Estado actualizado a "${newStatus}" correctamente`);
-      
+
       // Cerrar modales
       setShowFeedbackModal(false);
       setShowApprovalModal(false);
@@ -501,6 +537,79 @@ function Management() {
     }
   }
   
+  async function checkAndApproveParentTask(parentId: string) {
+    try {
+        // 1. Get parent task's current state
+        const { data: parentTask, error: parentError } = await supabase
+            .from('tasks')
+            .select('status')
+            .eq('id', parentId)
+            .single();
+
+        if (parentError || !parentTask) {
+            console.error(`[Parent Check] Could not get parent task ${parentId}.`, parentError);
+            return;
+        }
+        const previousStatus = parentTask.status;
+
+        // 2. Check if all other subtasks are also approved
+        const { data: subtasks, error: subError } = await supabase
+            .from('subtasks')
+            .select('status')
+            .eq('task_id', parentId);
+
+        if (subError) {
+            console.error(`[Parent Check] Could not get subtasks for task ${parentId}.`, subError);
+            return;
+        }
+
+        const allSubtasksApproved = subtasks!.every(s => s.status === 'approved');
+
+        // 3. If all are approved and parent isn't, update and log.
+        if (allSubtasksApproved && previousStatus !== 'approved') {
+            const newStatus = 'approved';
+            const { error: updateError } = await supabase
+                .from('tasks')
+                .update({ status: newStatus })
+                .eq('id', parentId);
+            
+            if (updateError) throw updateError;
+            
+            // Log the implicit status change
+            const historyRecord = {
+                task_id: parentId,
+                subtask_id: null,
+                changed_by: user!.id,
+                previous_status: previousStatus,
+                new_status: newStatus,
+                metadata: {
+                    reason: 'All subtasks have been approved.',
+                    triggering_action: 'subtask_approval'
+                },
+            };
+
+            const { error: historyError } = await supabase
+                .from('status_history')
+                .insert([historyRecord]);
+
+            if (historyError) {
+                console.error('⚠️ [HISTORY] Could not log implicit parent task APPROVAL:', historyError);
+            } else {
+                console.log(`✅ [HISTORY] Implicit parent task approval from '${previousStatus}' to '${newStatus}' logged.`);
+            }
+
+            // Also update the UI for the main task list
+            setTasks(prev => prev.map(task => 
+                task.id === parentId 
+                    ? { ...task, status: newStatus as any } 
+                    : task
+            ));
+        }
+    } catch (e) {
+        console.error(`Error checking and approving parent task ${parentId}:`, e);
+    }
+  }
+
   // Función para manejar el envío del formulario de retroalimentación
   function handleFeedbackSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -543,7 +652,7 @@ function Management() {
       const { data: assignmentData, error: fetchError } = await supabase
         .from('task_work_assignments')
         .select('id, notes')
-        .eq('task_id', itemId)
+        .eq(itemType === 'subtask' ? 'subtask_id' : 'task_id', itemId)
         .eq('task_type', itemType)
         .single();
       

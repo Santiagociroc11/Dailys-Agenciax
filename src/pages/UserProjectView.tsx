@@ -302,6 +302,7 @@ export default function UserProjectView() {
 
   // Estados para detalles de tareas y subtareas
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
+  const [taskForStatusUpdate, setTaskForStatusUpdate] = useState<Task | null>(null);
   const [previousSubtask, setPreviousSubtask] = useState<Subtask | null>(null);
   const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
   const [subtaskUsers, setSubtaskUsers] = useState<Record<string, string>>({});
@@ -1694,13 +1695,15 @@ export default function UserProjectView() {
     let isEditing = false;
 
     // Buscar primero en tareas pendientes
-    selectedTask = [...assignedTaskItems, ...delayedTaskItems].find(task => task.id === taskId);
+    selectedTask = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems].find(task => task.id === taskId);
 
     // Si no está en las tareas pendientes, buscar en las completadas
     if (!selectedTask) {
       selectedTask = completedTaskItems.find(task => task.id === taskId);
       isEditing = selectedTask?.status === 'completed';
     }
+
+    setTaskForStatusUpdate(selectedTask || null);
 
     const estimatedDuration = selectedTask ? selectedTask.estimated_duration : 0;
 
@@ -1732,23 +1735,63 @@ export default function UserProjectView() {
   // Helper para actualizar el estado de una tarea padre tras completar todas sus subtareas
   async function updateParentTaskStatus(parentId: string) {
     try {
-      // Consultar todas las subtareas
+      // 1. Get parent task's current state first
+      const { data: parentTask, error: parentError } = await supabase
+        .from('tasks')
+        .select('status')
+        .eq('id', parentId)
+        .single();
+
+      if (parentError) {
+        console.error(`[HISTORY] Could not get parent task ${parentId} for history logging`, parentError);
+        // Do not proceed if we can't get the parent task, to avoid inconsistent state.
+        return;
+      }
+      const previousStatus = parentTask.status;
+
+      // 2. Check status of all its subtasks
       const { data: subtasks, error: subError } = await supabase
         .from('subtasks')
         .select('status')
         .eq('task_id', parentId);
       if (subError) throw subError;
 
-      // ¿Todas completadas o aprobadas?
-      const allDone = subtasks!.every(s => ['approved'].includes(s.status));
-      const newStatus = allDone ? 'completed' : 'in_progress';
+      const allSubtasksDone = subtasks!.every(s => ['approved'].includes(s.status));
+      
+      const newStatus = allSubtasksDone ? 'completed' : 'in_progress';
 
-      // Actualizar la tarea padre
-      const { error: taskError } = await supabase
-        .from('tasks')
-        .update({ status: newStatus })
-        .eq('id', parentId);
-      if (taskError) throw taskError;
+      // 4. If the status needs to change, update and log it.
+      if (previousStatus !== newStatus) {
+        const { error: updateError } = await supabase
+          .from('tasks')
+          .update({ status: newStatus })
+          .eq('id', parentId);
+        
+        if (updateError) throw updateError;
+
+        // Log the implicit status change
+        const historyRecord = {
+            task_id: parentId,
+            subtask_id: null,
+            changed_by: user!.id, // Action was triggered by this user
+            previous_status: previousStatus,
+            new_status: newStatus,
+            metadata: {
+                reason: allSubtasksDone ? 'All subtasks finished.' : 'A subtask was finished, parent task is in progress.',
+                triggering_action: 'subtask_completion'
+            },
+        };
+
+        const { error: historyError } = await supabase
+            .from('status_history')
+            .insert([historyRecord]);
+
+        if (historyError) {
+            console.error('⚠️ [HISTORY] Could not log implicit parent task status change:', historyError);
+        } else {
+            console.log(`✅ [HISTORY] Implicit parent task status change from '${previousStatus}' to '${newStatus}' logged.`);
+        }
+      }
     } catch (e) {
       console.error('Error actualizando tarea padre:', e);
     }
@@ -1843,7 +1886,30 @@ export default function UserProjectView() {
         newStatus: selectedStatus
       });
 
-      // 5️⃣ Si era subtarea completada, actualiza la tarea padre
+      // 5️⃣ Registrar el cambio de estado en la nueva tabla de historial
+      if (taskForStatusUpdate) {
+        const historyRecord = {
+          task_id: isSubtask ? null : originalId,
+          subtask_id: isSubtask ? originalId : null,
+          changed_by: user!.id,
+          previous_status: taskForStatusUpdate.status,
+          new_status: selectedStatus,
+          metadata: metadata,
+        };
+
+        const { error: historyError } = await supabase
+          .from('status_history')
+          .insert([historyRecord]);
+
+        if (historyError) {
+          // Loggear el error pero no bloquear el flujo del usuario
+          console.error('⚠️ [HISTORY] No se pudo registrar el cambio de estado:', historyError);
+        } else {
+          console.log('✅ [HISTORY] Cambio de estado registrado con éxito.');
+        }
+      }
+
+      // 6️⃣ Si era subtarea completada, actualiza la tarea padre
       if (isSubtask && selectedStatus === 'completed') {
         const { data: { task_id: parentId } = {} } = await supabase
           .from('subtasks')
@@ -1853,7 +1919,7 @@ export default function UserProjectView() {
         if (parentId) await updateParentTaskStatus(parentId);
       }
 
-      // 6️⃣ Refrescar estado local
+      // 7️⃣ Refrescar estado local
       // Determinar de qué lista proviene la tarea
       const isInReturned = returnedTaskItems.some(t => t.id === selectedTaskId);
       const isInAssigned = assignedTaskItems.some(t => t.id === selectedTaskId);
@@ -1894,6 +1960,7 @@ export default function UserProjectView() {
 
       console.log('✅ [SUBMIT STATUS] Estado local actualizado correctamente');
       setShowStatusModal(false);
+      setTaskForStatusUpdate(null);
 
       // Toast de éxito
       toast.success(`Tarea ${selectedStatus === 'completed' ? 'completada' : 'actualizada'} con éxito!`);
@@ -3405,6 +3472,9 @@ export default function UserProjectView() {
                     selectedTaskDetails.title
                   }
                 </h3>
+                {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.original_id && (
+                  <p className="text-xs text-gray-500 font-mono mt-1">ID: {selectedTaskDetails.original_id}</p>
+                )}
                 {selectedTaskDetails.projectName && (
                   <div className="text-sm text-blue-600 mt-1">
                     Proyecto: {selectedTaskDetails.projectName}
@@ -3634,15 +3704,28 @@ export default function UserProjectView() {
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
             <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-medium">
-                {selectedStatus === 'completed' && completedTaskItems.some(t => t.id === selectedTaskId)
-                  ? 'Editar tarea completada'
-                  : returnedTaskItems.some(t => t.id === selectedTaskId)
-                    ? 'Actualizar tarea devuelta'
-                    : 'Actualizar estado de tarea'}
-              </h3>
+              <div>
+                <h3 className="text-lg font-medium">
+                  {selectedStatus === 'completed' && completedTaskItems.some(t => t.id === selectedTaskId)
+                    ? 'Editar tarea completada'
+                    : returnedTaskItems.some(t => t.id === selectedTaskId)
+                      ? 'Actualizar tarea devuelta'
+                      : 'Actualizar estado de tarea'}
+                </h3>
+                {taskForStatusUpdate && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    {taskForStatusUpdate.title}
+                    {taskForStatusUpdate.type === 'subtask' && taskForStatusUpdate.original_id && (
+                      <span className="text-xs text-gray-500 font-mono ml-2">ID: {taskForStatusUpdate.original_id}</span>
+                    )}
+                  </p>
+                )}
+              </div>
               <button
-                onClick={() => setShowStatusModal(false)}
+                onClick={() => {
+                  setShowStatusModal(false);
+                  setTaskForStatusUpdate(null);
+                }}
                 className="text-gray-400 hover:text-gray-500 focus:outline-none"
               >
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3680,9 +3763,9 @@ export default function UserProjectView() {
                   {selectedReturnedTask?.notes &&
                     typeof selectedReturnedTask?.notes === 'object' &&
                     selectedReturnedTask?.notes?.returned_at && (
-                      <p className="text-sm text-gray-500 mt-1">
-                        Devuelta el {format(new Date(selectedReturnedTask?.notes?.returned_at), 'dd/MM/yyyy HH:mm')}
-                        {selectedReturnedTask?.notes?.returned_by && (
+                      <div className="mt-3 text-xs text-gray-600">
+                        Devuelta el {format(new Date(selectedReturnedTask?.notes.returned_at), 'dd/MM/yyyy HH:mm')}
+                        {selectedReturnedTask?.notes.returned_by && (
                           <span> por {
                             // Si el ID parece un UUID, obtener el nombre del usuario
                             selectedReturnedTask?.notes?.returned_by.includes('-') ?
@@ -3698,7 +3781,7 @@ export default function UserProjectView() {
                               selectedReturnedTask?.notes?.returned_by
                           }</span>
                         )}
-                      </p>
+                      </div>
                     )}
                 </div>
               )}
@@ -3809,7 +3892,10 @@ export default function UserProjectView() {
 
             <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
               <button
-                onClick={() => setShowStatusModal(false)}
+                onClick={() => {
+                  setShowStatusModal(false);
+                  setTaskForStatusUpdate(null);
+                }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500"
               >
                 Cancelar
@@ -3858,6 +3944,9 @@ export default function UserProjectView() {
                     </span>
                   )}
                 </h4>
+                {selectedReturnedTask?.type === 'subtask' && selectedReturnedTask?.original_id && (
+                  <p className="text-xs text-gray-500 font-mono mb-2">ID: {selectedReturnedTask.original_id}</p>
+                )}
                 <div className="text-sm text-gray-600">
                   {selectedReturnedTask?.description}
                 </div>
@@ -3904,7 +3993,7 @@ export default function UserProjectView() {
 
                 {selectedReturnedTask?.notes &&
                   typeof selectedReturnedTask?.notes === 'object' &&
-                  selectedReturnedTask?.notes.returned_at && (
+                  selectedReturnedTask?.notes?.returned_at && (
                     <div className="mt-3 text-xs text-gray-600">
                       Devuelta el {format(new Date(selectedReturnedTask?.notes.returned_at), 'dd/MM/yyyy HH:mm')}
                       {selectedReturnedTask?.notes.returned_by && (

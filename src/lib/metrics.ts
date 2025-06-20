@@ -6,7 +6,11 @@ export interface UserMetrics {
   userEmail: string;
   tasksCompleted: number;
   tasksAssigned: number;
+  tasksApproved: number;
+  tasksReturned: number;
   completionRate: number;
+  approvalRate: number;
+  reworkRate: number;
   averageCompletionTime: number;
   efficiencyRatio: number;
   onTimeDeliveryRate: number;
@@ -233,7 +237,11 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
       userEmail: userData?.email || '',
       tasksCompleted,
       tasksAssigned,
+      tasksApproved: tasksCompleted,
+      tasksReturned: 0,
       completionRate,
+      approvalRate: 100,
+      reworkRate: 0,
       averageCompletionTime,
       efficiencyRatio,
       onTimeDeliveryRate,
@@ -250,26 +258,128 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 }
 
 /**
- * Obtiene métricas de todos los usuarios (para administradores)
+ * Obtiene métricas completas de todos los usuarios, calculadas en tiempo real de forma masiva.
+ * Esta función es ahora la fuente principal para las estadísticas de usuario.
  */
 export async function getAllUsersMetrics(): Promise<UserMetrics[]> {
   try {
-    // Obtener todos los usuarios (sin filtrar por rol)
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, name, email, role');
+    // 1. Carga masiva de todos los datos necesarios
+    const [
+      { data: users, error: usersError },
+      { data: allTasks, error: tasksError },
+      { data: allSubtasks, error: subtasksError },
+      { data: allAssignments, error: assignmentsError }
+    ] = await Promise.all([
+      supabase.from('users').select('id, name, email'),
+      supabase.from('tasks').select('id, assigned_users, status, deadline, estimated_duration, feedback'),
+      supabase.from('subtasks').select('id, assigned_to, status, deadline, estimated_duration, feedback'),
+      supabase.from('task_work_assignments').select('user_id, date, status')
+    ]);
 
-    const metricsPromises = (users || []).map(user => getUserMetrics(user.id));
-    const allMetrics = await Promise.all(metricsPromises);
+    if (usersError || tasksError || subtasksError || assignmentsError) {
+      console.error("Error fetching batch data for metrics:", { usersError, tasksError, subtasksError, assignmentsError });
+      return [];
+    }
 
-    // Filtrar usuarios con actividad (que tengan al menos una tarea asignada)
-    const activeUserMetrics = allMetrics.filter(metrics => metrics.tasksAssigned > 0);
+    const todayStr = new Date().toISOString().split('T')[0];
 
-    // Ordenar por tasa de finalización descendente
-    return activeUserMetrics.sort((a, b) => b.completionRate - a.completionRate);
+    // 2. Procesar métricas para cada usuario
+    const metrics: UserMetrics[] = users.map(user => {
+      const userTasks = allTasks.filter(t => t.assigned_users?.includes(user.id));
+      const userSubtasks = allSubtasks.filter(s => s.assigned_to === user.id);
+      const userAssignments = allAssignments.filter(a => a.user_id === user.id);
+
+      const allUserItems = [...userTasks, ...userSubtasks];
+
+      const tasksAssigned = allUserItems.length;
+      if (tasksAssigned === 0) {
+        return {
+          userId: user.id, userName: user.name, userEmail: user.email,
+          tasksAssigned: 0, tasksCompleted: 0, tasksApproved: 0, tasksReturned: 0,
+          completionRate: 0, approvalRate: 0, reworkRate: 0, averageCompletionTime: 0,
+          efficiencyRatio: 0, onTimeDeliveryRate: 0, overdueTasks: 0,
+        };
+      }
+
+      const tasksCompleted = allUserItems.filter(item => ['completed', 'approved'].includes(item.status)).length;
+      const tasksApproved = allUserItems.filter(item => item.status === 'approved').length;
+      const tasksReturned = allUserItems.filter(item => item.status === 'returned').length;
+      
+      const completionRate = tasksAssigned > 0 ? (tasksCompleted / tasksAssigned) * 100 : 0;
+      
+      const totalReviewed = tasksApproved + tasksReturned;
+      const approvalRate = totalReviewed > 0 ? (tasksApproved / totalReviewed) * 100 : 100;
+      const reworkRate = totalReviewed > 0 ? (tasksReturned / totalReviewed) * 100 : 0;
+
+      const itemsWithFeedback = allUserItems
+        .map(item => {
+          if (!item.feedback) return null;
+          let feedbackData: any = {};
+          if (typeof item.feedback === 'string') {
+            try { feedbackData = JSON.parse(item.feedback); } catch { return null; }
+          } else if (typeof item.feedback === 'object' && item.feedback !== null) {
+            feedbackData = item.feedback;
+          }
+          return { ...item, feedbackData };
+        })
+        .filter(item => item !== null && item.feedbackData.duracion_real);
+
+      const totalCompletionTime = itemsWithFeedback.reduce((acc, item) => acc + (item!.feedbackData.duracion_real || 0), 0);
+      const averageCompletionTime = itemsWithFeedback.length > 0 ? totalCompletionTime / itemsWithFeedback.length : 0;
+      
+      const totalEfficiency = itemsWithFeedback.reduce((acc, item) => {
+        const estimated = item!.estimated_duration || 0;
+        const real = item!.feedbackData.duracion_real || 0;
+        if (real > 0 && estimated > 0) {
+          return acc + (estimated / real);
+        }
+        return acc;
+      }, 0);
+      const efficiencyRatio = itemsWithFeedback.length > 0 ? totalEfficiency / itemsWithFeedback.length : 0;
+
+      const onTimeItems = allUserItems.filter(item => {
+        if (!['completed', 'approved'].includes(item.status) || !item.deadline) return false;
+        let completionDate: Date | null = null;
+        if (item.feedback) {
+           let feedbackData: any = {};
+           if (typeof item.feedback === 'string') {
+             try { feedbackData = JSON.parse(item.feedback); } catch { /* no date */ }
+           } else {
+              feedbackData = item.feedback;
+           }
+           if (feedbackData.reviewed_at || feedbackData.approved_at) {
+             completionDate = new Date(feedbackData.reviewed_at || feedbackData.approved_at);
+           }
+        }
+        return completionDate ? completionDate <= new Date(item.deadline) : false;
+      });
+      const onTimeDeliveryRate = tasksCompleted > 0 ? (onTimeItems.length / tasksCompleted) * 100 : 0;
+      
+      const overdueTasks = userAssignments.filter(a => a.date < todayStr && !['completed', 'approved'].includes(a.status)).length;
+      
+      return {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        tasksAssigned,
+        tasksCompleted,
+        tasksApproved,
+        tasksReturned,
+        completionRate,
+        approvalRate,
+        reworkRate,
+        averageCompletionTime,
+        efficiencyRatio,
+        onTimeDeliveryRate,
+        overdueTasks
+      };
+    });
+
+    return metrics;
+
   } catch (error) {
-    console.error('Error getting all users metrics:', error);
-    return [];
+    console.error('Error calculating all user metrics:', error);
+    throw error;
   }
 }
 

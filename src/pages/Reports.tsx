@@ -496,8 +496,8 @@ function UtilizationReport({ metrics }: { metrics: UtilizationMetrics[] }) {
 // Componente para métricas de usuarios
 function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
   const totalTasks = metrics.reduce((acc, m) => acc + m.tasksCompleted, 0);
-  const avgCompletionRate = metrics.length > 0 
-    ? metrics.reduce((acc, m) => acc + m.completionRate, 0) / metrics.length 
+  const avgApprovalRate = metrics.length > 0 
+    ? metrics.reduce((acc, m) => acc + m.approvalRate, 0) / metrics.length 
     : 0;
   const avgEfficiency = metrics.length > 0 
     ? metrics.reduce((acc, m) => acc + m.efficiencyRatio, 0) / metrics.length 
@@ -530,8 +530,8 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
         <div className="bg-purple-50 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-purple-600 font-medium">Finalización Promedio</p>
-              <p className="text-2xl font-bold text-purple-900">{avgCompletionRate.toFixed(0)}%</p>
+              <p className="text-sm text-purple-600 font-medium">Tasa Aprobación Media</p>
+              <p className="text-2xl font-bold text-purple-900">{avgApprovalRate.toFixed(0)}%</p>
             </div>
             <Target className="w-8 h-8 text-purple-600" />
           </div>
@@ -562,16 +562,16 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                   Usuario
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tareas
+                  Tareas Completadas
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Finalización
+                  Tasa de Aprobación
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Tasa de Retrabajo
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Eficiencia
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Entrega a Tiempo
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Atrasadas
@@ -592,17 +592,34 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                       {metric.tasksCompleted}/{metric.tasksAssigned}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {metric.averageTasksPerDay.toFixed(1)}/día
+                      ({metric.completionRate.toFixed(0)}% completado)
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className={`text-sm font-medium ${
-                        metric.completionRate >= 90 ? 'text-green-600' : 
-                        metric.completionRate >= 70 ? 'text-yellow-600' : 'text-red-600'
+                        metric.approvalRate >= 95 ? 'text-green-600' : 
+                        metric.approvalRate >= 85 ? 'text-yellow-600' : 'text-red-600'
                       }`}>
-                        {metric.completionRate.toFixed(1)}%
+                        {metric.approvalRate.toFixed(1)}%
                       </div>
+                       <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
+                        <div 
+                          className={`h-2 rounded-full ${
+                            metric.approvalRate >= 95 ? 'bg-green-500' : 
+                            metric.approvalRate >= 85 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${metric.approvalRate}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className={`text-sm font-medium ${
+                      metric.reworkRate <= 5 ? 'text-green-600' : 
+                      metric.reworkRate <= 15 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {metric.reworkRate.toFixed(1)}%
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -615,16 +632,8 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className={`text-sm ${
-                      metric.onTimeDeliveryRate >= 90 ? 'text-green-600' : 
-                      metric.onTimeDeliveryRate >= 70 ? 'text-yellow-600' : 'text-red-600'
-                    }`}>
-                      {metric.onTimeDeliveryRate.toFixed(1)}%
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
                     <div className={`flex items-center text-sm ${
-                      metric.overdueTasks > 0 ? 'text-red-600' : 'text-green-600'
+                      metric.overdueTasks > 0 ? 'text-red-600 font-bold' : 'text-gray-900'
                     }`}>
                       {metric.overdueTasks > 0 && <AlertTriangle className="w-4 h-4 mr-1" />}
                       {metric.overdueTasks}
