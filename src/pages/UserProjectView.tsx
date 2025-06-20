@@ -828,8 +828,17 @@ export default function UserProjectView() {
         return !already && !inProg;
       });
 
+      // Filtrar duplicados para evitar errores de renderizado en React
+      const uniqueAvailable = available.filter((task, index, self) =>
+        index === self.findIndex((t) => t.id === task.id)
+      );
+
+      if (uniqueAvailable.length < available.length) {
+        console.warn('🚨 [DUPLICADOS REMOVIDOS] Se encontraron y eliminaron tareas duplicadas de la lista de asignación.');
+      }
+
       // 1️⃣3️⃣ Ordenar
-      const sorted = available.sort((a, b) => {
+      const sorted = uniqueAvailable.sort((a, b) => {
         if (sortBy === 'deadline') {
           const da = a.deadline ? +new Date(a.deadline) : Infinity;
           const db = b.deadline ? +new Date(b.deadline) : Infinity;
