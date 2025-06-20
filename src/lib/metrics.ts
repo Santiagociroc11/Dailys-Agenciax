@@ -252,156 +252,134 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
       tasksCompletedThisMonth
     };
   } catch (error) {
-    console.error('Error calculating user metrics:', error);
-    throw error;
+    console.error(`Error fetching metrics for user ${userId}:`, error);
+    // Return empty metrics on error
+    return {
+      userId, userName: 'Error', userEmail: 'Error', tasksCompleted: 0, tasksAssigned: 0,
+      completionRate: 0, averageCompletionTime: 0, efficiencyRatio: 0,
+      onTimeDeliveryRate: 0, overdueTasks: 0, upcomingDeadlines: 0,
+      averageTasksPerDay: 0, tasksCompletedThisWeek: 0, tasksCompletedThisMonth: 0,
+      tasksApproved: 0, tasksReturned: 0, approvalRate: 0, reworkRate: 0,
+    };
   }
 }
 
 /**
- * Obtiene métricas completas de todos los usuarios, calculadas en tiempo real de forma masiva.
- * Esta función es ahora la fuente principal para las estadísticas de usuario.
+ * Obtiene métricas de calidad y rendimiento para todos los usuarios,
+ * basándose en el historial de estados para mayor precisión.
  */
 export async function getAllUsersMetrics(): Promise<UserMetrics[]> {
   try {
-    // 1. Carga masiva de todos los datos necesarios
+    // 1. Carga masiva de datos
     const [
       { data: users, error: usersError },
-      { data: allTasks, error: tasksError },
-      { data: allSubtasks, error: subtasksError },
-      { data: allAssignments, error: assignmentsError }
+      { data: history, error: historyError }
     ] = await Promise.all([
       supabase.from('users').select('id, name, email'),
-      supabase.from('tasks').select('id, assigned_users, status, deadline, estimated_duration, feedback'),
-      supabase.from('subtasks').select('id, assigned_to, status, deadline, estimated_duration, feedback'),
-      supabase.from('task_work_assignments').select('user_id, date, status')
+      supabase.from('status_history').select('*')
     ]);
 
-    if (usersError || tasksError || subtasksError || assignmentsError) {
-      console.error("Error fetching batch data for metrics:", { usersError, tasksError, subtasksError, assignmentsError });
+    if (usersError || historyError) {
+      console.error("Error fetching data for metrics:", { usersError, historyError });
       return [];
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    // 2. Procesar el historial para cada usuario
+    const metricsMap = new Map<string, any>();
 
-    // 2. Procesar métricas para cada usuario
-    const metrics: UserMetrics[] = users.map(user => {
-      const userTasks = allTasks.filter(t => t.assigned_users?.includes(user.id));
-      const userSubtasks = allSubtasks.filter(s => s.assigned_to === user.id);
-      const userAssignments = allAssignments.filter(a => a.user_id === user.id);
+    for (const user of users) {
+      metricsMap.set(user.id, {
+        userId: user.id,
+        userName: user.name || 'Sin nombre',
+        userEmail: user.email || 'Sin email',
+        tasksDelivered: 0, // Tareas que el usuario ha puesto en 'completed' o 'in_review'
+        tasksReturned: 0,  // De las entregadas, cuántas se devolvieron
+        tasksApproved: 0,  // De las entregadas, cuántas se aprobaron
+        uniqueTasksWorkedOn: new Set(),
+      });
+    }
 
-      const allUserItems = [...userTasks, ...userSubtasks];
+    for (const event of history) {
+      const userId = event.changed_by;
+      if (!metricsMap.has(userId)) continue;
 
-      const tasksAssigned = allUserItems.length;
-      if (tasksAssigned === 0) {
-        return {
-          userId: user.id, userName: user.name, userEmail: user.email,
-          tasksAssigned: 0, tasksCompleted: 0, tasksApproved: 0, tasksReturned: 0,
-          completionRate: 0, approvalRate: 0, reworkRate: 0, averageCompletionTime: 0,
-          efficiencyRatio: 0, onTimeDeliveryRate: 0, overdueTasks: 0,
-        };
+      const userMetrics = metricsMap.get(userId);
+      const item_id = event.subtask_id || event.task_id;
+
+      // Contar como "entregada" si el usuario la marcó como completada/en revisión
+      if (['completed', 'in_review'].includes(event.new_status)) {
+        userMetrics.tasksDelivered++;
+        userMetrics.uniqueTasksWorkedOn.add(item_id);
       }
 
-      const tasksCompleted = allUserItems.filter(item => ['completed', 'approved'].includes(item.status)).length;
-      const tasksApproved = allUserItems.filter(item => item.status === 'approved').length;
-      const tasksReturned = allUserItems.filter(item => item.status === 'returned').length;
+      // Contar como "devuelta" si estaba en revisión y pasó a "returned"
+      if (['completed', 'in_review'].includes(event.previous_status) && event.new_status === 'returned') {
+        userMetrics.tasksReturned++;
+      }
+        
+      // Contar como "aprobada" si estaba en revisión y pasó a "approved"
+      if (['completed', 'in_review'].includes(event.previous_status) && event.new_status === 'approved') {
+        userMetrics.tasksApproved++;
+      }
+    }
+
+    // 3. Calcular métricas finales y devolver el resultado
+    const finalMetrics: UserMetrics[] = [];
+    for (const userMetric of metricsMap.values()) {
+      const { tasksDelivered, tasksReturned, tasksApproved } = userMetric;
       
-      const completionRate = tasksAssigned > 0 ? (tasksCompleted / tasksAssigned) * 100 : 0;
+      const totalReviewed = tasksReturned + tasksApproved;
       
-      const totalReviewed = tasksApproved + tasksReturned;
       const approvalRate = totalReviewed > 0 ? (tasksApproved / totalReviewed) * 100 : 100;
-      const reworkRate = totalReviewed > 0 ? (tasksReturned / totalReviewed) * 100 : 0;
-
-      const itemsWithFeedback = allUserItems
-        .map(item => {
-          if (!item.feedback) return null;
-          let feedbackData: any = {};
-          if (typeof item.feedback === 'string') {
-            try { feedbackData = JSON.parse(item.feedback); } catch { return null; }
-          } else if (typeof item.feedback === 'object' && item.feedback !== null) {
-            feedbackData = item.feedback;
-          }
-          return { ...item, feedbackData };
-        })
-        .filter(item => item !== null && item.feedbackData.duracion_real);
-
-      const totalCompletionTime = itemsWithFeedback.reduce((acc, item) => acc + (item!.feedbackData.duracion_real || 0), 0);
-      const averageCompletionTime = itemsWithFeedback.length > 0 ? totalCompletionTime / itemsWithFeedback.length : 0;
+      const reworkRate = tasksDelivered > 0 ? (tasksReturned / tasksDelivered) * 100 : 0;
       
-      const totalEfficiency = itemsWithFeedback.reduce((acc, item) => {
-        const estimated = item!.estimated_duration || 0;
-        const real = item!.feedbackData.duracion_real || 0;
-        if (real > 0 && estimated > 0) {
-          return acc + (estimated / real);
-        }
-        return acc;
-      }, 0);
-      const efficiencyRatio = itemsWithFeedback.length > 0 ? totalEfficiency / itemsWithFeedback.length : 0;
-
-      const onTimeItems = allUserItems.filter(item => {
-        if (!['completed', 'approved'].includes(item.status) || !item.deadline) return false;
-        let completionDate: Date | null = null;
-        if (item.feedback) {
-           let feedbackData: any = {};
-           if (typeof item.feedback === 'string') {
-             try { feedbackData = JSON.parse(item.feedback); } catch { /* no date */ }
-           } else {
-              feedbackData = item.feedback;
-           }
-           if (feedbackData.reviewed_at || feedbackData.approved_at) {
-             completionDate = new Date(feedbackData.reviewed_at || feedbackData.approved_at);
-           }
-        }
-        return completionDate ? completionDate <= new Date(item.deadline) : false;
+      finalMetrics.push({
+        ...userMetric,
+        tasksCompleted: tasksApproved, // Consideramos "completadas" las aprobadas
+        tasksAssigned: userMetric.uniqueTasksWorkedOn.size,
+        completionRate: userMetric.uniqueTasksWorkedOn.size > 0 ? (tasksApproved / userMetric.uniqueTasksWorkedOn.size) * 100 : 0,
+        approvalRate: approvalRate,
+        reworkRate: reworkRate,
+        // Métricas que ya no se calculan aquí o requieren otra fuente
+        averageCompletionTime: 0,
+        efficiencyRatio: 0,
+        onTimeDeliveryRate: 0,
+        overdueTasks: 0,
+        upcomingDeadlines: 0,
+        averageTasksPerDay: 0,
+        tasksCompletedThisWeek: 0,
+        tasksCompletedThisMonth: 0,
       });
-      const onTimeDeliveryRate = tasksCompleted > 0 ? (onTimeItems.length / tasksCompleted) * 100 : 0;
-      
-      const overdueTasks = userAssignments.filter(a => a.date < todayStr && !['completed', 'approved'].includes(a.status)).length;
-      
-      return {
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        tasksAssigned,
-        tasksCompleted,
-        tasksApproved,
-        tasksReturned,
-        completionRate,
-        approvalRate,
-        reworkRate,
-        averageCompletionTime,
-        efficiencyRatio,
-        onTimeDeliveryRate,
-        overdueTasks
-      };
-    });
+    }
 
-    return metrics;
+    return finalMetrics;
 
   } catch (error) {
-    console.error('Error calculating all user metrics:', error);
-    throw error;
+    console.error("Error in getAllUsersMetrics:", error);
+    return [];
   }
 }
 
 /**
- * Obtiene métricas de todos los usuarios incluyendo los sin actividad
+ * DEPRECATED: Esta función puede no ser precisa con la nueva lógica de negocio.
+ * Se mantiene por si es usada en otros componentes, pero se recomienda migrar
+ * a una versión que use `status_history` para métricas de calidad.
  */
 export async function getAllUsersMetricsIncludingInactive(): Promise<UserMetrics[]> {
-  try {
-    // Obtener todos los usuarios (sin filtrar por rol)
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, name, email, role');
+  const { data: users, error: userError } = await supabase
+    .from('users')
+    .select('id, name, email, role');
 
-    const metricsPromises = (users || []).map(user => getUserMetrics(user.id));
-    const allMetrics = await Promise.all(metricsPromises);
-
-    // Ordenar por tasa de finalización descendente
-    return allMetrics.sort((a, b) => b.completionRate - a.completionRate);
-  } catch (error) {
-    console.error('Error getting all users metrics (including inactive):', error);
+  if (userError) {
+    console.error('Error getting all users metrics (including inactive):', userError);
     return [];
   }
+
+  const metricsPromises = (users || []).map(user => getUserMetrics(user.id));
+  const allMetrics = await Promise.all(metricsPromises);
+
+  // Ordenar por tasa de finalización descendente
+  return allMetrics.sort((a, b) => b.completionRate - a.completionRate);
 }
 
 /**
