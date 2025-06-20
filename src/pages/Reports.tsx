@@ -499,8 +499,8 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
   const avgApprovalRate = metrics.length > 0 
     ? metrics.reduce((acc, m) => acc + m.approvalRate, 0) / metrics.length 
     : 0;
-  const avgEfficiency = metrics.length > 0 
-    ? metrics.reduce((acc, m) => acc + m.efficiencyRatio, 0) / metrics.length 
+  const avgReworkRate = metrics.length > 0
+    ? metrics.reduce((acc, m) => acc + m.reworkRate, 0) / metrics.length
     : 0;
 
   return (
@@ -520,7 +520,7 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
         <div className="bg-green-50 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-green-600 font-medium">Tareas Completadas</p>
+              <p className="text-sm text-green-600 font-medium">Tareas Aprobadas</p>
               <p className="text-2xl font-bold text-green-900">{totalTasks}</p>
             </div>
             <CheckCircle className="w-8 h-8 text-green-600" />
@@ -537,13 +537,13 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
           </div>
         </div>
 
-        <div className="bg-yellow-50 rounded-lg p-4">
+        <div className="bg-orange-50 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-yellow-600 font-medium">Eficiencia Media</p>
-              <p className="text-2xl font-bold text-yellow-900">{(avgEfficiency * 100).toFixed(0)}%</p>
+              <p className="text-sm text-orange-600 font-medium">Tasa Retrabajo Media</p>
+              <p className="text-2xl font-bold text-orange-900">{avgReworkRate.toFixed(1)}%</p>
             </div>
-            <TrendingUp className="w-8 h-8 text-yellow-600" />
+            <AlertTriangle className="w-8 h-8 text-orange-600" />
           </div>
         </div>
       </div>
@@ -562,19 +562,13 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                   Usuario
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tareas Completadas
+                  Asignadas / Aprobadas
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Tasa de Aprobación
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Tasa de Retrabajo
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Eficiencia
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Atrasadas
                 </th>
               </tr>
             </thead>
@@ -589,7 +583,7 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
-                      {metric.tasksCompleted}/{metric.tasksAssigned}
+                      {metric.tasksAssigned} / <span className="font-bold text-green-600">{metric.tasksApproved}</span>
                     </div>
                     <div className="text-xs text-gray-500">
                       ({metric.completionRate.toFixed(0)}% completado)
@@ -597,15 +591,15 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <div className={`text-sm font-medium ${
+                      <div className={`text-sm font-medium mr-2 ${
                         metric.approvalRate >= 95 ? 'text-green-600' : 
                         metric.approvalRate >= 85 ? 'text-yellow-600' : 'text-red-600'
                       }`}>
                         {metric.approvalRate.toFixed(1)}%
                       </div>
-                       <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
+                       <div className="w-full bg-gray-200 rounded-full h-2.5">
                         <div 
-                          className={`h-2 rounded-full ${
+                          className={`h-2.5 rounded-full ${
                             metric.approvalRate >= 95 ? 'bg-green-500' : 
                             metric.approvalRate >= 85 ? 'bg-yellow-500' : 'bg-red-500'
                           }`}
@@ -615,28 +609,22 @@ function UsersMetrics({ metrics }: { metrics: UserMetrics[] }) {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className={`text-sm font-medium ${
-                      metric.reworkRate <= 5 ? 'text-green-600' : 
-                      metric.reworkRate <= 15 ? 'text-yellow-600' : 'text-red-600'
-                    }`}>
-                      {metric.reworkRate.toFixed(1)}%
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className={`text-sm font-medium ${
-                      metric.efficiencyRatio >= 1.2 ? 'text-green-600' : 
-                      metric.efficiencyRatio >= 1.0 ? 'text-blue-600' : 
-                      metric.efficiencyRatio >= 0.8 ? 'text-yellow-600' : 'text-red-600'
-                    }`}>
-                      {(metric.efficiencyRatio * 100).toFixed(0)}%
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className={`flex items-center text-sm ${
-                      metric.overdueTasks > 0 ? 'text-red-600 font-bold' : 'text-gray-900'
-                    }`}>
-                      {metric.overdueTasks > 0 && <AlertTriangle className="w-4 h-4 mr-1" />}
-                      {metric.overdueTasks}
+                    <div className="flex items-center">
+                      <div className={`text-sm font-medium mr-2 ${
+                        metric.reworkRate <= 5 ? 'text-green-600' : 
+                        metric.reworkRate <= 15 ? 'text-yellow-600' : 'text-red-600'
+                      }`}>
+                        {metric.reworkRate.toFixed(1)}%
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div
+                          className={`h-2.5 rounded-full ${
+                            metric.reworkRate <= 5 ? 'bg-green-500' : 
+                            metric.reworkRate <= 15 ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${metric.reworkRate * 2}%` }} // Multiplicar para mejor visualización
+                        ></div>
+                      </div>
                     </div>
                   </td>
                 </tr>
