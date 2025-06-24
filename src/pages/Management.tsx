@@ -1828,6 +1828,11 @@ function Management() {
                     </span>
                   )}
                 </div>
+                {taskDetails && (
+                  <div className="text-xs text-gray-500 font-mono mb-2">
+                    ID: {taskDetails.id}
+                  </div>
+                )}
                 {detailsItem?.type === 'subtask' && taskDetails?.parent_task && (
                   <div className="text-sm text-indigo-600 flex items-center mt-1">
                     <FolderOpen className="w-4 h-4 mr-1.5 flex-shrink-0" />

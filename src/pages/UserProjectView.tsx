@@ -3471,9 +3471,11 @@ export default function UserProjectView() {
                     selectedTaskDetails.title
                   }
                 </h3>
-                {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.original_id && (
-                  <p className="text-xs text-gray-500 font-mono mt-1">ID: {selectedTaskDetails.original_id}</p>
-                )}
+                <p className="text-xs text-gray-500 font-mono mt-1">
+                  ID: {selectedTaskDetails.type === 'subtask' && selectedTaskDetails.original_id ? 
+                    selectedTaskDetails.original_id : 
+                    selectedTaskDetails.id}
+                </p>
                 {selectedTaskDetails.projectName && (
                   <div className="text-sm text-blue-600 mt-1">
                     Proyecto: {selectedTaskDetails.projectName}
