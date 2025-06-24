@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import toast, { Toaster } from 'react-hot-toast';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
+import { Area, AreaUserAssignment } from '../types/Area';
 
 interface TaskFeedback {
   feedback?: string;
@@ -61,6 +62,10 @@ interface User {
   email: string;
   name?: string;
   assigned_projects?: string[];
+}
+
+interface UserWithArea extends User {
+  area?: Area;
 }
 
 // Define the column statuses
@@ -214,6 +219,10 @@ function Management() {
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [userAreaAssignments, setUserAreaAssignments] = useState<AreaUserAssignment[]>([]);
+  const [usersWithAreas, setUsersWithAreas] = useState<UserWithArea[]>([]);
+  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedPriority, setSelectedPriority] = useState<string | null>(null);
   const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
@@ -223,8 +232,9 @@ function Management() {
   const [groupByPriority, setGroupByPriority] = useState(false);
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
-  const [view, setView] = useState<'subtasks' | 'main_tasks'>('subtasks');
+  const [view, setView] = useState<'subtasks' | 'main_tasks' | 'review'>('subtasks');
   const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { main_task_status: string })[]>([]);
+  const [reviewSubTab, setReviewSubTab] = useState<'pending' | 'in_review'>('pending');
   
   // Estados para los modales
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -261,6 +271,7 @@ function Management() {
   useEffect(() => {
     fetchProjects();
     fetchUsers();
+    fetchAreas();
     fetchData();
   }, []);
 
@@ -312,6 +323,51 @@ function Management() {
       console.error('Error al cargar usuarios:', error);
     }
   }
+
+  async function fetchAreas() {
+    try {
+      // Fetch areas
+      const { data: areasData, error: areasError } = await supabase
+        .from('areas')
+        .select('*');
+
+      if (areasError) throw areasError;
+
+      // Fetch user-area assignments
+      const { data: assignmentsData, error: assignmentsError } = await supabase
+        .from('area_user_assignments')
+        .select('*');
+
+      if (assignmentsError) throw assignmentsError;
+
+      setAreas(areasData || []);
+      setUserAreaAssignments(assignmentsData || []);
+    } catch (error) {
+      console.error('Error al cargar áreas:', error);
+    }
+  }
+
+  // Effect to combine users with their areas
+  useEffect(() => {
+    const usersWithAreasData: UserWithArea[] = users.map(user => {
+      const userAssignment = userAreaAssignments.find(assignment => assignment.user_id === user.id);
+      const userArea = userAssignment ? areas.find(area => area.id === userAssignment.area_id) : undefined;
+      
+      return {
+        ...user,
+        area: userArea
+      };
+    });
+    setUsersWithAreas(usersWithAreasData);
+  }, [users, areas, userAreaAssignments]);
+
+  // Effect to expand all areas by default when switching to review view
+  useEffect(() => {
+    if (view === 'review' && areas.length > 0) {
+      const allAreaIds = new Set([...areas.map(area => area.id), 'no_area']);
+      setExpandedAreas(allAreaIds);
+    }
+  }, [view, areas]);
 
   async function fetchData() {
     if (refreshing) return; // Evitar múltiples llamadas simultáneas
@@ -395,12 +451,12 @@ function Management() {
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
       'blocked': ['in_review'],
-      'in_review': ['returned', 'approved']
+      'in_review': ['returned', 'approved', 'completed']
     };
     
     // Verificar si la transición está permitida
     if (!allowedTransitions[currentStatus as keyof typeof allowedTransitions]?.includes(newStatus)) {
-      toast.error(`No se puede cambiar de "${currentStatus}" a "${newStatus}"`);
+      toast.error(`No se puede cambiar de "${statusTextMap[currentStatus as keyof typeof statusTextMap] || currentStatus}" a "${statusTextMap[newStatus as keyof typeof statusTextMap] || newStatus}"`);
       return;
     }
     
@@ -419,8 +475,8 @@ function Management() {
     } else if (newStatus === 'approved') {
       setShowApprovalModal(true);
       return; // No actualizar hasta que se envíe el formulario
-    } else if (newStatus === 'in_review') {
-      // Para in_review no necesitamos feedback, actualizamos directamente
+    } else if (newStatus === 'in_review' || newStatus === 'completed') {
+      // Para 'in_review' o para regresar a 'completed' no necesitamos feedback, actualizamos directamente
       updateItemStatus(itemId, newStatus, isSubtask);
     }
   }
@@ -996,6 +1052,16 @@ function Management() {
                               ) : subtask.status === 'in_review' ? (
                                 <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                   <button
+                                    className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded-md flex items-center"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStatusChange(subtask.id, 'completed', true);
+                                    }}
+                                  >
+                                    <ArrowLeft className="w-2.5 h-2.5 mr-1" />
+                                    Cancelar revisión
+                                  </button>
+                                  <button
                                     className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1101,6 +1167,16 @@ function Management() {
                               </div>
                             ) : task.status === 'in_review' ? (
                               <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
+                                <button
+                                  className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded-md flex items-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStatusChange(task.id, 'completed', false);
+                                  }}
+                                >
+                                  <ArrowLeft className="w-2.5 h-2.5 mr-1" />
+                                  A completada
+                                </button>
                                 <button
                                   className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
                                   onClick={(e) => {
@@ -1391,6 +1467,535 @@ function Management() {
     );
   };
 
+  const renderReviewView = () => {
+    const readyForReviewTasks = tasks.filter(task => 
+      task.status === 'completed' || task.status === 'blocked'
+    );
+    const readyForReviewSubtasks = subtasks.filter(subtask => 
+      subtask.status === 'completed' || subtask.status === 'blocked'
+    );
+
+    const inReviewTasks = tasks.filter(task => task.status === 'in_review');
+    const inReviewSubtasks = subtasks.filter(subtask => subtask.status === 'in_review');
+
+    // Function to group items by area
+    const groupItemsByArea = (tasksToGroup: Task[], subtasksToGroup: Subtask[]) => {
+      const grouped: { [areaId: string]: { area: Area | null, tasks: Task[], subtasks: Subtask[] } } = {};
+      
+      // Initialize areas
+      areas.forEach(area => {
+        grouped[area.id] = { area, tasks: [], subtasks: [] };
+      });
+      
+      // Add "No Area" group
+      grouped['no_area'] = { area: null, tasks: [], subtasks: [] };
+
+      // Group tasks (tasks without subtasks only)
+      tasksToGroup
+        .filter(task => !subtasksToGroup.some(st => st.task_id === task.id))
+        .forEach(task => {
+          // For tasks, we need to check assigned users (if any) and their areas
+          if (task.assigned_users && task.assigned_users.length > 0) {
+            const assignedUser = usersWithAreas.find(u => task.assigned_users!.includes(u.id));
+            const areaId = assignedUser?.area?.id || 'no_area';
+            grouped[areaId].tasks.push(task);
+          } else {
+            grouped['no_area'].tasks.push(task);
+          }
+        });
+
+      // Group subtasks
+      subtasksToGroup.forEach(subtask => {
+        const assignedUser = usersWithAreas.find(u => u.id === subtask.assigned_to);
+        const areaId = assignedUser?.area?.id || 'no_area';
+        grouped[areaId].subtasks.push(subtask);
+      });
+
+      // Filter out empty groups
+      return Object.entries(grouped)
+        .filter(([_, group]) => group.tasks.length > 0 || group.subtasks.length > 0)
+        .sort(([areaIdA], [areaIdB]) => {
+          if (areaIdA === 'no_area') return 1;
+          if (areaIdB === 'no_area') return -1;
+          return 0;
+        });
+    };
+
+    const toggleAreaExpansion = (areaId: string) => {
+      const newExpanded = new Set(expandedAreas);
+      if (newExpanded.has(areaId)) {
+        newExpanded.delete(areaId);
+      } else {
+        newExpanded.add(areaId);
+      }
+      setExpandedAreas(newExpanded);
+    };
+
+    const renderTasksTable = (itemsToRender: { tasks: Task[], subtasks: Subtask[] }) => {
+      const allItems: Array<{ item: Task | Subtask, isSubtask: boolean }> = [
+        ...itemsToRender.tasks.map(task => ({ item: task, isSubtask: false })),
+        ...itemsToRender.subtasks.map(subtask => ({ item: subtask, isSubtask: true }))
+      ];
+
+      if (allItems.length === 0) {
+        return (
+          <div className="text-center py-8 text-gray-500">
+            <span className="text-sm">No hay actividades en esta área</span>
+          </div>
+        );
+      }
+
+      return (
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+              <tr>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-12">
+                  Tipo
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Actividad
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                  Estado
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-20">
+                  Prioridad
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">
+                  Usuario / Área
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-20">
+                  Duración
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">
+                  Fecha Límite
+                </th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">
+                  Comentarios
+                </th>
+                <th scope="col" className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-52">
+                  Acciones
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {allItems.map(({ item, isSubtask }) => {
+                const parentTask = isSubtask ? tasks.find(t => t.id === (item as Subtask).task_id) : null;
+                const details = getItemDetails(item);
+                const assignedUser = isSubtask ? usersWithAreas.find(u => u.id === (item as Subtask).assigned_to) : null;
+                
+                return (
+                  <tr 
+                    key={item.id}
+                    className={`hover:bg-gray-50 cursor-pointer transition-colors group ${
+                      item.status === 'blocked' ? 'bg-red-25' : 'bg-white'
+                    }`}
+                    onClick={() => handleViewTaskDetails(item.id, isSubtask ? 'subtask' : 'task')}
+                  >
+                    {/* Tipo */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center">
+                        {isSubtask ? (
+                          <div className="p-1.5 bg-emerald-100 rounded-lg">
+                            <div className="w-3 h-3 bg-emerald-500 rounded-sm"></div>
+                          </div>
+                        ) : (
+                          <div className="p-1.5 bg-indigo-100 rounded-lg">
+                            <FolderOpen className="w-3 h-3 text-indigo-600" />
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Actividad */}
+                    <td className="px-4 py-4">
+                      <div className="max-w-xs">
+                        <div className="text-sm font-medium text-gray-900 line-clamp-2" title={item.title}>
+                          {item.title}
+                        </div>
+                        {isSubtask && parentTask && (
+                          <div className="text-xs text-gray-500 mt-1 flex items-center">
+                            <FolderOpen className="w-3 h-3 mr-1" />
+                            <span className="truncate">{parentTask.title}</span>
+                          </div>
+                        )}
+                        {(isSubtask ? parentTask?.project_id : (item as Task).project_id) && (
+                          <div className="text-xs text-indigo-600 mt-1">
+                            {projects.find(p => p.id === (isSubtask ? parentTask?.project_id : (item as Task).project_id))?.name}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Estado */}
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                        item.status === 'blocked' 
+                          ? 'bg-red-100 text-red-800 border border-red-200' 
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }`}>
+                        {item.status === 'blocked' ? '🚫 Bloqueada' : '✅ Completada'}
+                      </span>
+                    </td>
+
+                    {/* Prioridad */}
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                        (isSubtask ? parentTask?.priority : (item as Task).priority) === 'high' 
+                          ? 'bg-red-100 text-red-800' :
+                        (isSubtask ? parentTask?.priority : (item as Task).priority) === 'medium' 
+                          ? 'bg-amber-100 text-amber-800' :
+                          'bg-green-100 text-green-800'
+                      }`}>
+                        {(isSubtask ? parentTask?.priority : (item as Task).priority) === 'high' ? '🔥' :
+                         (isSubtask ? parentTask?.priority : (item as Task).priority) === 'medium' ? '⚡' : '🌿'}
+                      </span>
+                    </td>
+
+                    {/* Usuario / Área */}
+                    <td className="px-4 py-4">
+                      {isSubtask && assignedUser ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900 truncate" title={assignedUser.name}>
+                            {assignedUser.name}
+                          </div>
+                          {assignedUser.area && (
+                            <div className="text-xs text-indigo-600 truncate" title={assignedUser.area.name}>
+                              {assignedUser.area.name}
+                            </div>
+                          )}
+                        </div>
+                      ) : !isSubtask && (item as Task).assigned_users && (item as Task).assigned_users!.length > 0 ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">
+                            {usersWithAreas.find(u => (item as Task).assigned_users!.includes(u.id))?.name || 'Usuario'}
+                          </div>
+                          {(item as Task).assigned_users!.length > 1 && (
+                            <div className="text-xs text-gray-500">
+                              +{(item as Task).assigned_users!.length - 1} más
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400 italic">No asignado</span>
+                      )}
+                    </td>
+
+                    {/* Duración */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm text-gray-900">
+                        <div className="font-medium">{item.estimated_duration}min</div>
+                        {details.realDuration && details.realDuration !== item.estimated_duration && (
+                          <div className="text-xs text-emerald-600">
+                            Real: {details.realDuration}min
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Fecha Límite */}
+                    <td className="px-4 py-4">
+                      {item.deadline ? (
+                        <div className="text-sm text-gray-900">
+                          {new Date(item.deadline).toLocaleDateString('es-ES', { 
+                            day: 'numeric', 
+                            month: 'short',
+                            year: '2-digit'
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">-</span>
+                      )}
+                    </td>
+
+                    {/* Comentarios */}
+                    <td className="px-4 py-4">
+                      <div className="max-w-xs">
+                        {details.deliveryComments && item.status === 'completed' && (
+                          <div className="text-xs text-emerald-800 bg-emerald-50 px-2 py-1 rounded-md line-clamp-2" title={details.deliveryComments}>
+                            💬 {details.deliveryComments}
+                          </div>
+                        )}
+                        {details.blockReason && item.status === 'blocked' && (
+                          <div className="text-xs text-red-800 bg-red-50 px-2 py-1 rounded-md line-clamp-2" title={details.blockReason}>
+                            🚫 {details.blockReason}
+                          </div>
+                        )}
+                        {reviewSubTab === 'in_review' && (details.returnedFeedback || details.approvedFeedback) && (
+                          <div className="text-xs text-amber-800 bg-amber-50 px-2 py-1 rounded-md line-clamp-2" title={(details.returnedFeedback || details.approvedFeedback)?.feedback || ''}>
+                            📝 {(details.returnedFeedback || details.approvedFeedback)?.feedback || 'Sin comentarios'}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Acciones */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center justify-center gap-2">
+                        {reviewSubTab === 'pending' && (
+                          <button
+                            className="text-sm font-medium px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-sm hover:shadow-md"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStatusChange(item.id, 'in_review', isSubtask);
+                            }}
+                            title="Iniciar revisión"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                            Revisar
+                          </button>
+                        )}
+                        
+                        {reviewSubTab === 'in_review' && (
+                          <>
+                            <button
+                              className="text-sm font-medium px-3 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors shadow-sm hover:shadow-md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(item.id, 'completed', isSubtask);
+                              }}
+                              title="Cancelar revisión"
+                            >
+                              <ArrowLeft className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="text-sm font-medium px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-sm hover:shadow-md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(item.id, 'returned', isSubtask);
+                              }}
+                              title="Devolver"
+                            >
+                              <AlertTriangle className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="text-sm font-medium px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm hover:shadow-md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(item.id, 'approved', isSubtask);
+                              }}
+                              title="Aprobar"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    };
+
+    return (
+      <div className="flex flex-col h-full bg-gradient-to-br from-gray-50 to-gray-100">
+        {/* Header con gradiente */}
+        <div className="bg-white shadow-sm border-b border-gray-200">
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setReviewSubTab('pending')}
+              className={`relative px-8 py-4 text-sm font-semibold transition-all duration-300 ${
+                reviewSubTab === 'pending'
+                  ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-500'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5" />
+                <span>Por Revisar</span>
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-full transition-all duration-300 ${
+                  reviewSubTab === 'pending' 
+                    ? 'bg-blue-100 text-blue-800 shadow-md' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {readyForReviewTasks.length + readyForReviewSubtasks.length}
+                </span>
+              </div>
+            </button>
+            <button
+              onClick={() => setReviewSubTab('in_review')}
+              className={`relative px-8 py-4 text-sm font-semibold transition-all duration-300 ${
+                reviewSubTab === 'in_review'
+                  ? 'text-orange-600 bg-orange-50 border-b-2 border-orange-500'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5" />
+                <span>En Revisión</span>
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-full transition-all duration-300 ${
+                  reviewSubTab === 'in_review' 
+                    ? 'bg-orange-100 text-orange-800 shadow-md' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {inReviewTasks.length + inReviewSubtasks.length}
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Contenido principal */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {reviewSubTab === 'pending' ? (
+            <div className="max-w-8xl mx-auto">
+              <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+                {/* Header de sección */}
+                <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/20 rounded-xl">
+                      <CheckCircle className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">Actividades Listas para Revisar</h3>
+                      <p className="text-blue-100 mt-1">
+                        {readyForReviewTasks.length + readyForReviewSubtasks.length} actividades esperando tu revisión
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  {readyForReviewTasks.length === 0 && readyForReviewSubtasks.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-blue-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
+                        <CheckCircle className="relative w-20 h-20 mx-auto mb-6 text-emerald-400" />
+                      </div>
+                      <h4 className="text-2xl font-bold text-gray-800 mb-2">¡Excelente trabajo!</h4>
+                      <p className="text-gray-600 text-lg">No hay actividades pendientes de revisión en este momento.</p>
+                      <p className="text-gray-500 text-sm mt-2">Todas las actividades están al día 🎉</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {groupItemsByArea(readyForReviewTasks, readyForReviewSubtasks).map(([areaId, group]) => (
+                        <div key={areaId} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          {/* Area Header */}
+                          <button
+                            onClick={() => toggleAreaExpansion(areaId)}
+                            className="w-full p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 transition-all duration-200 flex items-center justify-between border-b border-gray-200"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-indigo-100 rounded-lg">
+                                <Users className="w-5 h-5 text-indigo-600" />
+                              </div>
+                              <div className="text-left">
+                                <h4 className="font-semibold text-gray-900">
+                                  {group.area?.name || '📋 Sin Área Asignada'}
+                                </h4>
+                                <p className="text-sm text-gray-500">
+                                  {group.tasks.length + group.subtasks.length} actividades por revisar
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                                {group.tasks.length + group.subtasks.length}
+                              </span>
+                              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                                expandedAreas.has(areaId) ? 'rotate-180' : ''
+                              }`} />
+                            </div>
+                          </button>
+                          
+                          {/* Area Content */}
+                          {expandedAreas.has(areaId) && (
+                            <div className="p-4">
+                              {renderTasksTable(group)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-8xl mx-auto">
+              <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+                {/* Header de sección */}
+                <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/20 rounded-xl">
+                      <AlertTriangle className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">Actividades en Proceso de Revisión</h3>
+                      <p className="text-orange-100 mt-1">
+                        {inReviewTasks.length + inReviewSubtasks.length} actividades siendo revisadas actualmente
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  {inReviewTasks.length === 0 && inReviewSubtasks.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-orange-400 to-red-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
+                        <AlertTriangle className="relative w-20 h-20 mx-auto mb-6 text-orange-400" />
+                      </div>
+                      <h4 className="text-2xl font-bold text-gray-800 mb-2">No hay revisiones en curso</h4>
+                      <p className="text-gray-600 text-lg">Todas las actividades han sido procesadas.</p>
+                      <p className="text-gray-500 text-sm mt-2">Las nuevas actividades aparecerán aquí cuando inicies su revisión ⏳</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {groupItemsByArea(inReviewTasks, inReviewSubtasks).map(([areaId, group]) => (
+                        <div key={areaId} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          {/* Area Header */}
+                          <button
+                            onClick={() => toggleAreaExpansion(areaId)}
+                            className="w-full p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 transition-all duration-200 flex items-center justify-between border-b border-gray-200"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-orange-100 rounded-lg">
+                                <Users className="w-5 h-5 text-orange-600" />
+                              </div>
+                              <div className="text-left">
+                                <h4 className="font-semibold text-gray-900">
+                                  {group.area?.name || '📋 Sin Área Asignada'}
+                                </h4>
+                                <p className="text-sm text-gray-500">
+                                  {group.tasks.length + group.subtasks.length} actividades en revisión
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-sm font-medium">
+                                {group.tasks.length + group.subtasks.length}
+                              </span>
+                              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                                expandedAreas.has(areaId) ? 'rotate-180' : ''
+                              }`} />
+                            </div>
+                          </button>
+                          
+                          {/* Area Content */}
+                          {expandedAreas.has(areaId) && (
+                            <div className="p-4">
+                              {renderTasksTable(group)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col p-4">
       <div className="flex justify-between items-center mb-6">
@@ -1464,9 +2069,15 @@ function Management() {
               </button>
               <button
                 onClick={() => setView('main_tasks')}
-                className={`-ml-px px-4 py-2 text-sm font-medium border rounded-r-md ${view === 'main_tasks' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                className={`-ml-px px-4 py-2 text-sm font-medium border ${view === 'main_tasks' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
               >
                 Tareas Principales
+              </button>
+              <button
+                onClick={() => setView('review')}
+                className={`-ml-px px-4 py-2 text-sm font-medium border rounded-r-md ${view === 'review' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                Revisión
               </button>
           </div>
           <button
@@ -1648,8 +2259,12 @@ function Management() {
           <div className="text-center py-10">
             <p className="text-gray-500">Cargando tablero...</p>
           </div>
+        ) : view === 'subtasks' ? (
+          renderKanbanBoard()
+        ) : view === 'main_tasks' ? (
+          renderMainTaskKanbanBoard()
         ) : (
-          view === 'subtasks' ? renderKanbanBoard() : renderMainTaskKanbanBoard()
+          renderReviewView()
         )}
       </div>
 
