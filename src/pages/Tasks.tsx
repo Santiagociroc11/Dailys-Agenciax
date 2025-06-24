@@ -1012,13 +1012,7 @@ function Tasks() {
                                   )}
                                   
                                   <div className="flex items-center">
-                                    <span className={`font-medium ${
-                                      subtask.status === 'completed' || subtask.status === 'approved' ? 'text-green-600' : 
-                                      subtask.status === 'in_progress' ? 'text-blue-600' : 'text-gray-600'
-                                    }`}>
-                                      {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
-                                       subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
-                                    </span>
+                                    <TaskStatusDisplay status={subtask.status} />
                                     </div>
                                   
                                   <div className="flex items-center text-indigo-600">
@@ -1164,8 +1158,7 @@ function Tasks() {
                                     subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                                     'bg-gray-100 text-gray-800'
                                   }`}>
-                                    {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
-                                     subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
+                                    <TaskStatusDisplay status={subtask.status} />
                                   </span>
                                     )}
                                   </div>
@@ -2066,8 +2059,7 @@ function Tasks() {
                                       <div className="flex-1">
                                         <p className="font-medium">{subtask.title}</p>
                                         <p className="text-xs text-gray-500">
-                                          {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
-                                          subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
+                                          <TaskStatusDisplay status={subtask.status} />
                                         </p>
                                       </div>
                                       <div className="flex-none w-48">
@@ -2283,8 +2275,7 @@ function Tasks() {
                                     subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                                     'bg-gray-100 text-gray-800'
                                   }`}>
-                                    {subtask.status === 'completed' || subtask.status === 'approved' ? 'Completada' : 
-                                    subtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
+                                    <TaskStatusDisplay status={subtask.status} />
                                   </span>
                                 </div>
                               </div>
@@ -2587,8 +2578,7 @@ function Tasks() {
                         selectedSubtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
                         'bg-gray-100 text-gray-800'
                       }`}>
-                        {selectedSubtask.status === 'completed' || selectedSubtask.status === 'approved' ? 'Completada' : 
-                         selectedSubtask.status === 'in_progress' ? 'En progreso' : 'Pendiente'}
+                        <TaskStatusDisplay status={selectedSubtask.status} />
                       </p>
                     )}
                   </div>
