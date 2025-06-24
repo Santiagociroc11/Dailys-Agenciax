@@ -237,11 +237,13 @@ function Management() {
   const [view, setView] = useState<'subtasks' | 'main_tasks' | 'review'>('subtasks');
   const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { 
     main_task_status: string;
-    completionPercentage: number;
     subtaskStats: {
       total: number;
       approved: number;
+      completed: number;
     };
+    approvedPercentage: number;
+    completedAndApprovedPercentage: number;
   })[]>([]);
   const [reviewSubTab, setReviewSubTab] = useState<'pending' | 'in_review'>('pending');
   
@@ -275,16 +277,21 @@ function Management() {
 
         const total = relatedSubtasks.length;
         const approved = relatedSubtasks.filter(st => st.status === 'approved').length;
-        const completionPercentage = total > 0 ? (approved / total) * 100 : 0;
+        const completed = relatedSubtasks.filter(st => st.status === 'completed').length;
+        
+        const approvedPercentage = total > 0 ? (approved / total) * 100 : 0;
+        const completedAndApprovedPercentage = total > 0 ? ((approved + completed) / total) * 100 : 0;
         
         return { 
           ...task, 
           main_task_status,
-          completionPercentage,
           subtaskStats: {
             total,
             approved,
-          }
+            completed
+          },
+          approvedPercentage,
+          completedAndApprovedPercentage,
         };
     });
     setProcessedMainTasks(tasksWithDetails);
@@ -1331,13 +1338,17 @@ function Management() {
         relatedSubtasksData = fetchedRelatedSubtasks || [];
       }
 
-      let completionPercentage = 0;
-      let subtaskStats = { total: 0, approved: 0 };
+      let subtaskStats = { total: 0, approved: 0, completed: 0 };
+      let approvedPercentage = 0;
+      let completedAndApprovedPercentage = 0;
+
       if (relatedSubtasksData.length > 0) {
         subtaskStats.total = relatedSubtasksData.length;
         subtaskStats.approved = relatedSubtasksData.filter(st => st.status === 'approved').length;
+        subtaskStats.completed = relatedSubtasksData.filter(st => st.status === 'completed').length;
         if (subtaskStats.total > 0) {
-            completionPercentage = (subtaskStats.approved / subtaskStats.total) * 100;
+            approvedPercentage = (subtaskStats.approved / subtaskStats.total) * 100;
+            completedAndApprovedPercentage = ((subtaskStats.approved + subtaskStats.completed) / subtaskStats.total) * 100;
         }
       }
 
@@ -1345,8 +1356,9 @@ function Management() {
       setTaskDetails({ 
         ...item, 
         parent_task: isSubtaskType ? parentTaskData : undefined,
-        completionPercentage,
-        subtaskStats 
+        subtaskStats,
+        approvedPercentage,
+        completedAndApprovedPercentage,
       });
       setRelatedSubtasks(relatedSubtasksData);
       setPreviousSubtask(fetchedPreviousSubtask);
@@ -1453,10 +1465,20 @@ function Management() {
                     >
                       <h4 className="font-medium text-center py-2 border-b mb-2">{column.name} ({columnTasks.length || 0})</h4>
                       <div className="space-y-2">
-                        {columnTasks.map(task => (
+                        {columnTasks.map(task => {
+                          let borderColorClass = 'border-indigo-500'; // Default
+                          if (task.subtaskStats.total > 0) {
+                              if (task.approvedPercentage === 100) {
+                                  borderColorClass = 'border-green-500'; // All approved
+                              } else if (task.completedAndApprovedPercentage > 0) {
+                                  borderColorClass = 'border-yellow-500'; // Some progress (completed or approved)
+                              }
+                          }
+                          
+                          return (
                           <div 
                             key={task.id}
-                            className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 border-l-4 border-indigo-500 cursor-pointer"
+                            className={`bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border-l-4 ${borderColorClass} cursor-pointer`}
                             onClick={() => handleViewTaskDetails(task.id, 'task')}
                           >
                             <div className="flex justify-between items-start gap-2">
@@ -1499,16 +1521,22 @@ function Management() {
                                     {task.subtaskStats.approved} / {task.subtaskStats.total}
                                   </span>
                                 </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden relative">
+                                  {/* Ghost bar */}
+                                  <div
+                                    className="bg-green-300 h-2 rounded-full transition-all duration-500 absolute top-0 left-0"
+                                    style={{ width: `${task.completedAndApprovedPercentage}%` }}
+                                  ></div>
+                                  {/* Main bar */}
                                   <div 
-                                    className="bg-gradient-to-r from-indigo-500 to-blue-500 h-2 rounded-full transition-all duration-500"
-                                    style={{ width: `${task.completionPercentage}%` }}
+                                    className="bg-gradient-to-r from-indigo-500 to-blue-500 h-2 rounded-full transition-all duration-500 absolute top-0 left-0"
+                                    style={{ width: `${task.approvedPercentage}%` }}
                                   ></div>
                                 </div>
                               </div>
                             )}
                           </div>
-                        ))}
+                        )})}
                       </div>
                     </div>
                   );
