@@ -29,6 +29,12 @@ interface Task {
   status: string;
 }
 
+interface Subtask {
+  id: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'in_review' | 'returned' | 'approved';
+  task_id: string;
+}
+
 interface User {
   id: string;
   email: string;
@@ -39,9 +45,9 @@ interface User {
 function Projects() {
   const { isAdmin, user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [tasks, setTasks] = useState<Record<string, Task[]>>({});
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [projectUsers, setProjectUsers] = useState<Record<string, string[]>>({});
   const [userProjectAssignments, setUserProjectAssignments] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -59,7 +65,7 @@ function Projects() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchProjects();
+    fetchData();
   }, []);
   
   useEffect(() => {
@@ -88,65 +94,32 @@ function Projects() {
     }
   }
 
-  async function fetchProjects() {
+  async function fetchData() {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setProjects(data || []);
+      const projectsPromise = supabase.from('projects').select('*').order('created_at', { ascending: false });
+      const tasksPromise = supabase.from('tasks').select('*');
+      const subtasksPromise = supabase.from('subtasks').select('id, task_id, status');
       
-      // Fetch tasks for each project
-      for (const project of (data || [])) {
-        fetchProjectTasks(project.id);
-        fetchProjectUsers(project.id);
-      }
+      const [{ data: projectsData, error: projectsError }, { data: tasksData, error: tasksError }, { data: subtasksData, error: subtasksError }] = await Promise.all([
+        projectsPromise,
+        tasksPromise,
+        subtasksPromise,
+      ]);
+
+      if (projectsError) throw projectsError;
+      setProjects(projectsData || []);
+      
+      if (tasksError) throw tasksError;
+      setTasks(tasksData || []);
+      
+      if (subtasksError) throw subtasksError;
+      setSubtasks(subtasksData || []);
       
     } catch (error) {
-      console.error('Error al cargar los proyectos:', error);
+      console.error('Error al cargar los datos del proyecto:', error);
     } finally {
       setLoading(false);
-    }
-  }
-  
-  async function fetchProjectTasks(projectId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('project_id', projectId);
-      
-      if (error) throw error;
-      
-      setTasks(prev => ({
-        ...prev,
-        [projectId]: data || []
-      }));
-    } catch (error) {
-      console.error(`Error al cargar tareas del proyecto ${projectId}:`, error);
-    }
-  }
-
-  async function fetchProjectUsers(projectId: string) {
-    try {
-      // En lugar de consultar una tabla project_users inexistente,
-      // obtenemos los usuarios que tienen este proyecto en su array assigned_projects
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .filter('assigned_projects', 'cs', `{${projectId}}`); // Busca el projectId en el array
-      
-      if (error) throw error;
-      
-      setProjectUsers(prev => ({
-        ...prev,
-        [projectId]: data?.map(user => user.id) || []
-      }));
-    } catch (error) {
-      console.error(`Error al cargar usuarios del proyecto ${projectId}:`, error);
-      // No interrumpir la carga de la aplicación por este error
     }
   }
 
@@ -224,7 +197,7 @@ function Projects() {
         }
       }
 
-      await fetchProjects();
+      await fetchData();
       await fetchUsers(); // Actualizar los usuarios para tener los assigned_projects actualizados
       setShowModal(false);
       setNewProject({
@@ -325,7 +298,7 @@ function Projects() {
         }
       }
       
-      await fetchProjects();
+      await fetchData();
       await fetchUsers(); // Actualizar los usuarios para tener los assigned_projects actualizados
       setShowDetailModal(false);
       setEditMode(false);
@@ -420,7 +393,7 @@ function Projects() {
         }
       }
       
-      await fetchProjects();
+      await fetchData();
       setShowDetailModal(false);
       alert('Proyecto eliminado correctamente');
     } catch (error) {
@@ -461,24 +434,38 @@ function Projects() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {projects.length > 0 ? (
           projects.map((project) => {
-            // Calcular estadísticas del proyecto
-            const projectTasks = tasks[project.id] || [];
-            const totalTasks = projectTasks.length;
-            const completedTasks = projectTasks.filter(t => t.status === 'completed' || t.status === 'approved').length;
-            const pendingTasks = projectTasks.filter(t => t.status === 'pending' || t.status === 'assigned').length;
-            const blockedTasks = projectTasks.filter(t => t.status === 'blocked').length;
-            const inReviewTasks = projectTasks.filter(t => t.status === 'in_review').length;
+            // Calcular estadísticas del proyecto de forma profunda
+            const projectTasks = tasks.filter(t => t.project_id === project.id);
+            const allTaskIds = new Set(projectTasks.map(t => t.id));
             
-            // Calcular porcentaje de progreso
-            const progressPercentage = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
+            const standaloneTasks = projectTasks.filter(t => !subtasks.some(st => st.task_id === t.id));
+            const projectSubtasks = subtasks.filter(st => allTaskIds.has(st.task_id));
+
+            const totalWorkUnits = standaloneTasks.length + projectSubtasks.length;
+
+            const approvedUnits = standaloneTasks.filter(t => t.status === 'approved').length + 
+                                  projectSubtasks.filter(st => st.status === 'approved').length;
+
+            const completedUnits = standaloneTasks.filter(t => t.status === 'completed').length + 
+                                   projectSubtasks.filter(st => st.status === 'completed').length;
             
-            // Determinar color de la barra de progreso
-            let progressColor = 'bg-emerald-500';
-            if (progressPercentage < 25) {
-              progressColor = 'bg-red-500';
-            } else if (progressPercentage < 75) {
-              progressColor = 'bg-yellow-500';
-            }
+            const inProgressUnits = standaloneTasks.filter(t => ['in_progress', 'assigned'].includes(t.status)).length + 
+                                    projectSubtasks.filter(st => ['in_progress', 'assigned'].includes(st.status)).length;
+            
+            const pendingUnits = standaloneTasks.filter(t => t.status === 'pending').length +
+                                 projectSubtasks.filter(st => st.status === 'pending').length;
+
+            const blockedUnits = standaloneTasks.filter(t => t.status === 'blocked').length + 
+                                 projectSubtasks.filter(st => st.status === 'blocked').length;
+
+            const inReviewUnits = standaloneTasks.filter(t => t.status === 'in_review').length + 
+                                    projectSubtasks.filter(st => st.status === 'in_review').length;
+
+            const returnedUnits = standaloneTasks.filter(t => t.status === 'returned').length + 
+                                    projectSubtasks.filter(st => st.status === 'returned').length;
+
+            const approvedPercentage = totalWorkUnits > 0 ? (approvedUnits / totalWorkUnits) * 100 : 0;
+            const completedAndApprovedPercentage = totalWorkUnits > 0 ? ((approvedUnits + completedUnits) / totalWorkUnits) * 100 : 0;
             
             return (
               <div
@@ -511,30 +498,49 @@ function Projects() {
                 
                 <div className="mb-4">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm font-medium text-gray-700">Progreso</span>
-                    <span className="text-sm font-medium text-gray-700">{progressPercentage}%</span>
+                    <span className="text-sm font-medium text-gray-700">Progreso (Aprobado)</span>
+                    <span className="text-sm font-semibold text-emerald-600">{Math.round(approvedPercentage)}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div className={`${progressColor} h-2.5 rounded-full`} style={{ width: `${progressPercentage}%` }}></div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 relative">
+                    {/* Ghost bar for completed */}
+                    <div
+                      className="bg-yellow-300 h-2.5 rounded-full absolute top-0 left-0 transition-all duration-500"
+                      style={{ width: `${completedAndApprovedPercentage}%` }}
+                      title={`${Math.round(completedAndApprovedPercentage)}% completado (pendiente de revisión)`}
+                    ></div>
+                    {/* Main bar for approved */}
+                    <div
+                      className="bg-emerald-500 h-2.5 rounded-full absolute top-0 left-0 transition-all duration-500"
+                      style={{ width: `${approvedPercentage}%` }}
+                      title={`${Math.round(approvedPercentage)}% aprobado`}
+                    ></div>
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                  <div className="bg-gray-50 p-2 rounded text-center">
-                    <span className="block text-xl font-bold text-emerald-600">{completedTasks}</span>
-                    <span className="text-xs text-gray-500">Completadas</span>
+                <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+                  <div className="bg-emerald-50 p-2 rounded">
+                    <span className="block text-lg font-bold text-emerald-600">{approvedUnits}</span>
+                    <span className="text-xs text-gray-500">Aprobadas</span>
                   </div>
-                  <div className="bg-gray-50 p-2 rounded text-center">
-                    <span className="block text-xl font-bold text-gray-600">{totalTasks}</span>
-                    <span className="text-xs text-gray-500">Total</span>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <span className="block text-lg font-bold text-blue-600">{inProgressUnits}</span>
+                    <span className="text-xs text-gray-500">En Progreso</span>
                   </div>
-                  <div className="bg-gray-50 p-2 rounded text-center">
-                    <span className="block text-xl font-bold text-yellow-600">{pendingTasks}</span>
+                  <div className="bg-yellow-50 p-2 rounded">
+                    <span className="block text-lg font-bold text-yellow-600">{pendingUnits}</span>
                     <span className="text-xs text-gray-500">Pendientes</span>
                   </div>
-                  <div className="bg-gray-50 p-2 rounded text-center">
-                    <span className="block text-xl font-bold text-red-600">{blockedTasks}</span>
+                  <div className="bg-slate-50 p-2 rounded">
+                    <span className="block text-lg font-bold text-slate-600">{completedUnits}</span>
+                    <span className="text-xs text-gray-500">Completadas</span>
+                  </div>
+                  <div className="bg-red-50 p-2 rounded">
+                    <span className="block text-lg font-bold text-red-600">{blockedUnits}</span>
                     <span className="text-xs text-gray-500">Bloqueadas</span>
+                  </div>
+                  <div className="bg-gray-100 p-2 rounded">
+                    <span className="block text-lg font-bold text-gray-800">{totalWorkUnits}</span>
+                    <span className="text-xs text-gray-500">Total</span>
                   </div>
                 </div>
                 
@@ -558,7 +564,7 @@ function Projects() {
                 </div>
                 
                 <div className="mt-4 pt-4 border-t">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Tareas recientes ({totalTasks})</h3>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Tareas recientes ({totalWorkUnits})</h3>
                   {projectTasks.length > 0 ? (
                     <ul className="space-y-2">
                       {projectTasks.slice(0, 3).map(task => (
@@ -898,99 +904,92 @@ function Projects() {
                 
                 {!editMode && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Usuarios involucrados</h3>
-                    <div className="bg-gray-50 p-3 rounded-md">
-                      {getUsersWithAccessToProject(selectedProject.id).length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {getUsersWithAccessToProject(selectedProject.id).map(usr => (
-                            <span key={usr.id} className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs">
-                              {usr.name} {usr.id === selectedProject.created_by ? "(Creador)" : ""}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-gray-500">Solo el creador tiene acceso a este proyecto.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-                
-                {!editMode && (
-                  <>
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <h3 className="text-lg font-medium text-gray-700 mb-4">Progreso del Proyecto</h3>
+                    <h3 className="text-lg font-medium text-gray-700 mb-4">Progreso del Proyecto</h3>
+                    
+                    {(() => {
+                      const projectTasks = tasks.filter(t => t.project_id === selectedProject.id);
+                      const allTaskIds = new Set(projectTasks.map(t => t.id));
                       
-                      {(() => {
-                        // Calcular estadísticas del proyecto
-                        const projectTasks = tasks[selectedProject.id] || [];
-                        const totalTasks = projectTasks.length;
-                        const completedTasks = projectTasks.filter(t => t.status === 'completed' || t.status === 'approved').length;
-                        const pendingTasks = projectTasks.filter(t => t.status === 'pending' || t.status === 'assigned').length;
-                        const blockedTasks = projectTasks.filter(t => t.status === 'blocked').length;
-                        const inReviewTasks = projectTasks.filter(t => t.status === 'in_review').length;
-                        const returnedTasks = projectTasks.filter(t => t.status === 'returned').length;
-                        
-                        // Calcular porcentaje de progreso
-                        const progressPercentage = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
-                        
-                        // Determinar color de la barra de progreso
-                        let progressColor = 'bg-emerald-500';
-                        if (progressPercentage < 25) {
-                          progressColor = 'bg-red-500';
-                        } else if (progressPercentage < 75) {
-                          progressColor = 'bg-yellow-500';
-                        }
-                        
-                        return (
-                          <>
-                            <div className="mb-6">
-                              <div className="flex justify-between items-center mb-1">
-                                <span className="text-sm font-medium text-gray-700">Progreso General</span>
-                                <span className="text-sm font-medium text-gray-700">{progressPercentage}%</span>
+                      const standaloneTasks = projectTasks.filter(t => !subtasks.some(st => st.task_id === t.id));
+                      const projectSubtasks = subtasks.filter(st => allTaskIds.has(st.task_id));
+
+                      const totalWorkUnits = standaloneTasks.length + projectSubtasks.length;
+
+                      const approvedUnits = standaloneTasks.filter(t => t.status === 'approved').length + 
+                                            projectSubtasks.filter(st => st.status === 'approved').length;
+                      const completedUnits = standaloneTasks.filter(t => t.status === 'completed').length + 
+                                             projectSubtasks.filter(st => st.status === 'completed').length;
+                      const inReviewUnits = standaloneTasks.filter(t => t.status === 'in_review').length + 
+                                            projectSubtasks.filter(st => st.status === 'in_review').length;
+                      const returnedUnits = standaloneTasks.filter(t => t.status === 'returned').length + 
+                                            projectSubtasks.filter(st => st.status === 'returned').length;
+                      const blockedUnits = standaloneTasks.filter(t => t.status === 'blocked').length + 
+                                           projectSubtasks.filter(st => st.status === 'blocked').length;
+
+                      const pendingUnits = totalWorkUnits - approvedUnits - completedUnits - inReviewUnits - returnedUnits - blockedUnits;
+
+                      const approvedPercentage = totalWorkUnits > 0 ? (approvedUnits / totalWorkUnits) * 100 : 0;
+                      const completedAndApprovedPercentage = totalWorkUnits > 0 ? ((approvedUnits + completedUnits) / totalWorkUnits) * 100 : 0;
+                      
+                      return (
+                        <>
+                          <div className="mb-6">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-sm font-medium text-gray-700">Progreso General</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-4 relative">
+                              <div
+                                className="bg-yellow-300 h-4 rounded-full absolute top-0 left-0 flex items-center justify-end px-2 transition-all duration-500"
+                                style={{ width: `${completedAndApprovedPercentage}%` }}
+                              >
+                                <span className="text-xs font-medium text-yellow-800">{Math.round(completedAndApprovedPercentage)}%</span>
                               </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                <div
-                                  className={`${progressColor} h-2.5 rounded-full transition-all duration-500`}
-                                  style={{ width: `${progressPercentage}%` }}
-                                ></div>
+                              <div
+                                className="bg-emerald-500 h-4 rounded-full absolute top-0 left-0 flex items-center justify-end px-2 transition-all duration-500"
+                                style={{ width: `${approvedPercentage}%` }}
+                              >
+                                <span className="text-xs font-bold text-white">{Math.round(approvedPercentage)}%</span>
                               </div>
                             </div>
-                            
-                            <div className="grid grid-cols-3 gap-4 mb-6">
-                              <div className="bg-emerald-50 p-4 rounded-lg text-center">
-                                <span className="block text-2xl font-bold text-emerald-600">{completedTasks}</span>
-                                <span className="text-sm text-emerald-700">Completadas</span>
-                              </div>
-                              <div className="bg-yellow-50 p-4 rounded-lg text-center">
-                                <span className="block text-2xl font-bold text-yellow-600">{pendingTasks}</span>
-                                <span className="text-sm text-yellow-700">Pendientes</span>
-                              </div>
-                              <div className="bg-red-50 p-4 rounded-lg text-center">
-                                <span className="block text-2xl font-bold text-red-600">{blockedTasks}</span>
-                                <span className="text-sm text-red-700">Bloqueadas</span>
-                              </div>
+                             <div className="flex justify-between mt-1 text-xs">
+                              <span className="text-yellow-600">Completado</span>
+                              <span className="text-emerald-600 font-semibold">Aprobado</span>
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                              <div className="bg-blue-50 p-4 rounded-lg text-center">
-                                <span className="block text-2xl font-bold text-blue-600">{inReviewTasks}</span>
-                                <span className="text-sm text-blue-700">En Revisión</span>
-                              </div>
-                              <div className="bg-orange-50 p-4 rounded-lg text-center">
-                                <span className="block text-2xl font-bold text-orange-600">{returnedTasks}</span>
-                                <span className="text-sm text-orange-700">Devueltas</span>
-                              </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="bg-emerald-50 p-4 rounded-lg text-center">
+                              <span className="block text-2xl font-bold text-emerald-600">{approvedUnits}</span>
+                              <span className="text-sm text-emerald-700">Aprobadas</span>
                             </div>
-                            
+                            <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                              <span className="block text-2xl font-bold text-yellow-600">{completedUnits}</span>
+                              <span className="text-sm text-yellow-700">Completadas</span>
+                            </div>
                             <div className="bg-gray-50 p-4 rounded-lg text-center">
-                              <span className="block text-2xl font-bold text-gray-600">{totalTasks}</span>
-                              <span className="text-sm text-gray-700">Total de Tareas</span>
+                              <span className="block text-2xl font-bold text-gray-600">{totalWorkUnits}</span>
+                              <span className="text-sm text-gray-700">Total Tareas</span>
                             </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </>
+                          </div>
+                          
+                          <div className="grid grid-cols-3 gap-4 mb-6">
+                             <div className="bg-blue-50 p-4 rounded-lg text-center">
+                              <span className="block text-2xl font-bold text-blue-600">{inReviewUnits}</span>
+                              <span className="text-sm text-blue-700">En Revisión</span>
+                            </div>
+                            <div className="bg-orange-50 p-4 rounded-lg text-center">
+                              <span className="block text-2xl font-bold text-orange-600">{returnedUnits}</span>
+                              <span className="text-sm text-orange-700">Devueltas</span>
+                            </div>
+                             <div className="bg-red-50 p-4 rounded-lg text-center">
+                              <span className="block text-2xl font-bold text-red-600">{blockedUnits + pendingUnits < 0 ? 0 : blockedUnits + pendingUnits}</span>
+                              <span className="text-sm text-red-700">Pendientes</span>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                 )}
                 
                 <div className="mt-4 pt-4 border-t border-gray-200">
@@ -1008,9 +1007,9 @@ function Projects() {
                 </div>
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <h3 className="text-lg font-medium text-gray-700 mb-2">Tareas asociadas</h3>
-                  {tasks[selectedProject.id]?.length > 0 ? (
+                  {tasks.filter(t => t.project_id === selectedProject.id).length > 0 ? (
                     <div className="space-y-3">
-                      {tasks[selectedProject.id].map(task => (
+                      {tasks.filter(t => t.project_id === selectedProject.id).map(task => (
                         <div key={task.id} className="bg-gray-50 p-3 rounded-md">
                           <div className="flex justify-between items-start">
                             <div>
