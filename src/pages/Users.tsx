@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Users as UsersIcon, Plus, X, Trash2, AlertTriangle } from 'lucide-react';
+import { Users as UsersIcon, Plus, X, Trash2, AlertTriangle, LogIn } from 'lucide-react';
 
 interface User {
   id: string;
@@ -12,7 +12,7 @@ interface User {
 }
 
 export default function Users() {
-  const { isAdmin, user: currentUser } = useAuth();
+  const { isAdmin, user: currentUser, impersonateUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -452,6 +452,15 @@ export default function Users() {
                       </svg>
                       Editar usuario
                     </button>
+                    {isAdmin && currentUser?.id !== user.id && (
+                      <button
+                        onClick={() => impersonateUser(user)}
+                        className="w-full text-xs px-2 py-1.5 bg-yellow-50 text-yellow-700 rounded hover:bg-yellow-100 transition-colors flex items-center justify-center"
+                      >
+                        <LogIn className="h-3.5 w-3.5 mr-1" />
+                        Iniciar sesión como
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

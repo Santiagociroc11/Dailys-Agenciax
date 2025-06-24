@@ -16,6 +16,9 @@ interface AuthContextType {
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => void;
   isAdmin: boolean;
+  impersonateUser: (user: User) => void;
+  stopImpersonating: () => void;
+  isImpersonating: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,12 +26,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isImpersonating, setIsImpersonating] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
+    const impersonating = localStorage.getItem('impersonating_user') === 'true';
     if (storedUser) {
       setUser(JSON.parse(storedUser));
+      setIsImpersonating(impersonating);
     }
     setLoading(false);
   }, []);
@@ -59,6 +65,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       navigate('/dashboard');
     } else {
       navigate('/user');
+    }
+  };
+
+  const impersonateUser = (targetUser: User) => {
+    if (user?.role !== 'admin') {
+      console.error('Only admins can impersonate users.');
+      return;
+    }
+    // Store the admin user before impersonating
+    localStorage.setItem('admin_user', JSON.stringify(user));
+    
+    // Set the new user
+    setUser(targetUser);
+    localStorage.setItem('user', JSON.stringify(targetUser));
+    
+    // Set impersonation flag
+    setIsImpersonating(true);
+    localStorage.setItem('impersonating_user', 'true');
+    
+    navigate('/user');
+  };
+
+  const stopImpersonating = () => {
+    const adminUser = localStorage.getItem('admin_user');
+    if (adminUser) {
+      setUser(JSON.parse(adminUser));
+      localStorage.setItem('user', adminUser);
+      localStorage.removeItem('admin_user');
+      
+      setIsImpersonating(false);
+      localStorage.removeItem('impersonating_user');
+      
+      navigate('/dashboard');
     }
   };
 
@@ -95,6 +134,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = () => {
     setUser(null);
     localStorage.removeItem('user');
+    localStorage.removeItem('admin_user');
+    localStorage.removeItem('impersonating_user');
     navigate('/login');
   };
 
@@ -104,7 +145,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signUp,
     signOut,
-    isAdmin: user?.role === 'admin'
+    isAdmin: user?.role === 'admin' && !isImpersonating,
+    impersonateUser,
+    stopImpersonating,
+    isImpersonating,
   };
 
   return (
