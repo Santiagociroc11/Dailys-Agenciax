@@ -1194,7 +1194,7 @@ export default function UserProjectView() {
       ]);
 
       // Pequeño delay para asegurar que todos los estados se actualicen
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Cambiar a la pestaña de gestión DESPUÉS de que se actualicen los datos
       setActiveTab('gestion');
