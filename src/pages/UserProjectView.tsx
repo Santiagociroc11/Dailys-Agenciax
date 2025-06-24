@@ -614,7 +614,7 @@ export default function UserProjectView() {
         .from('tasks')
         .select('*')
         .contains('assigned_users', [user.id])
-        .not('status', 'in', '(approved, completed)')
+        .not('status', 'in', '(approved, completed, in_review, returned, assigned, in_progress, blocked)')
         .order('deadline', { ascending: true });
       if (!isAll) {
         taskDataQ = taskDataQ.in('project_id', [projectId!]);
@@ -668,7 +668,7 @@ export default function UserProjectView() {
           )
         `)
         .eq('assigned_to', user.id)
-        .not('status', 'in', '(approved, completed)')
+        .not('status', 'in', '(approved, completed, in_review, returned, assigned, in_progress, blocked)')
         .order('sequence_order', { ascending: true });
       if (!isAll) {
         subtaskDataQ = subtaskDataQ.in('tasks.project_id', [projectId!]);
@@ -741,7 +741,7 @@ export default function UserProjectView() {
               if (allPreviousLevelsComplete) {
                 // El usuario puede trabajar en este nivel - añadir TODAS sus subtareas disponibles
                 const userSubtasksInLevel = currentLevelSubtasks.filter(s => 
-                  s.assigned_to === user.id && s.status !== 'approved'
+                  s.assigned_to === user.id && !['approved', 'completed', 'in_review', 'returned', 'assigned', 'in_progress', 'blocked'].includes(s.status)
                 );
                 
                 if (userSubtasksInLevel.length > 0) {
