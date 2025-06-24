@@ -16,5 +16,4 @@ dist
 
 # Docker
 .dockerignore
-Dockerfile
-nginx.conf 
+Dockerfile 
