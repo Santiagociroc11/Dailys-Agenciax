@@ -1366,7 +1366,7 @@ export default function UserProjectView() {
         .from("task_work_assignments")
         .select("*")
         .eq("user_id", user.id)
-        .not("status", "eq", "completed");
+        .not("status", "in", "('completed', 'in_review', 'approved')");
 
       // Solo aplicar filtro de proyecto si no estamos en "all"
       if (projectId !== "all") {
@@ -1522,12 +1522,7 @@ export default function UserProjectView() {
 
             // Verificar si esta tarea está en la lista de devueltas
             const returnedInfo = returnedItemsMap.get(task.id);
-
-            // Usar el estado de la tarea si está devuelta, de lo contrario usar el estado de la asignación
-            const taskStatus = returnedInfo ? 'returned' : (assignment?.status || task.status);
-
-            // Usar las notas de la tarea si está devuelta
-            const taskNotes = returnedInfo ? returnedInfo.notes : assignment?.notes;
+            const isActuallyReturned = returnedInfo || task.status === 'returned';
 
             const formattedTask: Task = {
               id: task.id,
@@ -1538,24 +1533,24 @@ export default function UserProjectView() {
               estimated_duration: task.estimated_duration,
               start_date: task.start_date,
               deadline: task.deadline,
-              status: taskStatus, // Usar el estado actualizado
+              status: task.status, // Usar siempre el estado de la tabla principal
               is_sequential: task.is_sequential,
               project_id: task.project_id,
               projectName: projectMap[task.project_id] || 'Sin proyecto',
               type: 'task',
               assignment_date: assignment?.date || today,
-              notes: taskNotes || null
+              notes: isActuallyReturned ? (returnedInfo?.notes || task.notes) : (assignment?.notes || task.notes)
             };
 
             // Calcular duración estimada en horas
             const durationHours = Math.round((task.estimated_duration / 60) * 100) / 100;
 
-            // Clasificar según el estado
-            if (formattedTask.status !== 'completed' && formattedTask.status !== 'approved') {
+            // Clasificar solo si la tarea no está en un estado final
+            if (!['completed', 'approved', 'in_review'].includes(formattedTask.status)) {
               totalPendingTime += durationHours;
 
               // Priorizar las tareas devueltas
-              if (formattedTask.status === 'returned') {
+              if (isActuallyReturned) {
                 returnedItems.push(formattedTask);
               }
               // Después clasificar por fecha
@@ -1607,12 +1602,7 @@ export default function UserProjectView() {
 
             // Verificar si esta subtarea está en la lista de devueltas
             const returnedInfo = returnedItemsMap.get(subtask.id);
-
-            // Usar el estado de la subtarea si está devuelta, de lo contrario usar el estado de la asignación
-            const subtaskStatus = returnedInfo ? 'returned' : (assignment?.status || subtask.status);
-
-            // Usar las notas de la subtarea si está devuelta
-            const subtaskNotes = returnedInfo ? returnedInfo.notes : assignment?.notes;
+            const isActuallyReturned = returnedInfo || subtask.status === 'returned';
 
             const formattedSubtask: Task = {
               id: `subtask-${subtask.id}`,
@@ -1624,24 +1614,24 @@ export default function UserProjectView() {
               estimated_duration: subtask.estimated_duration,
               start_date: subtask.start_date || '',
               deadline: subtask.deadline || '',
-              status: subtaskStatus, // Usar el estado actualizado
+              status: subtask.status, // Usar siempre el estado de la tabla principal
               is_sequential: false,
               project_id: subtask.tasks?.project_id || '',
               projectName: projectMap[subtask.tasks?.project_id || ''] || 'Sin proyecto',
               type: 'subtask',
               assignment_date: assignment?.date || today,
-              notes: subtaskNotes || null
+              notes: isActuallyReturned ? (returnedInfo?.notes || subtask.notes) : (assignment?.notes || subtask.notes)
             };
 
             // Calcular duración estimada en horas
             const durationHours = Math.round((subtask.estimated_duration / 60) * 100) / 100;
 
             // Clasificar según el estado
-            if (formattedSubtask.status !== 'completed' && formattedSubtask.status !== 'approved') {
+            if (!['completed', 'approved', 'in_review'].includes(formattedSubtask.status)) {
               totalPendingTime += durationHours;
 
               // Priorizar las tareas devueltas
-              if (formattedSubtask.status === 'returned') {
+              if (isActuallyReturned) {
                 returnedItems.push(formattedSubtask);
               }
               // Después clasificar por fecha
