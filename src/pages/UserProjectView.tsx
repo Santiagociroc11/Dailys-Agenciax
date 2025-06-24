@@ -451,17 +451,19 @@ export default function UserProjectView() {
    useEffect(() => {
       if (activeTab === "gestion" && activeGestionSubTab === "pendientes") {
          // Verificar si hay tareas que aparecen en ambas listas (pendientes y completadas)
-         const pendingTasks = [...assignedTaskItems, ...delayedTaskItems];
+         const pendingTasks = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems];
          const duplicates = pendingTasks.filter((pendingTask) => completedTaskItems.some((completedTask) => completedTask.id === pendingTask.id));
 
          if (duplicates.length > 0) {
+            console.warn("Tareas duplicadas encontradas en pendientes y completadas:", duplicates);
          }
       }
-   }, [activeTab, activeGestionSubTab, assignedTaskItems, delayedTaskItems, completedTaskItems]);
+   }, [activeTab, activeGestionSubTab, assignedTaskItems, delayedTaskItems, returnedTaskItems, completedTaskItems]);
 
    useEffect(() => {
       // Log de conteo de tareas en cada cambio de las listas
-   }, [assignedTaskItems, delayedTaskItems, completedTaskItems]);
+      console.log(`CONTEO TAREAS -> Asignadas: ${assignedTaskItems.length}, Retrasadas: ${delayedTaskItems.length}, Completadas: ${completedTaskItems.length}, Devueltas: ${returnedTaskItems.length}`);
+   }, [assignedTaskItems, delayedTaskItems, completedTaskItems, returnedTaskItems]);
 
    async function fetchProject() {
       try {
@@ -490,18 +492,17 @@ export default function UserProjectView() {
             return;
          }
 
-       
+         console.log("[DAILY] Tareas/Subtareas ya asignadas para hoy (raw):", data);
 
          // Asegurar el formato correcto de IDs para el filtrado
          const formattedIds = data.map((item) => {
             // Formato especial para subtareas
             const formattedId = item.task_type === "subtask" ? `subtask-${item.subtask_id}` : item.task_id;
 
-
             return formattedId;
          });
 
-       
+         console.log("[DAILY] IDs formateados para filtrar:", formattedIds);
 
          setDailyTasksIds(formattedIds || []);
       } catch (error) {
@@ -614,6 +615,7 @@ export default function UserProjectView() {
                const allForThis = allSubtasksData!.filter((x) => x.task_id === taskId).sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
 
                // DEBUG: Verificar secuencia completa
+               console.log(`[SECUENCIAL] Tarea ${taskId}, subtareas ordenadas:`, allForThis.map(s => ({ id: s.id, order: s.sequence_order, status: s.status, title: s.title, assigned_to: s.assigned_to === user.id ? 'ME' : s.assigned_to })));
 
                // NUEVA LÓGICA: Agrupar por sequence_order y manejar paralelismo
                const groupedByOrder = new Map<number, Subtask[]>();
@@ -678,6 +680,7 @@ export default function UserProjectView() {
          // Resumen final
          const sequentialSubs = relevantSubs.filter((s) => s.tasks?.is_sequential);
          if (sequentialSubs.length > 0) {
+            console.log(`[SECUENCIAL] Subtareas secuenciales relevantes para el usuario:`, sequentialSubs.map(s => ({ id: s.id, title: s.title, status: s.status })));
          }
 
          // 🔟 Mapear subtareas a Task[]
@@ -729,6 +732,8 @@ export default function UserProjectView() {
          if (uniqueAvailable.length < available.length) {
             console.warn("🚨 [DUPLICADOS REMOVIDOS] Se encontraron y eliminaron tareas duplicadas de la lista de asignación.");
          }
+
+         console.log("[FETCH] Tareas disponibles para asignar (filtradas y finales):", uniqueAvailable);
 
          // 1️⃣3️⃣ Ordenar
          const sorted = uniqueAvailable.sort((a, b) => {
@@ -903,6 +908,7 @@ export default function UserProjectView() {
       setSaving(true);
 
       // Log the selected tasks that will be saved
+      console.log("[SAVE] Tareas seleccionadas para guardar:", selectedTasks);
 
       try {
          const today = format(new Date(), "yyyy-MM-dd");
@@ -992,6 +998,7 @@ export default function UserProjectView() {
             if (updateSubtaskError) {
                console.error("Error al actualizar estado de subtareas:", updateSubtaskError);
             } else {
+               console.log("[SAVE] Subtareas actualizadas a 'assigned':", updatedSubtasks);
             }
          }
 
@@ -1002,6 +1009,7 @@ export default function UserProjectView() {
             if (updateTaskError) {
                console.error("Error al actualizar estado de tareas:", updateTaskError);
             } else {
+               console.log("[SAVE] Tareas actualizadas a 'assigned':", updatedTasks);
             }
          }
 
@@ -1013,6 +1021,7 @@ export default function UserProjectView() {
             if (updateParentError) {
                console.error("Error al actualizar estado de tareas principales:", updateParentError);
             } else {
+               console.log("[SAVE] Tareas principales de subtareas actualizadas a 'in_progress':", updatedParentTasks);
             }
          }
 
@@ -1170,7 +1179,8 @@ export default function UserProjectView() {
             return;
          }
 
-       
+         console.log("[ASSIGNED] Asignaciones de trabajo para el usuario:", assignments);
+
          if (!assignments) {
             setAssignedTaskItems([]);
             setDelayedTaskItems([]);
@@ -1535,6 +1545,7 @@ export default function UserProjectView() {
             if (historyError) {
                console.error("⚠️ [HISTORY] Could not log implicit parent task status change:", historyError);
             } else {
+               console.log("✅ [HISTORY] Cambio de estado registrado:", historyRecord);
             }
          }
       } catch (e) {
@@ -1614,6 +1625,7 @@ export default function UserProjectView() {
                // Loggear el error pero no bloquear el flujo del usuario
                console.error("⚠️ [HISTORY] No se pudo registrar el cambio de estado:", historyError);
             } else {
+               console.log("✅ [HISTORY] Cambio de estado registrado:", historyRecord);
             }
          }
 
@@ -1692,6 +1704,8 @@ export default function UserProjectView() {
             setLoadingCompleted(false);
             return;
          }
+
+         console.log("[COMPLETED] Asignaciones de tareas completadas:", completedTaskAssignments);
 
          // Verificar si hay datos
          if (!completedTaskAssignments) {
@@ -1831,6 +1845,7 @@ export default function UserProjectView() {
          });
 
          setCompletedTaskItems(sortedCompletedItems);
+         console.log("[COMPLETED] Tareas completadas procesadas y ordenadas:", sortedCompletedItems);
 
          // Después de actualizar las tareas completadas, eliminar duplicados de listas pendientes
          removeCompletedFromPendingLists(sortedCompletedItems);
@@ -1851,9 +1866,10 @@ export default function UserProjectView() {
       const duplicatesInReturned = returnedTaskItems.filter((task) => completedIds.has(task.id));
 
       if (duplicatesInAssigned.length > 0 || duplicatesInDelayed.length > 0 || duplicatesInReturned.length > 0) {
-         console.log("🧹 [CLEAN] Eliminando tareas completadas de listas pendientes:", {
+         console.warn("🧹 [CLEAN] Eliminando tareas completadas de listas pendientes:", {
             enAsignadas: duplicatesInAssigned.map((t) => t.id),
             enRetrasadas: duplicatesInDelayed.map((t) => t.id),
+            enDevueltas: duplicatesInReturned.map((t) => t.id),
          });
 
          // Filtrar las listas para quitar las tareas completadas
@@ -1884,6 +1900,7 @@ export default function UserProjectView() {
             const { data, error } = await supabase.from("subtasks").select("*").eq("id", task.original_id).single();
 
             if (error) {
+               console.error("Error al obtener datos de retroalimentación para subtarea", error);
             } else if (data) {
                // Verifica si feedback está disponible y es un objeto
                if (data.feedback) {
@@ -2045,6 +2062,7 @@ export default function UserProjectView() {
          }
 
          // Debug de las notas actualizadas antes de guardarlas
+         console.log("[FEEDBACK] Notas actualizadas para la tarea devuelta:", updatedNotes);
 
          // Actualizar la tarea seleccionada con las notas actualizadas
          setSelectedReturnedTask({
@@ -2366,12 +2384,10 @@ export default function UserProjectView() {
                                        <div>
                                           <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800">Devuelta</span>
                                        </div>
-                                       <div>
+                                       <div className="flex space-x-2 items-center">
                                           <button onClick={() => handleViewReturnedFeedback(task)} className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors">
                                              Ver Feedback
                                           </button>
-                                       </div>
-                                       <div className="flex space-x-2">
                                           <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
                                              Actualizar Estado
                                           </button>
@@ -3208,7 +3224,7 @@ export default function UserProjectView() {
 
                      <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
                         <h4 className="text-sm font-medium text-orange-800 mb-1">Motivo de la devolución:</h4>
-                        <div className="whitespace-pre-wrap text-sm">
+                        <div className="whitespace-pre-wrap text-sm text-gray-700 max-h-48 overflow-y-auto">
                            {(() => {
                               try {
                                  // Verificar si hay retroalimentación disponible
@@ -3228,7 +3244,7 @@ export default function UserProjectView() {
                                        feedback = String(notes.returned_feedback);
                                     }
 
-                                    return feedback;
+                                    return <RichTextDisplay text={feedback} />;
                                  } else {
                                     // Si no hay retroalimentación específica
                                     return (
