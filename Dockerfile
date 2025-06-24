@@ -3,6 +3,14 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+# Declare build arguments
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Set them as environment variables
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
 # Copy package files and install dependencies
 COPY package.json package-lock.json ./
 RUN npm install
