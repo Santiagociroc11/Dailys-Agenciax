@@ -182,14 +182,16 @@ const determineMainTaskStatus = (task: Task, subtasksOfTask: Subtask[]): string 
       return 'main_blocked';
     }
     
-    const anyInProgress = subtasksOfTask.some(st => ['in_progress', 'completed'].includes(st.status));
+    // Solo considerar como "en proceso" si realmente han comenzado a trabajar
+    const anyInProgress = subtasksOfTask.some(st => ['in_progress', 'completed', 'approved'].includes(st.status));
     if(anyInProgress) {
         return 'main_in_progress';
     }
 
-    const anyAssigned = subtasksOfTask.some(st => !!st.assigned_to);
-    if (anyAssigned) {
-      return 'main_in_progress';
+    // Si todas las subtareas están pendientes (aunque tengan asignados), la tarea principal debe estar pendiente
+    const allPending = subtasksOfTask.every(st => st.status === 'pending');
+    if (allPending) {
+      return 'main_pending';
     }
     
     return 'main_pending';
@@ -233,7 +235,14 @@ function Management() {
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
   const [view, setView] = useState<'subtasks' | 'main_tasks' | 'review'>('subtasks');
-  const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { main_task_status: string })[]>([]);
+  const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { 
+    main_task_status: string;
+    completionPercentage: number;
+    subtaskStats: {
+      total: number;
+      approved: number;
+    };
+  })[]>([]);
   const [reviewSubTab, setReviewSubTab] = useState<'pending' | 'in_review'>('pending');
   
   // Estados para los modales
@@ -260,12 +269,25 @@ function Management() {
   const processMainTasks = useCallback((allTasks: Task[], allSubtasks: Subtask[]) => {
     if (!allTasks) return;
     
-    const tasksWithStatus = allTasks.map(task => {
+    const tasksWithDetails = allTasks.map(task => {
         const relatedSubtasks = allSubtasks.filter(st => st.task_id === task.id);
         const main_task_status = determineMainTaskStatus(task, relatedSubtasks);
-        return { ...task, main_task_status };
+
+        const total = relatedSubtasks.length;
+        const approved = relatedSubtasks.filter(st => st.status === 'approved').length;
+        const completionPercentage = total > 0 ? (approved / total) * 100 : 0;
+        
+        return { 
+          ...task, 
+          main_task_status,
+          completionPercentage,
+          subtaskStats: {
+            total,
+            approved,
+          }
+        };
     });
-    setProcessedMainTasks(tasksWithStatus);
+    setProcessedMainTasks(tasksWithDetails);
   }, []);
 
   useEffect(() => {
@@ -1309,8 +1331,23 @@ function Management() {
         relatedSubtasksData = fetchedRelatedSubtasks || [];
       }
 
+      let completionPercentage = 0;
+      let subtaskStats = { total: 0, approved: 0 };
+      if (relatedSubtasksData.length > 0) {
+        subtaskStats.total = relatedSubtasksData.length;
+        subtaskStats.approved = relatedSubtasksData.filter(st => st.status === 'approved').length;
+        if (subtaskStats.total > 0) {
+            completionPercentage = (subtaskStats.approved / subtaskStats.total) * 100;
+        }
+      }
+
       // Set all state variables together
-      setTaskDetails({ ...item, parent_task: isSubtaskType ? parentTaskData : undefined });
+      setTaskDetails({ 
+        ...item, 
+        parent_task: isSubtaskType ? parentTaskData : undefined,
+        completionPercentage,
+        subtaskStats 
+      });
       setRelatedSubtasks(relatedSubtasksData);
       setPreviousSubtask(fetchedPreviousSubtask);
       setNextSubtask(fetchedNextSubtask);
@@ -1453,6 +1490,23 @@ function Management() {
                                 </div>
                               )}
                             </div>
+                            {/* NEW: Progress bar and stats */}
+                            {task.subtaskStats.total > 0 && (
+                              <div className="mt-3">
+                                <div className="flex justify-between items-center text-xs mb-1">
+                                  <span className="font-medium text-gray-600">Progreso</span>
+                                  <span className="font-semibold text-indigo-600">
+                                    {task.subtaskStats.approved} / {task.subtaskStats.total}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                                  <div 
+                                    className="bg-gradient-to-r from-indigo-500 to-blue-500 h-2 rounded-full transition-all duration-500"
+                                    style={{ width: `${task.completionPercentage}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
