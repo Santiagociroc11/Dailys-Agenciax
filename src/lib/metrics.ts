@@ -808,17 +808,25 @@ export async function getUserUtilizationMetrics(userId: string, workingHoursPerD
  */
 export async function getAllUsersUtilizationMetrics(workingHoursPerDay: number = 8): Promise<UtilizationMetrics[]> {
   try {
-    const { data: users } = await supabase
+    // Obtener solo usuarios que están asignados a al menos un proyecto
+    const { data: users, error } = await supabase
       .from('users')
-      .select('id');
+      .select('id, assigned_projects')
+      .not('assigned_projects', 'is', null);
 
-    if (!users) return [];
+    if (error) throw error;
+
+    // Filtrar localmente por si la base de datos devuelve un array vacío en lugar de nulo
+    const activeUsers = users?.filter(u => u.assigned_projects && u.assigned_projects.length > 0) || [];
+    
+    if (!activeUsers.length) return [];
 
     const utilizationMetrics = await Promise.all(
-      users.map(user => getUserUtilizationMetrics(user.id, workingHoursPerDay))
+      activeUsers.map(user => getUserUtilizationMetrics(user.id, workingHoursPerDay))
     );
 
-    return utilizationMetrics.filter(metrics => metrics.workingDaysThisMonth > 0);
+    // No filtrar por días trabajados para incluir a todos los usuarios con asignaciones
+    return utilizationMetrics;
   } catch (error) {
     console.error('Error getting all users utilization metrics:', error);
     return [];
