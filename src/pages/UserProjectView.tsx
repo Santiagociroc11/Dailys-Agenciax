@@ -2467,7 +2467,7 @@ export default function UserProjectView() {
                                        <div>
                                           <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800">Devuelta</span>
                                        </div>
-                                       <div className="flex space-x-2 items-center">
+                                       <div className="flex flex-wrap gap-2 items-center">
                                           <button onClick={() => handleViewReturnedFeedback(task)} className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors">
                                              Ver Feedback
                                           </button>
@@ -2580,9 +2580,12 @@ export default function UserProjectView() {
                                              {daysSinceAssignment <= 0 ? "Hoy" : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? "s" : ""}`}
                                              {task.assignment_date && <div className="text-xs text-gray-500">Asignada: {format(parseISO(task.assignment_date), "dd/MM/yyyy")}</div>}
                                           </div>
-                                          <div>
+                                          <div className="flex flex-wrap gap-2 items-center">
                                              <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
                                                 Actualizar Estado
+                                             </button>
+                                             <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
+                                                Desasignar
                                              </button>
                                           </div>
                                        </div>
@@ -2702,7 +2705,7 @@ export default function UserProjectView() {
                                     <div>
                                        <TaskStatusDisplay status={task.status} />
                                     </div>
-                                    <div className="flex space-x-2">
+                                    <div className="flex flex-wrap gap-2 items-center">
                                        <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
                                           Actualizar Estado
                                        </button>
