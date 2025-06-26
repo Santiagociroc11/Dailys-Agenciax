@@ -615,7 +615,10 @@ export default function UserProjectView() {
                const allForThis = allSubtasksData!.filter((x) => x.task_id === taskId).sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
 
                // DEBUG: Verificar secuencia completa
-               console.log(`[SECUENCIAL] Tarea ${taskId}, subtareas ordenadas:`, allForThis.map(s => ({ id: s.id, order: s.sequence_order, status: s.status, title: s.title, assigned_to: s.assigned_to === user.id ? 'ME' : s.assigned_to })));
+               console.log(
+                  `[SECUENCIAL] Tarea ${taskId}, subtareas ordenadas:`,
+                  allForThis.map((s) => ({ id: s.id, order: s.sequence_order, status: s.status, title: s.title, assigned_to: s.assigned_to === user.id ? "ME" : s.assigned_to }))
+               );
 
                // NUEVA LÓGICA: Agrupar por sequence_order y manejar paralelismo
                const groupedByOrder = new Map<number, Subtask[]>();
@@ -680,7 +683,10 @@ export default function UserProjectView() {
          // Resumen final
          const sequentialSubs = relevantSubs.filter((s) => s.tasks?.is_sequential);
          if (sequentialSubs.length > 0) {
-            console.log(`[SECUENCIAL] Subtareas secuenciales relevantes para el usuario:`, sequentialSubs.map(s => ({ id: s.id, title: s.title, status: s.status })));
+            console.log(
+               `[SECUENCIAL] Subtareas secuenciales relevantes para el usuario:`,
+               sequentialSubs.map((s) => ({ id: s.id, title: s.title, status: s.status }))
+            );
          }
 
          // 🔟 Mapear subtareas a Task[]
@@ -718,12 +724,12 @@ export default function UserProjectView() {
             type: "task",
          }));
 
-         // 1️⃣2️⃣ Filtrar las ya asignadas hoy o en curso
+         // 1️⃣2️⃣ Filtrar las ya asignadas hoy o solo mostrar las que están en estado 'pending'
          const available = [...tasksAsTasks, ...subtasksAsTasks].filter((task) => {
             const key = task.type === "subtask" ? `subtask-${task.original_id}` : task.id;
             const already = dailyTasksIds?.includes(key);
-            const inProg = ["assigned", "in_progress"].includes(task.status);
-            return !already && !inProg;
+            const isPending = task.status === "pending"; // Solo mostrar tareas pendientes
+            return !already && isPending;
          });
 
          // Filtrar duplicados para evitar errores de renderizado en React
