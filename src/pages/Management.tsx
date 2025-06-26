@@ -1045,6 +1045,29 @@ function Management() {
                                   <Clock className="w-2.5 h-2.5 mr-1" />
                                   <span>{subtask.estimated_duration} min</span>
                                 </div>
+                                {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
+                                {(subtask.status === 'completed' || subtask.status === 'approved') && (() => {
+                                  const details = getItemDetails(subtask);
+                                  if (details.realDuration) {
+                                    const isOnTime = details.realDuration <= subtask.estimated_duration;
+                                    const isClose = details.realDuration <= subtask.estimated_duration * 1.2; // 20% de tolerancia
+                                    return (
+                                      <div className={`flex items-center rounded px-1.5 py-0.5 ${
+                                        isOnTime 
+                                          ? 'bg-green-100 text-green-800' 
+                                          : isClose 
+                                            ? 'bg-yellow-100 text-yellow-800'
+                                            : 'bg-red-100 text-red-800'
+                                      }`}>
+                                        <Clock className="w-2.5 h-2.5 mr-1" />
+                                        <span>Real: {details.realDuration} min</span>
+                                        {isOnTime && <span className="ml-1">✓</span>}
+                                        {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
                                 {subtask.deadline && (
                                   <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
                                     <Calendar className="w-2.5 h-2.5 mr-1" />
@@ -1168,6 +1191,29 @@ function Management() {
                                 <Clock className="w-2.5 h-2.5 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
+                              {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
+                              {(task.status === 'completed' || task.status === 'approved') && (() => {
+                                const details = getItemDetails(task);
+                                if (details.realDuration) {
+                                  const isOnTime = details.realDuration <= task.estimated_duration;
+                                  const isClose = details.realDuration <= task.estimated_duration * 1.2; // 20% de tolerancia
+                                  return (
+                                    <div className={`flex items-center rounded px-1.5 py-0.5 ${
+                                      isOnTime 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : isClose 
+                                          ? 'bg-yellow-100 text-yellow-800'
+                                          : 'bg-red-100 text-red-800'
+                                    }`}>
+                                      <Clock className="w-2.5 h-2.5 mr-1" />
+                                      <span>Real: {details.realDuration} min</span>
+                                      {isOnTime && <span className="ml-1">✓</span>}
+                                      {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
                               <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
                                 <Calendar className="w-2.5 h-2.5 mr-1" />
                                 <span>{new Date(task.deadline).toLocaleDateString()}</span>
@@ -1499,6 +1545,29 @@ function Management() {
                                 <Clock className="w-2.5 h-2.5 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
+                              {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
+                              {(task.status === 'completed' || task.status === 'approved') && (() => {
+                                const details = getItemDetails(task);
+                                if (details.realDuration) {
+                                  const isOnTime = details.realDuration <= task.estimated_duration;
+                                  const isClose = details.realDuration <= task.estimated_duration * 1.2; // 20% de tolerancia
+                                  return (
+                                    <div className={`flex items-center rounded px-1.5 py-0.5 ${
+                                      isOnTime 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : isClose 
+                                          ? 'bg-yellow-100 text-yellow-800'
+                                          : 'bg-red-100 text-red-800'
+                                    }`}>
+                                      <Clock className="w-2.5 h-2.5 mr-1" />
+                                      <span>Real: {details.realDuration} min</span>
+                                      {isOnTime && <span className="ml-1">✓</span>}
+                                      {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
                               <div className="flex items-center bg-gray-50 rounded px-1.5 py-0.5">
                                 <Calendar className="w-2.5 h-2.5 mr-1" />
                                 <span>{new Date(task.deadline).toLocaleDateString()}</span>
@@ -1768,9 +1837,17 @@ function Management() {
                     <td className="px-4 py-4">
                       <div className="text-sm text-gray-900">
                         <div className="font-medium">{item.estimated_duration}min</div>
-                        {details.realDuration && details.realDuration !== item.estimated_duration && (
-                          <div className="text-xs text-emerald-600">
+                        {details.realDuration && (
+                          <div className={`text-xs font-medium ${
+                            details.realDuration <= item.estimated_duration
+                              ? 'text-green-600'
+                              : details.realDuration <= item.estimated_duration * 1.2
+                                ? 'text-yellow-600' 
+                                : 'text-red-600'
+                          }`}>
                             Real: {details.realDuration}min
+                            {details.realDuration <= item.estimated_duration && ' ✓'}
+                            {details.realDuration > item.estimated_duration * 1.2 && ' ⚠'}
                           </div>
                         )}
                       </div>
