@@ -283,6 +283,8 @@ export default function UserProjectView() {
    const [showStatusModal, setShowStatusModal] = useState(false);
    const [showReturnedFeedbackModal, setShowReturnedFeedbackModal] = useState(false);
    const [selectedReturnedTask, setSelectedReturnedTask] = useState<Task | null>(null);
+   const [showUnassignConfirmModal, setShowUnassignConfirmModal] = useState(false);
+   const [taskToUnassign, setTaskToUnassign] = useState<Task | null>(null);
 
    // Estados para detalles de tareas y subtareas
    const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
@@ -2083,6 +2085,81 @@ export default function UserProjectView() {
       setShowReturnedFeedbackModal(true);
    }
 
+   function handleShowUnassignConfirmModal(taskId: string) {
+      const task = assignedTaskItems.find((t) => t.id === taskId);
+      if (task) {
+         setTaskToUnassign(task);
+         setShowUnassignConfirmModal(true);
+      }
+   }
+
+   function handleConfirmUnassign() {
+      if (taskToUnassign) {
+         handleUnassignTask(taskToUnassign.id);
+      }
+      setShowUnassignConfirmModal(false);
+      setTaskToUnassign(null);
+   }
+
+   async function handleUnassignTask(taskId: string) {
+      if (!user) {
+         toast.error("No se pudo verificar el usuario.");
+         return;
+      }
+
+      setSaving(true);
+
+      try {
+         const isSubtask = taskId.startsWith("subtask-");
+         const originalId = isSubtask ? taskId.replace("subtask-", "") : taskId;
+         const table = isSubtask ? "subtasks" : "tasks";
+         const taskType = isSubtask ? "subtask" : "task";
+         const today = format(new Date(), "yyyy-MM-dd");
+
+         // 1. Delete from task_work_assignments
+         const deleteQuery = supabase.from("task_work_assignments").delete().eq("user_id", user.id).eq("date", today).eq("task_type", taskType);
+
+         const { error: deleteError } = isSubtask ? await deleteQuery.eq("subtask_id", originalId) : await deleteQuery.eq("task_id", originalId);
+
+         if (deleteError) throw deleteError;
+
+         // 2. Update task/subtask status back to "pending"
+         const { error: updateError } = await supabase.from(table).update({ status: "pending" }).eq("id", originalId);
+
+         if (updateError) {
+            console.warn("Could not reset task status to pending, but it was unassigned.", updateError);
+         }
+
+         // 3. If it was a subtask, check if parent task status needs to be reverted.
+         if (isSubtask) {
+            const { data: subtaskData } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
+
+            if (subtaskData && subtaskData.task_id) {
+               const parentId = subtaskData.task_id;
+               const { data: siblingSubtasks } = await supabase.from("subtasks").select("status").eq("task_id", parentId);
+
+               if (siblingSubtasks) {
+                  const anyInProgress = siblingSubtasks.some((s) => s.status !== "pending");
+                  if (!anyInProgress) {
+                     await supabase.from("tasks").update({ status: "pending" }).eq("id", parentId);
+                     console.log(`Parent task ${parentId} reverted to pending.`);
+                  }
+               }
+            }
+         }
+
+         toast.success("Tarea desasignada correctamente.");
+
+         // 4. Refresh data
+         await Promise.all([fetchProjectTasksAndSubtasks(), fetchAssignedTasks()]);
+      } catch (error) {
+         console.error("Error unassigning task:", error);
+         toast.error("Hubo un error al desasignar la tarea.");
+      } finally {
+         setSaving(false);
+      }
+   }
+
    return (
       <div className="bg-white rounded-lg shadow-md p-6">
          <div className="mb-6">
@@ -2397,6 +2474,9 @@ export default function UserProjectView() {
                                           <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
                                              Actualizar Estado
                                           </button>
+                                          <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
+                                             Desasignar
+                                          </button>
                                        </div>
                                     </div>
                                  ))}
@@ -2632,6 +2712,9 @@ export default function UserProjectView() {
                                              Ver Feedback
                                           </button>
                                        )}
+                                       <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
+                                          Desasignar
+                                       </button>
                                     </div>
                                  </div>
                               ))
@@ -3303,6 +3386,40 @@ export default function UserProjectView() {
                            Actualizar Estado Ahora
                         </button>
                      </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* Modal de confirmación para desasignar tarea */}
+         {showUnassignConfirmModal && taskToUnassign && (
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+               <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                     <h3 className="text-lg font-medium">Confirmar Desasignación</h3>
+                     <button onClick={() => setShowUnassignConfirmModal(false)} className="text-gray-400 hover:text-gray-500 focus:outline-none">
+                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                     </button>
+                  </div>
+                  <div className="px-6 py-4">
+                     <p className="mb-2 text-gray-700">¿Estás seguro de que quieres desasignar la siguiente tarea de tu lista de hoy?</p>
+                     <div className="p-3 bg-gray-50 rounded-md">
+                        <p className="font-semibold text-gray-800">{taskToUnassign.title}</p>
+                        {taskToUnassign.type === "subtask" && <p className="text-xs text-gray-500">Subtarea de: {taskToUnassign.subtask_title}</p>}
+                     </div>
+                     <p className="text-sm text-gray-600 mt-4">
+                        La tarea volverá a la lista de "Asignación" y su estado cambiará a <strong>pendiente</strong>.
+                     </p>
+                  </div>
+                  <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
+                     <button onClick={() => setShowUnassignConfirmModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50">
+                        Cancelar
+                     </button>
+                     <button onClick={handleConfirmUnassign} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 disabled:bg-gray-400">
+                        {saving ? "DESASIGNANDO..." : "Sí, desasignar"}
+                     </button>
                   </div>
                </div>
             </div>
