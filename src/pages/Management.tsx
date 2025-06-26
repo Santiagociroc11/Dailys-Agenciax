@@ -1045,8 +1045,8 @@ function Management() {
                                   <Clock className="w-2.5 h-2.5 mr-1" />
                                   <span>{subtask.estimated_duration} min</span>
                                 </div>
-                                {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
-                                {(subtask.status === 'completed' || subtask.status === 'approved') && (() => {
+                                {/* Tiempo real si está disponible */}
+                                {(() => {
                                   const details = getItemDetails(subtask);
                                   if (details.realDuration) {
                                     const isOnTime = details.realDuration <= subtask.estimated_duration;
@@ -1191,8 +1191,8 @@ function Management() {
                                 <Clock className="w-2.5 h-2.5 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
-                              {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
-                              {(task.status === 'completed' || task.status === 'approved') && (() => {
+                              {/* Tiempo real si está disponible */}
+                              {(() => {
                                 const details = getItemDetails(task);
                                 if (details.realDuration) {
                                   const isOnTime = details.realDuration <= task.estimated_duration;
@@ -1425,7 +1425,7 @@ function Management() {
   }
 
   const groupMainTasks = () => {
-    let grouped: { [key: string]: (Task & { main_task_status: string })[] } = {};
+    let grouped: { [key: string]: (typeof processedMainTasks) } = {};
 
     const sourceTasks = processedMainTasks;
 
@@ -1545,8 +1545,8 @@ function Management() {
                                 <Clock className="w-2.5 h-2.5 mr-1" />
                                 <span>{task.estimated_duration} min</span>
                               </div>
-                              {/* Tiempo real si está disponible y la tarea está completada/aprobada */}
-                              {(task.status === 'completed' || task.status === 'approved') && (() => {
+                              {/* Tiempo real si está disponible */}
+                              {(() => {
                                 const details = getItemDetails(task);
                                 if (details.realDuration) {
                                   const isOnTime = details.realDuration <= task.estimated_duration;
