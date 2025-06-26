@@ -1329,7 +1329,8 @@ export default function UserProjectView() {
                   const durationHours = Math.round((task.estimated_duration / 60) * 100) / 100;
 
                   // Clasificar solo si la tarea no está en un estado final
-                  if (!["completed", "approved", "in_review"].includes(formattedTask.status)) {
+                  // USAR EL ESTADO DE LA ASIGNACIÓN (assignment?.status) EN LUGAR DEL ESTADO DE LA TAREA
+                  if (!["completed", "approved", "in_review"].includes(assignment?.status || formattedTask.status)) {
                      totalPendingTime += durationHours;
 
                      // Priorizar las tareas devueltas
@@ -1409,7 +1410,8 @@ export default function UserProjectView() {
                   const durationHours = Math.round((subtask.estimated_duration / 60) * 100) / 100;
 
                   // Clasificar según el estado
-                  if (!["completed", "approved", "in_review"].includes(formattedSubtask.status)) {
+                  // USAR EL ESTADO DE LA ASIGNACIÓN (assignment?.status) EN LUGAR DEL ESTADO DE LA SUBTAREA
+                  if (!["completed", "approved", "in_review"].includes(assignment?.status || formattedSubtask.status)) {
                      totalPendingTime += durationHours;
 
                      // Priorizar las tareas devueltas
@@ -1664,6 +1666,17 @@ export default function UserProjectView() {
             // Recargar las tareas completadas para incluir la nueva
             console.log("🔄 [SUBMIT STATUS] Recargando tareas completadas después de marcar como completada");
             fetchCompletedTasks();
+
+            // Agregar un pequeño delay y una segunda verificación para asegurar consistencia
+            setTimeout(() => {
+               // Verificar si la tarea aún aparece en las listas pendientes después de completarla
+               if (assignedTaskItems.some(t => t.id === selectedTaskId) || 
+                   delayedTaskItems.some(t => t.id === selectedTaskId) || 
+                   returnedTaskItems.some(t => t.id === selectedTaskId)) {
+                  console.warn("🚨 [CONSISTENCY CHECK] Tarea completada aún aparece en listas pendientes, forzando recarga");
+                  fetchAssignedTasks();
+               }
+            }, 1000);
          } else {
             // Si se marcó con otro estado, actualizar el estado en la lista correspondiente
             if (isInReturned) {
