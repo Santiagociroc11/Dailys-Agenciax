@@ -95,6 +95,11 @@ const getItemDetails = (item: Task | Subtask | null): {
   returnedFeedback: TaskFeedback | null;
   approvedFeedback: TaskFeedback | null;
   realDuration: number | null;
+  timeBreakdown: {
+    initial: number | null;
+    rework: Array<{ tiempo: number; fecha_devolucion: string; motivo?: string }>;
+    total: number | null;
+  } | null;
 } => {
   if (!item) {
     return {
@@ -103,7 +108,8 @@ const getItemDetails = (item: Task | Subtask | null): {
       blockReason: null,
       returnedFeedback: null,
       approvedFeedback: null,
-      realDuration: null
+      realDuration: null,
+      timeBreakdown: null
     };
   }
 
@@ -113,6 +119,11 @@ const getItemDetails = (item: Task | Subtask | null): {
   let returnedFeedback: TaskFeedback | null = null;
   let approvedFeedback: TaskFeedback | null = null;
   let realDuration: number | null = null;
+  let timeBreakdown: {
+    initial: number | null;
+    rework: Array<{ tiempo: number; fecha_devolucion: string; motivo?: string }>;
+    total: number | null;
+  } | null = null;
   
   const notes = item.notes;
   let parsedNotes: any = null;
@@ -148,8 +159,24 @@ const getItemDetails = (item: Task | Subtask | null): {
             ? parsedNotes.notes
             : JSON.stringify(parsedNotes.notes, null, 2);
     }
-    if (parsedNotes.duracion_real) {
+    
+    // Manejar estructura de tiempo con historial de devoluciones
+    if (parsedNotes.duracion_inicial || parsedNotes.duracion_retrabajo || parsedNotes.duracion_total) {
+      // Nueva estructura con historial
+      timeBreakdown = {
+        initial: parsedNotes.duracion_inicial || null,
+        rework: parsedNotes.duracion_retrabajo || [],
+        total: parsedNotes.duracion_total || null
+      };
+      realDuration = timeBreakdown.total;
+    } else if (parsedNotes.duracion_real) {
+      // Estructura legacy - migrar a nueva estructura si la tarea no ha sido devuelta
       realDuration = parsedNotes.duracion_real;
+      timeBreakdown = {
+        initial: parsedNotes.duracion_real,
+        rework: [],
+        total: parsedNotes.duracion_real
+      };
     }
   }
 
@@ -161,7 +188,7 @@ const getItemDetails = (item: Task | Subtask | null): {
     }
   }
 
-  return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration };
+  return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration, timeBreakdown };
 };
 
 const determineMainTaskStatus = (task: Task, subtasksOfTask: Subtask[]): string => {
@@ -1051,6 +1078,8 @@ function Management() {
                                   if (details.realDuration) {
                                     const isOnTime = details.realDuration <= subtask.estimated_duration;
                                     const isClose = details.realDuration <= subtask.estimated_duration * 1.2; // 20% de tolerancia
+                                    const hasRework = details.timeBreakdown && details.timeBreakdown.rework.length > 0;
+                                    
                                     return (
                                       <div className={`flex items-center rounded px-1.5 py-0.5 ${
                                         isOnTime 
@@ -1058,11 +1087,12 @@ function Management() {
                                           : isClose 
                                             ? 'bg-yellow-100 text-yellow-800'
                                             : 'bg-red-100 text-red-800'
-                                      }`}>
+                                      }`} title={hasRework ? `Inicial: ${details.timeBreakdown!.initial}min | Retrabajo: ${details.timeBreakdown!.rework.reduce((sum, r) => sum + r.tiempo, 0)}min` : undefined}>
                                         <Clock className="w-2.5 h-2.5 mr-1" />
                                         <span>Real: {details.realDuration} min</span>
                                         {isOnTime && <span className="ml-1">✓</span>}
                                         {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                        {hasRework && <span className="ml-1 text-orange-600">🔄</span>}
                                       </div>
                                     );
                                   }
@@ -1197,6 +1227,8 @@ function Management() {
                                 if (details.realDuration) {
                                   const isOnTime = details.realDuration <= task.estimated_duration;
                                   const isClose = details.realDuration <= task.estimated_duration * 1.2; // 20% de tolerancia
+                                  const hasRework = details.timeBreakdown && details.timeBreakdown.rework.length > 0;
+                                  
                                   return (
                                     <div className={`flex items-center rounded px-1.5 py-0.5 ${
                                       isOnTime 
@@ -1204,11 +1236,12 @@ function Management() {
                                         : isClose 
                                           ? 'bg-yellow-100 text-yellow-800'
                                           : 'bg-red-100 text-red-800'
-                                    }`}>
+                                    }`} title={hasRework ? `Inicial: ${details.timeBreakdown!.initial}min | Retrabajo: ${details.timeBreakdown!.rework.reduce((sum, r) => sum + r.tiempo, 0)}min` : undefined}>
                                       <Clock className="w-2.5 h-2.5 mr-1" />
                                       <span>Real: {details.realDuration} min</span>
                                       {isOnTime && <span className="ml-1">✓</span>}
                                       {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                      {hasRework && <span className="ml-1 text-orange-600">🔄</span>}
                                     </div>
                                   );
                                 }
@@ -1551,6 +1584,8 @@ function Management() {
                                 if (details.realDuration) {
                                   const isOnTime = details.realDuration <= task.estimated_duration;
                                   const isClose = details.realDuration <= task.estimated_duration * 1.2; // 20% de tolerancia
+                                  const hasRework = details.timeBreakdown && details.timeBreakdown.rework.length > 0;
+                                  
                                   return (
                                     <div className={`flex items-center rounded px-1.5 py-0.5 ${
                                       isOnTime 
@@ -1558,11 +1593,12 @@ function Management() {
                                         : isClose 
                                           ? 'bg-yellow-100 text-yellow-800'
                                           : 'bg-red-100 text-red-800'
-                                    }`}>
+                                    }`} title={hasRework ? `Inicial: ${details.timeBreakdown!.initial}min | Retrabajo: ${details.timeBreakdown!.rework.reduce((sum, r) => sum + r.tiempo, 0)}min` : undefined}>
                                       <Clock className="w-2.5 h-2.5 mr-1" />
                                       <span>Real: {details.realDuration} min</span>
                                       {isOnTime && <span className="ml-1">✓</span>}
                                       {!isOnTime && !isClose && <span className="ml-1">⚠</span>}
+                                      {hasRework && <span className="ml-1 text-orange-600">🔄</span>}
                                     </div>
                                   );
                                 }
@@ -1844,10 +1880,11 @@ function Management() {
                               : details.realDuration <= item.estimated_duration * 1.2
                                 ? 'text-yellow-600' 
                                 : 'text-red-600'
-                          }`}>
+                          }`} title={details.timeBreakdown && details.timeBreakdown.rework.length > 0 ? `Inicial: ${details.timeBreakdown.initial}min | Retrabajo: ${details.timeBreakdown.rework.reduce((sum, r) => sum + r.tiempo, 0)}min` : undefined}>
                             Real: {details.realDuration}min
                             {details.realDuration <= item.estimated_duration && ' ✓'}
                             {details.realDuration > item.estimated_duration * 1.2 && ' ⚠'}
+                            {details.timeBreakdown && details.timeBreakdown.rework.length > 0 && ' 🔄'}
                           </div>
                         )}
                       </div>
@@ -2828,10 +2865,36 @@ function Management() {
                            <span className="font-medium text-gray-800">{taskDetails.estimated_duration} min</span>
                          </div>
                          {getItemDetails(taskDetails).realDuration && (
-                          <div className="flex justify-between text-sm">
-                             <span className="text-gray-600">Duración real:</span>
-                             <span className="font-medium text-indigo-600">{getItemDetails(taskDetails).realDuration} min</span>
-                           </div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-600">Duración real:</span>
+                              <span className="font-medium text-indigo-600 flex items-center">
+                                {getItemDetails(taskDetails).realDuration} min
+                                {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
+                                  <span className="ml-1 text-orange-600" title="Incluye retrabajo">🔄</span>
+                                )}
+                              </span>
+                            </div>
+                            {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
+                              <div className="bg-orange-50 border border-orange-200 rounded-md p-2 mt-1">
+                                <div className="text-xs text-orange-800 space-y-1">
+                                  <div className="flex justify-between">
+                                    <span>Tiempo inicial:</span>
+                                    <span className="font-medium">{getItemDetails(taskDetails).timeBreakdown!.initial} min</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>Tiempo de retrabajo:</span>
+                                    <span className="font-medium">{getItemDetails(taskDetails).timeBreakdown!.rework.reduce((sum, r) => sum + r.tiempo, 0)} min</span>
+                                  </div>
+                                  {getItemDetails(taskDetails).timeBreakdown!.rework.map((rework, index) => (
+                                    <div key={index} className="ml-2 text-xs text-orange-700">
+                                      • {rework.tiempo} min ({new Date(rework.fecha_devolucion).toLocaleDateString()})
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                          )}
                          {taskDetails.start_date && (
                            <div className="flex justify-between text-sm">
