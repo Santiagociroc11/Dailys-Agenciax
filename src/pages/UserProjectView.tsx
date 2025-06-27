@@ -2099,10 +2099,15 @@ export default function UserProjectView() {
    }
 
    function handleShowUnassignConfirmModal(taskId: string) {
-      const task = assignedTaskItems.find((t) => t.id === taskId);
+      // Buscar en todas las listas de tareas pendientes
+      const task = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems].find((t) => t.id === taskId);
       if (task) {
+         console.log(`[UNASSIGN] Preparando desasignación para tarea: ${task.title}, ID: ${taskId}, fecha de asignación: ${task.assignment_date}`);
          setTaskToUnassign(task);
          setShowUnassignConfirmModal(true);
+      } else {
+         console.error(`[UNASSIGN] No se encontró la tarea con ID: ${taskId} en las listas de tareas pendientes`);
+         toast.error("No se pudo encontrar la tarea para desasignar.");
       }
    }
 
@@ -2127,14 +2132,27 @@ export default function UserProjectView() {
          const originalId = isSubtask ? taskId.replace("subtask-", "") : taskId;
          const table = isSubtask ? "subtasks" : "tasks";
          const taskType = isSubtask ? "subtask" : "task";
-         const today = format(new Date(), "yyyy-MM-dd");
 
-         // 1. Delete from task_work_assignments
-         const deleteQuery = supabase.from("task_work_assignments").delete().eq("user_id", user.id).eq("date", today).eq("task_type", taskType);
+         // Encontrar la tarea para obtener su fecha de asignación real
+         const taskToUnassignData = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems].find(t => t.id === taskId);
+         const assignmentDate = taskToUnassignData?.assignment_date || format(new Date(), "yyyy-MM-dd");
+
+         console.log(`[UNASSIGN] Desasignando tarea: ${taskId}, tipo: ${taskType}, fecha de asignación: ${assignmentDate}, originalId: ${originalId}`);
+
+         // 1. Delete from task_work_assignments using the actual assignment date
+         const deleteQuery = supabase.from("task_work_assignments").delete().eq("user_id", user.id).eq("date", assignmentDate).eq("task_type", taskType);
 
          const { error: deleteError } = isSubtask ? await deleteQuery.eq("subtask_id", originalId) : await deleteQuery.eq("task_id", originalId);
 
-         if (deleteError) throw deleteError;
+         if (deleteError) {
+            console.error(`[UNASSIGN] Error al eliminar de task_work_assignments:`, deleteError);
+            throw deleteError;
+         }
+
+         console.log(`[UNASSIGN] Eliminación exitosa de task_work_assignments`);
+
+         // 2. Update task/subtask status back to "pending"
+         console.log(`[UNASSIGN] Actualizando estado a 'pending' en tabla ${table} para ID ${originalId}`);
 
          // 2. Update task/subtask status back to "pending"
          const { error: updateError } = await supabase.from(table).update({ status: "pending" }).eq("id", originalId);
@@ -2161,12 +2179,15 @@ export default function UserProjectView() {
             }
          }
 
+         console.log(`[UNASSIGN] Proceso de desasignación completado exitosamente`);
          toast.success("Tarea desasignada correctamente.");
 
          // 4. Refresh data
+         console.log(`[UNASSIGN] Recargando datos...`);
          await Promise.all([fetchProjectTasksAndSubtasks(), fetchAssignedTasks()]);
+         console.log(`[UNASSIGN] Datos recargados exitosamente`);
       } catch (error) {
-         console.error("Error unassigning task:", error);
+         console.error("[UNASSIGN] Error completo al desasignar tarea:", error);
          toast.error("Hubo un error al desasignar la tarea.");
       } finally {
          setSaving(false);
