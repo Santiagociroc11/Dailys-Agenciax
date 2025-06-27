@@ -272,16 +272,17 @@ function Management() {
     approvedPercentage: number;
     completedAndApprovedPercentage: number;
   })[]>([]);
-  const [reviewSubTab, setReviewSubTab] = useState<'pending' | 'in_review'>('pending');
+  const [reviewSubTab, setReviewSubTab] = useState<'ready_for_review' | 'in_review' | 'blocked'>('ready_for_review');
   
   // Estados para los modales
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showUnblockModal, setShowUnblockModal] = useState(false); // Nuevo modal para desbloquear
   const [showFeedbackDetailsModal, setShowFeedbackDetailsModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<{id: string, type: 'task' | 'subtask', status: string} | null>(null);
-  const [targetStatus, setTargetStatus] = useState<string>('');
+  const [targetStatus, setTargetStatus] = useState('');
   const [feedback, setFeedback] = useState('');
-  const [rating, setRating] = useState<number>(5);
+  const [rating, setRating] = useState(5);
   const [feedbackDetails, setFeedbackDetails] = useState<TaskFeedback | null>(null);
   const [showTaskDetailsModal, setShowTaskDetailsModal] = useState(false);
   const [detailsItem, setDetailsItem] = useState<{id: string, type: 'task' | 'subtask'} | null>(null);
@@ -1124,7 +1125,12 @@ function Management() {
                                     className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleStatusChange(subtask.id, subtask.status === 'blocked' ? 'assigned' : 'in_review', true);
+                                      if (subtask.status === 'blocked') {
+                                        setSelectedItem({ id: subtask.id, type: 'subtask', status: subtask.status });
+                                        setShowUnblockModal(true);
+                                      } else {
+                                        handleStatusChange(subtask.id, 'in_review', true);
+                                      }
                                     }}
                                   >
                                     <ArrowRight className="w-2.5 h-2.5 mr-1" />
@@ -1266,12 +1272,17 @@ function Management() {
                                   className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleStatusChange(task.id, task.status === 'blocked' ? 'assigned' : 'in_review', false);
+                                    if (task.status === 'blocked') {
+                                      setSelectedItem({ id: task.id, type: 'task', status: task.status });
+                                      setShowUnblockModal(true);
+                                    } else {
+                                      handleStatusChange(task.id, 'in_review', false);
+                                    }
                                   }}
-                                >
-                                  <ArrowRight className="w-2.5 h-2.5 mr-1" />
-                                  {task.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
-                                </button>
+                                  >
+                                    <ArrowRight className="w-2.5 h-2.5 mr-1" />
+                                    {task.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
+                                  </button>
                               </div>
                             ) : task.status === 'in_review' ? (
                               <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
@@ -1656,14 +1667,17 @@ function Management() {
 
   const renderReviewView = () => {
     const readyForReviewTasks = tasks.filter(task => 
-      task.status === 'completed' || task.status === 'blocked'
+      task.status === 'completed'
     );
     const readyForReviewSubtasks = subtasks.filter(subtask => 
-      subtask.status === 'completed' || subtask.status === 'blocked'
+      subtask.status === 'completed'
     );
 
     const inReviewTasks = tasks.filter(task => task.status === 'in_review');
     const inReviewSubtasks = subtasks.filter(subtask => subtask.status === 'in_review');
+
+    const blockedTasks = tasks.filter(task => task.status === 'blocked');
+    const blockedSubtasks = subtasks.filter(subtask => subtask.status === 'blocked');
 
     // Function to group items by area
     const groupItemsByArea = (tasksToGroup: Task[], subtasksToGroup: Subtask[]) => {
@@ -1929,7 +1943,7 @@ function Management() {
                     {/* Acciones */}
                     <td className="px-4 py-4">
                       <div className="flex items-center justify-center gap-2">
-                        {reviewSubTab === 'pending' && (
+                        {reviewSubTab === 'ready_for_review' && (
                           <button
                             className="text-sm font-medium px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-sm hover:shadow-md"
                             onClick={(e) => {
@@ -1977,6 +1991,30 @@ function Management() {
                             </button>
                           </>
                         )}
+                        {reviewSubTab === 'blocked' && (
+                          <>
+                            <button
+                              className="text-sm font-medium px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-sm hover:shadow-md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(item.id, 'assigned', isSubtask);
+                              }}
+                              title="Desbloquear y Reasignar"
+                            >
+                              <ArrowLeft className="w-4 h-4" />
+                            </button>
+                            <button
+                              className="text-sm font-medium px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm hover:shadow-md"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(item.id, 'approved', isSubtask);
+                              }}
+                              title="Aprobar"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1994,9 +2032,9 @@ function Management() {
         <div className="bg-white shadow-sm border-b border-gray-200">
           <div className="flex border-b border-gray-200">
             <button
-              onClick={() => setReviewSubTab('pending')}
+              onClick={() => setReviewSubTab('ready_for_review')}
               className={`relative px-8 py-4 text-sm font-semibold transition-all duration-300 ${
-                reviewSubTab === 'pending'
+                reviewSubTab === 'ready_for_review'
                   ? 'text-blue-600 bg-blue-50 border-b-2 border-blue-500'
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
@@ -2005,7 +2043,7 @@ function Management() {
                 <CheckCircle className="w-5 h-5" />
                 <span>Por Revisar</span>
                 <span className={`px-2.5 py-1 text-xs font-bold rounded-full transition-all duration-300 ${
-                  reviewSubTab === 'pending' 
+                  reviewSubTab === 'ready_for_review' 
                     ? 'bg-blue-100 text-blue-800 shadow-md' 
                     : 'bg-gray-100 text-gray-600'
                 }`}>
@@ -2033,12 +2071,32 @@ function Management() {
                 </span>
               </div>
             </button>
+            <button
+              onClick={() => setReviewSubTab('blocked')}
+              className={`relative px-8 py-4 text-sm font-semibold transition-all duration-300 ${
+                reviewSubTab === 'blocked'
+                  ? 'text-red-600 bg-red-50 border-b-2 border-red-500'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5" />
+                <span>Bloqueadas</span>
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-full transition-all duration-300 ${
+                  reviewSubTab === 'blocked' 
+                    ? 'bg-red-100 text-red-800 shadow-md' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {blockedTasks.length + blockedSubtasks.length}
+                </span>
+              </div>
+            </button>
           </div>
         </div>
 
         {/* Contenido principal */}
         <div className="flex-1 overflow-y-auto p-6">
-          {reviewSubTab === 'pending' ? (
+          {reviewSubTab === 'ready_for_review' ? (
             <div className="max-w-8xl mx-auto">
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
                 {/* Header de sección */}
@@ -2112,7 +2170,7 @@ function Management() {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : reviewSubTab === 'in_review' ? (
             <div className="max-w-8xl mx-auto">
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
                 {/* Header de sección */}
@@ -2165,6 +2223,80 @@ function Management() {
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-sm font-medium">
+                                {group.tasks.length + group.subtasks.length}
+                              </span>
+                              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                                expandedAreas.has(areaId) ? 'rotate-180' : ''
+                              }`} />
+                            </div>
+                          </button>
+                          
+                          {/* Area Content */}
+                          {expandedAreas.has(areaId) && (
+                            <div className="p-4">
+                              {renderTasksTable(group)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-8xl mx-auto">
+              <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+                {/* Header de sección */}
+                <div className="bg-gradient-to-r from-red-500 to-red-600 p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/20 rounded-xl">
+                      <AlertTriangle className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">Tareas Bloqueadas</h3>
+                      <p className="text-red-100 mt-1">
+                        {blockedTasks.length + blockedSubtasks.length} tareas están bloqueadas y esperando revisión
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  {blockedTasks.length === 0 && blockedSubtasks.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-red-400 to-red-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
+                        <AlertTriangle className="relative w-20 h-20 mx-auto mb-6 text-red-400" />
+                      </div>
+                      <h4 className="text-2xl font-bold text-gray-800 mb-2">No hay tareas bloqueadas</h4>
+                      <p className="text-gray-600 text-lg">Todas las tareas están completadas o aprobadas.</p>
+                      <p className="text-gray-500 text-sm mt-2">Las nuevas tareas aparecerán aquí cuando se bloquee una.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {groupItemsByArea(blockedTasks, blockedSubtasks).map(([areaId, group]) => (
+                        <div key={areaId} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          {/* Area Header */}
+                          <button
+                            onClick={() => toggleAreaExpansion(areaId)}
+                            className="w-full p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 transition-all duration-200 flex items-center justify-between border-b border-gray-200"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-red-100 rounded-lg">
+                                <Users className="w-5 h-5 text-red-600" />
+                              </div>
+                              <div className="text-left">
+                                <h4 className="font-semibold text-gray-900">
+                                  {group.area?.name || '📋 Sin Área Asignada'}
+                                </h4>
+                                <p className="text-sm text-gray-500">
+                                  {group.tasks.length + group.subtasks.length} tareas bloqueadas
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                                 {group.tasks.length + group.subtasks.length}
                               </span>
                               <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
@@ -3032,6 +3164,53 @@ function Management() {
                  Cerrar
                </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación para desbloquear */}
+      {showUnblockModal && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <div className="flex items-center mb-4">
+              <div className="flex-shrink-0">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <div className="ml-3">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Confirmar Desbloqueo
+                </h3>
+              </div>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600">
+                ¿Estás seguro de que quieres desbloquear esta {selectedItem.type === 'subtask' ? 'subtarea' : 'tarea'}? 
+                Una vez desbloqueada, volverá a aparecer en la lista de trabajo del usuario asignado.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowUnblockModal(false);
+                  setSelectedItem(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  handleStatusChange(selectedItem.id, 'assigned', selectedItem.type === 'subtask');
+                  setShowUnblockModal(false);
+                  setSelectedItem(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
+              >
+                Confirmar Desbloqueo
+              </button>
+            </div>
           </div>
         </div>
       )}
