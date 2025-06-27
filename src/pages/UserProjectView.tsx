@@ -256,6 +256,8 @@ export default function UserProjectView() {
    const [delayedTaskItems, setDelayedTaskItems] = useState<Task[]>([]);
    const [returnedTaskItems, setReturnedTaskItems] = useState<Task[]>([]); // Lista para tareas devueltas
    const [completedTaskItems, setCompletedTaskItems] = useState<Task[]>([]);
+   const [inReviewTaskItems, setInReviewTaskItems] = useState<Task[]>([]);
+   const [approvedTaskItems, setApprovedTaskItems] = useState<Task[]>([]);
    const [dailyTasksIds, setDailyTasksIds] = useState<string[] | null>(null);
 
    // Estados para UI
@@ -361,7 +363,7 @@ export default function UserProjectView() {
    }, [projectId, dailyTasksIds]);
 
    useEffect(() => {
-      if (activeTab === "gestion" && activeGestionSubTab === "completadas" && projectId && user) {
+      if (activeTab === "gestion" && ["entregadas", "en_revision", "aprobadas"].includes(activeGestionSubTab) && projectId && user) {
          fetchCompletedTasks();
       }
    }, [activeTab, activeGestionSubTab, projectId, user]);
@@ -1703,6 +1705,8 @@ export default function UserProjectView() {
    async function fetchCompletedTasks() {
       if (!user || !projectId) {
          setCompletedTaskItems([]);
+         setInReviewTaskItems([]);
+         setApprovedTaskItems([]);
          setLoadingCompleted(false);
          return;
       }
@@ -1710,7 +1714,7 @@ export default function UserProjectView() {
       try {
          setLoadingCompleted(true);
 
-         let completedTaskAssignmentsQuery = supabase.from("task_work_assignments").select("*").eq("user_id", user.id).eq("status", "completed");
+         let completedTaskAssignmentsQuery = supabase.from("task_work_assignments").select("*").eq("user_id", user.id).in("status", ["completed", "in_review", "approved"]);
 
          // Solo aplicar filtro de proyecto si no estamos en "all"
          if (projectId !== "all") {
@@ -1722,6 +1726,8 @@ export default function UserProjectView() {
          if (assignmentsError) {
             console.error("Error al cargar tareas completadas:", assignmentsError);
             setCompletedTaskItems([]);
+            setInReviewTaskItems([]);
+            setApprovedTaskItems([]);
             setLoadingCompleted(false);
             return;
          }
@@ -1731,6 +1737,8 @@ export default function UserProjectView() {
          // Verificar si hay datos
          if (!completedTaskAssignments) {
             setCompletedTaskItems([]);
+            setInReviewTaskItems([]);
+            setApprovedTaskItems([]);
             setLoadingCompleted(false);
             return;
          }
@@ -1781,7 +1789,7 @@ export default function UserProjectView() {
                      estimated_duration: task.estimated_duration,
                      start_date: task.start_date,
                      deadline: task.deadline,
-                     status: "completed",
+                     status: task.status, // Usar el estado real de la tarea
                      is_sequential: task.is_sequential,
                      project_id: task.project_id,
                      projectName: projectMap[task.project_id] || "Sin proyecto",
@@ -1844,7 +1852,7 @@ export default function UserProjectView() {
                      estimated_duration: subtask.estimated_duration,
                      start_date: subtask.start_date || "",
                      deadline: subtask.deadline || "",
-                     status: "completed",
+                     status: subtask.status, // Usar el estado real de la subtarea
                      is_sequential: false,
                      project_id: subtask.tasks?.project_id || "",
                      projectName: projectMap[subtask.tasks?.project_id || ""] || "Sin proyecto",
@@ -1865,8 +1873,32 @@ export default function UserProjectView() {
             return new Date(b.assignment_date).getTime() - new Date(a.assignment_date).getTime();
          });
 
-         setCompletedTaskItems(sortedCompletedItems);
-         console.log("[COMPLETED] Tareas completadas procesadas y ordenadas:", sortedCompletedItems);
+         const submitted: Task[] = [];
+         const inReview: Task[] = [];
+         const approved: Task[] = [];
+
+         sortedCompletedItems.forEach((task) => {
+            switch (task.status) {
+               case "in_review":
+                  inReview.push(task);
+                  break;
+               case "approved":
+                  approved.push(task);
+                  break;
+               case "completed":
+               default:
+                  submitted.push(task);
+                  break;
+            }
+         });
+
+         setCompletedTaskItems(submitted);
+         setInReviewTaskItems(inReview);
+         setApprovedTaskItems(approved);
+
+         console.log("[COMPLETED] Tareas Entregadas:", submitted);
+         console.log("[IN_REVIEW] Tareas en Revisión:", inReview);
+         console.log("[APPROVED] Tareas Aprobadas:", approved);
 
          // Después de actualizar las tareas completadas, eliminar duplicados de listas pendientes
          removeCompletedFromPendingLists(sortedCompletedItems);
@@ -2394,11 +2426,21 @@ export default function UserProjectView() {
                {/* Sub pestañas para gestión */}
                <div className="mb-6 bg-white rounded-md shadow-sm border border-gray-200 p-4">
                   <div className="flex border-b border-gray-200 mb-4">
-                     <button className={`mr-4 py-2 px-4 font-medium ${activeGestionSubTab === "pendientes" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("pendientes")}>
-                        Tareas Pendientes
+                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "pendientes" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("pendientes")}>
+                        Pendientes
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length).toString()}</span>
                      </button>
-                     <button className={`py-2 px-4 font-medium ${activeGestionSubTab === "completadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("completadas")}>
-                        Tareas Completadas
+                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "entregadas" ? "border-b-2 border-gray-500 text-gray-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("entregadas")}>
+                        Entregadas
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{completedTaskItems.length}</span>
+                     </button>
+                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "en_revision" ? "border-b-2 border-yellow-500 text-yellow-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_revision")}>
+                        En Revisión
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-600">{inReviewTaskItems.length}</span>
+                     </button>
+                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
+                        Aprobadas
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-600">{approvedTaskItems.length}</span>
                      </button>
                   </div>
                </div>
@@ -2766,17 +2808,15 @@ export default function UserProjectView() {
                   </>
                )}
 
-               {activeGestionSubTab === "completadas" && (
+               {activeGestionSubTab === "entregadas" && (
                   <>
                      <div className="mb-2">
                         <div className="flex items-center mb-2">
-                           <div className="w-4 h-4 bg-green-500 rounded-full mr-2"></div>
-                           <h3 className="text-lg font-semibold text-green-700">Tareas Completadas</h3>
+                           <div className="w-4 h-4 bg-gray-400 rounded-full mr-2"></div>
+                           <h3 className="text-lg font-semibold text-gray-700">Entregadas - Pendiente de Revisión ({completedTaskItems.length})</h3>
                         </div>
                      </div>
-
                      <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
-                        {/* Task list header */}
                         <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
                            <div>PROYECTO</div>
                            <div>ACTIVIDAD</div>
@@ -2788,17 +2828,14 @@ export default function UserProjectView() {
                            <div>FECHA</div>
                            <div>ACCIONES</div>
                         </div>
-
-                        {/* Task list for completed tasks */}
                         <div className="divide-y divide-gray-200">
                            {loadingCompleted ? (
                               <div className="py-8 text-center text-gray-500 bg-white">
                                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                                 <p>Cargando tareas completadas...</p>
+                                 <p>Cargando tareas entregadas...</p>
                               </div>
                            ) : completedTaskItems.length > 0 ? (
                               completedTaskItems.map((task) => {
-                                 // Extraer información de notas (que contiene metadata)
                                  const metadata = typeof task.notes === "object" ? task.notes : {};
                                  const entregables = metadata.entregables || (typeof task.notes === "string" ? task.notes : "-");
                                  const duracionReal = metadata.duracion_real || task.estimated_duration;
@@ -2812,7 +2849,6 @@ export default function UserProjectView() {
                                              return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
                                           })()}
                                        </div>
-
                                        <div className="font-medium">
                                           {task.type === "subtask" ? (
                                              <div>
@@ -2844,10 +2880,8 @@ export default function UserProjectView() {
                                        <div className="text-sm font-medium">
                                           {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
                                        </div>
-                                       <div className="text-sm font-medium text-green-600">
-                                          {Math.round((duracionReal / 60) * 100) / 100} HORA{Math.round((duracionReal / 60) * 100) / 100 !== 1 ? "S" : ""}
-                                       </div>
-                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{entregables}</div>
+                                       <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
+                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
                                        <div className="text-sm text-gray-700">{completionDate !== "-" ? format(new Date(completionDate), "dd/MM/yyyy") : "-"}</div>
                                        <div className="flex space-x-2">
                                           <button onClick={() => handleViewTaskDetails(task)} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
@@ -2862,11 +2896,125 @@ export default function UserProjectView() {
                               })
                            ) : (
                               <div className="py-8 text-center bg-white">
-                                 <p className="text-gray-500 mb-2">No hay tareas completadas para mostrar.</p>
+                                 <p className="text-gray-500 mb-2">No hay tareas entregadas pendientes de revisión.</p>
                               </div>
                            )}
                         </div>
                      </div>
+                  </>
+               )}
+
+               {activeGestionSubTab === "en_revision" && (
+                  <>
+                     {loadingCompleted ? (
+                        <div className="py-8 text-center text-gray-500 bg-white">
+                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                           <p>Cargando tareas en revisión...</p>
+                        </div>
+                     ) : inReviewTaskItems.length > 0 ? (
+                        <div className="mb-8">
+                           <div className="flex items-center mb-3">
+                              <div className="w-4 h-4 bg-yellow-400 rounded-full mr-3 flex-shrink-0"></div>
+                              <h3 className="text-lg font-semibold text-yellow-700">En Revisión ({inReviewTaskItems.length})</h3>
+                           </div>
+                           <div className="bg-yellow-50 rounded-md shadow-sm border border-yellow-200 overflow-hidden">
+                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-yellow-300 font-medium text-yellow-800 bg-yellow-100">
+                                 <div>PROYECTO</div>
+                                 <div>ACTIVIDAD</div>
+                                 <div>DESCRIPCION</div>
+                                 <div>FECHA FIN</div>
+                                 <div>DURACIÓN EST.</div>
+                                 <div>DURACIÓN REAL</div>
+                                 <div>RESULTADO</div>
+                                 <div>ESTADO</div>
+                              </div>
+                              <div className="divide-y divide-yellow-200">
+                                 {inReviewTaskItems.map((task) => (
+                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-yellow-50 px-3">
+                                       <div className="text-sm text-gray-700 py-1">
+                                          {(() => {
+                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                          })()}
+                                       </div>
+                                       <div className="font-medium">{task.title}</div>
+                                       <div className="text-sm text-gray-600">
+                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                       </div>
+                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
+                                       <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
+                                       <div className="text-sm font-medium text-yellow-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
+                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
+                                       <div>
+                                          <TaskStatusDisplay status={task.status} />
+                                       </div>
+                                    </div>
+                                 ))}
+                              </div>
+                           </div>
+                        </div>
+                     ) : (
+                        <div className="py-8 text-center bg-white">
+                           <p className="text-gray-500 mb-2">No tienes tareas en revisión en este momento.</p>
+                        </div>
+                     )}
+                  </>
+               )}
+
+               {activeGestionSubTab === "aprobadas" && (
+                  <>
+                     {loadingCompleted ? (
+                        <div className="py-8 text-center text-gray-500 bg-white">
+                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                           <p>Cargando tareas aprobadas...</p>
+                        </div>
+                     ) : approvedTaskItems.length > 0 ? (
+                        <div className="mb-8">
+                           <div className="flex items-center mb-3">
+                              <div className="w-4 h-4 bg-green-500 rounded-full mr-3 flex-shrink-0"></div>
+                              <h3 className="text-lg font-semibold text-green-700">Aprobadas ({approvedTaskItems.length})</h3>
+                           </div>
+                           <div className="bg-green-50 rounded-md shadow-sm border border-green-200 overflow-hidden">
+                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
+                                 <div>PROYECTO</div>
+                                 <div>ACTIVIDAD</div>
+                                 <div>DESCRIPCION</div>
+                                 <div>FECHA FIN</div>
+                                 <div>DURACIÓN EST.</div>
+                                 <div>DURACIÓN REAL</div>
+                                 <div>RESULTADO</div>
+                                 <div>ESTADO</div>
+                              </div>
+                              <div className="divide-y divide-green-200">
+                                 {approvedTaskItems.map((task) => (
+                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
+                                       <div className="text-sm text-gray-700 py-1">
+                                          {(() => {
+                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                          })()}
+                                       </div>
+                                       <div className="font-medium">{task.title}</div>
+                                       <div className="text-sm text-gray-600">
+                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                       </div>
+                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
+                                       <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
+                                       <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
+                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
+                                       <div>
+                                          <TaskStatusDisplay status={task.status} />
+                                       </div>
+                                    </div>
+                                 ))}
+                              </div>
+                           </div>
+                        </div>
+                     ) : (
+                        <div className="py-8 text-center bg-white">
+                           <p className="text-gray-500 mb-2">Aún no tienes tareas aprobadas.</p>
+                        </div>
+                     )}
                   </>
                )}
 
