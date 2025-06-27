@@ -3493,7 +3493,9 @@ export default function UserProjectView() {
                            {selectedReturnedTask?.type === "subtask" && selectedReturnedTask?.subtask_title && <span className="ml-2 text-sm text-gray-500">(Subtarea de {selectedReturnedTask?.subtask_title})</span>}
                         </h4>
                         {selectedReturnedTask?.type === "subtask" && selectedReturnedTask?.original_id && <p className="text-xs text-gray-500 font-mono mb-2">ID: {selectedReturnedTask.original_id}</p>}
-                        <div className="text-sm text-gray-600">{selectedReturnedTask?.description}</div>
+                        <div className="text-sm text-gray-600">
+                           <RichTextDisplay text={selectedReturnedTask?.description || ""} />
+                        </div>
                      </div>
 
                      <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
