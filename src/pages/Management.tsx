@@ -506,7 +506,7 @@ function Management() {
     // Validar transiciones permitidas
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
-      'blocked': ['in_review'],
+      'blocked': ['assigned'], // <-- CAMBIO: De 'pending' a 'assigned'
       'in_review': ['returned', 'approved', 'completed']
     };
     
@@ -1124,11 +1124,11 @@ function Management() {
                                     className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleStatusChange(subtask.id, 'in_review', true);
+                                      handleStatusChange(subtask.id, subtask.status === 'blocked' ? 'assigned' : 'in_review', true);
                                     }}
                                   >
                                     <ArrowRight className="w-2.5 h-2.5 mr-1" />
-                                    En revisión
+                                    {subtask.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
                                   </button>
                                 </div>
                               ) : subtask.status === 'in_review' ? (
@@ -1266,11 +1266,11 @@ function Management() {
                                   className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md flex items-center"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleStatusChange(task.id, 'in_review', false);
+                                    handleStatusChange(task.id, task.status === 'blocked' ? 'assigned' : 'in_review', false);
                                   }}
                                 >
                                   <ArrowRight className="w-2.5 h-2.5 mr-1" />
-                                  En revisión
+                                  {task.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
                                 </button>
                               </div>
                             ) : task.status === 'in_review' ? (
@@ -2714,6 +2714,15 @@ function Management() {
                         </div>
                         <div className="p-4 text-red-900 text-sm whitespace-pre-wrap">
                           {getItemDetails(taskDetails).blockReason}
+                        </div>
+                        <div className="p-3 bg-red-100 border-t border-red-200">
+                           <button 
+                              onClick={() => handleStatusChange(taskDetails.id, 'assigned', taskDetails.type === 'subtask')}
+                              className="px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-1.5 transition-colors bg-blue-100 text-blue-800 hover:bg-blue-200"
+                           >
+                              <ArrowLeft className="w-4 h-4" />
+                              Desbloquear y Reasignar
+                           </button>
                         </div>
                       </div>
                     )}

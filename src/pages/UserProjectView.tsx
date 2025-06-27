@@ -255,6 +255,7 @@ export default function UserProjectView() {
    const [assignedTaskItems, setAssignedTaskItems] = useState<Task[]>([]);
    const [delayedTaskItems, setDelayedTaskItems] = useState<Task[]>([]);
    const [returnedTaskItems, setReturnedTaskItems] = useState<Task[]>([]); // Lista para tareas devueltas
+   const [blockedTaskItems, setBlockedTaskItems] = useState<Task[]>([]); // Lista para tareas bloqueadas
    const [completedTaskItems, setCompletedTaskItems] = useState<Task[]>([]);
    const [inReviewTaskItems, setInReviewTaskItems] = useState<Task[]>([]);
    const [approvedTaskItems, setApprovedTaskItems] = useState<Task[]>([]);
@@ -466,8 +467,10 @@ export default function UserProjectView() {
 
    useEffect(() => {
       // Log de conteo de tareas en cada cambio de las listas
-      console.log(`CONTEO TAREAS -> Asignadas: ${assignedTaskItems.length}, Retrasadas: ${delayedTaskItems.length}, Completadas: ${completedTaskItems.length}, Devueltas: ${returnedTaskItems.length}`);
-   }, [assignedTaskItems, delayedTaskItems, completedTaskItems, returnedTaskItems]);
+      console.log(
+         `CONTEO TAREAS -> Asignadas: ${assignedTaskItems.length}, Retrasadas: ${delayedTaskItems.length}, Completadas: ${completedTaskItems.length}, Devueltas: ${returnedTaskItems.length}, Bloqueadas: ${blockedTaskItems.length}`
+      );
+   }, [assignedTaskItems, delayedTaskItems, completedTaskItems, returnedTaskItems, blockedTaskItems]);
 
    async function fetchProject() {
       try {
@@ -1269,6 +1272,7 @@ export default function UserProjectView() {
          let todayAssignedItems: Task[] = [];
          let delayedAssignedItems: Task[] = [];
          let returnedItems: Task[] = []; // Nueva lista para tareas devueltas
+         let blockedItems: Task[] = []; // Nueva lista para tareas bloqueadas
          let totalPendingTime = 0;
          let totalDelayTime = 0;
          let totalDelayDays = 0;
@@ -1335,8 +1339,10 @@ export default function UserProjectView() {
                   if (!["completed", "approved", "in_review"].includes(assignment?.status || formattedTask.status)) {
                      totalPendingTime += durationHours;
 
-                     // Priorizar las tareas devueltas
-                     if (isActuallyReturned) {
+                     // Clasificar por estado
+                     if (formattedTask.status === "blocked") {
+                        blockedItems.push(formattedTask);
+                     } else if (isActuallyReturned) {
                         returnedItems.push(formattedTask);
                      }
                      // Después clasificar por fecha
@@ -1416,8 +1422,10 @@ export default function UserProjectView() {
                   if (!["completed", "approved", "in_review"].includes(assignment?.status || formattedSubtask.status)) {
                      totalPendingTime += durationHours;
 
-                     // Priorizar las tareas devueltas
-                     if (isActuallyReturned) {
+                     // Clasificar por estado
+                     if (formattedSubtask.status === "blocked") {
+                        blockedItems.push(formattedSubtask);
+                     } else if (isActuallyReturned) {
                         returnedItems.push(formattedSubtask);
                      }
                      // Después clasificar por fecha
@@ -1452,6 +1460,7 @@ export default function UserProjectView() {
          setAssignedTaskItems(todayAssignedItems);
          setDelayedTaskItems(delayedAssignedItems);
          setReturnedTaskItems(returnedItems);
+         setBlockedTaskItems(blockedItems);
          setTotalAssignedTime(totalPendingTime);
          setTotalDelayedTime(totalDelayTime);
          setTotalDelayedDays(avgDelayDays);
@@ -2430,6 +2439,10 @@ export default function UserProjectView() {
                         Pendientes
                         <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length).toString()}</span>
                      </button>
+                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
+                        Bloqueadas
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600">{blockedTaskItems.length}</span>
+                     </button>
                      <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "entregadas" ? "border-b-2 border-gray-500 text-gray-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("entregadas")}>
                         Entregadas
                         <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{completedTaskItems.length}</span>
@@ -2801,6 +2814,77 @@ export default function UserProjectView() {
                               <div className="py-8 text-center bg-white">
                                  <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
                                  {delayedTaskItems.length > 0 ? <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p> : <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>}
+                              </div>
+                           )}
+                        </div>
+                     </div>
+                  </>
+               )}
+
+               {activeGestionSubTab === "bloqueadas" && (
+                  <>
+                     <div className="mb-2">
+                        <div className="flex items-center mb-2">
+                           <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
+                           <h3 className="text-lg font-semibold text-red-700">Tareas Bloqueadas ({blockedTaskItems.length})</h3>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-4">Estas tareas requieren que un administrador las revise y desbloquee para que puedas continuar.</p>
+                     </div>
+                     <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
+                        <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
+                           <div>PROYECTO</div>
+                           <div>ACTIVIDAD</div>
+                           <div>MOTIVO DEL BLOQUEO</div>
+                           <div>INICIO</div>
+                           <div>FIN</div>
+                           <div>DURACIÓN</div>
+                           <div>ESTADO</div>
+                        </div>
+                        <div className="divide-y divide-red-200">
+                           {loadingAssigned ? (
+                              <div className="py-8 text-center text-gray-500 bg-white">
+                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
+                                 <p>Cargando tareas...</p>
+                              </div>
+                           ) : blockedTaskItems.length > 0 ? (
+                              blockedTaskItems.map((task) => {
+                                 const blockReason = (typeof task.notes === 'object' && task.notes?.razon_bloqueo) ? task.notes.razon_bloqueo : (typeof task.notes === 'string' ? task.notes : 'No especificado');
+
+                                 return (
+                                    <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-red-50 hover:bg-red-100 px-3">
+                                       <div className="text-sm text-gray-700 py-1">
+                                          {(() => {
+                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                          })()}
+                                       </div>
+                                       <div className="font-medium">
+                                       <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
+                                             {task.title}
+                                          </div>
+                                          {task.type === "subtask" && <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>}
+                                       </div>
+                                       <div className="text-sm text-red-700">
+                                          <RichTextSummary text={blockReason} maxLength={100} />
+                                       </div>
+                                       <div className="text-sm text-gray-700">
+                                          {task.start_date ? format(new Date(task.start_date), "dd/MM/yyyy") : "-"}
+                                       </div>
+                                       <div className="text-sm text-gray-700">
+                                          {task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}
+                                       </div>
+                                       <div className="text-sm font-medium">
+                                          {Math.round((task.estimated_duration / 60) * 100) / 100} H
+                                       </div>
+                                       <div>
+                                          <TaskStatusDisplay status={task.status} />
+                                       </div>
+                                    </div>
+                                 );
+                              })
+                           ) : (
+                              <div className="py-8 text-center bg-white">
+                                 <p className="text-gray-500">¡Genial! No tienes ninguna tarea bloqueada.</p>
                               </div>
                            )}
                         </div>
