@@ -507,7 +507,7 @@ function Management() {
     // Validar transiciones permitidas
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
-      'blocked': ['assigned'], // <-- CAMBIO: De 'pending' a 'assigned'
+      'blocked': ['pending'], // <-- CAMBIO: De 'assigned' a 'pending'
       'in_review': ['returned', 'approved', 'completed']
     };
     
@@ -1134,7 +1134,7 @@ function Management() {
                                     }}
                                   >
                                     <ArrowRight className="w-2.5 h-2.5 mr-1" />
-                                    {subtask.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
+                                    {subtask.status === 'blocked' ? 'Desbloquear' : 'En revisión'}
                                   </button>
                                 </div>
                               ) : subtask.status === 'in_review' ? (
@@ -1281,7 +1281,7 @@ function Management() {
                                   }}
                                   >
                                     <ArrowRight className="w-2.5 h-2.5 mr-1" />
-                                    {task.status === 'blocked' ? 'Desbloquear y Reasignar' : 'En revisión'}
+                                    {task.status === 'blocked' ? 'Desbloquear' : 'En revisión'}
                                   </button>
                               </div>
                             ) : task.status === 'in_review' ? (
@@ -1991,30 +1991,19 @@ function Management() {
                             </button>
                           </>
                         )}
-                        {reviewSubTab === 'blocked' && (
-                          <>
-                            <button
-                              className="text-sm font-medium px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-sm hover:shadow-md"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStatusChange(item.id, 'assigned', isSubtask);
-                              }}
-                              title="Desbloquear y Reasignar"
-                            >
-                              <ArrowLeft className="w-4 h-4" />
-                            </button>
-                            <button
-                              className="text-sm font-medium px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm hover:shadow-md"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStatusChange(item.id, 'approved', isSubtask);
-                              }}
-                              title="Aprobar"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
+                                                 {reviewSubTab === 'blocked' && (
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               setSelectedItem({ id: item.id, type: isSubtask ? 'subtask' : 'task', status: item.status });
+                               setShowUnblockModal(true);
+                             }}
+                             className="px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors bg-blue-100 text-blue-800 hover:bg-blue-200"
+                           >
+                             <ArrowLeft className="w-3 h-3" />
+                             <span>Desbloquear</span>
+                           </button>
+                         )}
                       </div>
                     </td>
                   </tr>
@@ -2849,11 +2838,14 @@ function Management() {
                         </div>
                         <div className="p-3 bg-red-100 border-t border-red-200">
                            <button 
-                              onClick={() => handleStatusChange(taskDetails.id, 'assigned', taskDetails.type === 'subtask')}
+                              onClick={() => {
+                                setSelectedItem({ id: taskDetails.id, type: taskDetails.type === 'subtask' ? 'subtask' : 'task', status: taskDetails.status });
+                                setShowUnblockModal(true);
+                              }}
                               className="px-3 py-1.5 text-sm font-medium rounded-md flex items-center gap-1.5 transition-colors bg-blue-100 text-blue-800 hover:bg-blue-200"
                            >
                               <ArrowLeft className="w-4 h-4" />
-                              Desbloquear y Reasignar
+                              Desbloquear
                            </button>
                         </div>
                       </div>
@@ -3183,12 +3175,12 @@ function Management() {
               </div>
             </div>
             
-            <div className="mb-4">
-              <p className="text-sm text-gray-600">
-                ¿Estás seguro de que quieres desbloquear esta {selectedItem.type === 'subtask' ? 'subtarea' : 'tarea'}? 
-                Una vez desbloqueada, volverá a aparecer en la lista de trabajo del usuario asignado.
-              </p>
-            </div>
+                         <div className="mb-4">
+               <p className="text-sm text-gray-600">
+                 ¿Estás seguro de que quieres desbloquear esta {selectedItem.type === 'subtask' ? 'subtarea' : 'tarea'}? 
+                 Una vez desbloqueada, volverá a la lista de tareas pendientes para que el usuario pueda reasignársela.
+               </p>
+             </div>
 
             <div className="flex justify-end space-x-3">
               <button
@@ -3200,16 +3192,16 @@ function Management() {
               >
                 Cancelar
               </button>
-              <button
-                onClick={() => {
-                  handleStatusChange(selectedItem.id, 'assigned', selectedItem.type === 'subtask');
-                  setShowUnblockModal(false);
-                  setSelectedItem(null);
-                }}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
-              >
-                Confirmar Desbloqueo
-              </button>
+                             <button
+                 onClick={() => {
+                   handleStatusChange(selectedItem.id, 'pending', selectedItem.type === 'subtask');
+                   setShowUnblockModal(false);
+                   setSelectedItem(null);
+                 }}
+                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
+               >
+                 Confirmar Desbloqueo
+               </button>
             </div>
           </div>
         </div>
