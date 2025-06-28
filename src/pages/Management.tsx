@@ -504,21 +504,11 @@ function Management() {
     
     const currentStatus = currentItem.status;
     
-    // Si el nuevo estado es 'in_review', no necesitamos modal, solo registrar quién lo movió.
-    if (newStatus === 'in_review') {
-      const reviewFeedback: TaskFeedback = {
-        reviewed_by: user!.id,
-        reviewed_at: new Date().toISOString()
-      };
-      updateItemStatus(itemId, newStatus, isSubtask, reviewFeedback);
-      return;
-    }
-    
     // Validar transiciones permitidas
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
       'blocked': ['pending'], // <-- CAMBIO: De 'assigned' a 'pending'
-      'in_review': ['returned', 'approved']
+      'in_review': ['returned', 'approved', 'completed']
     };
     
     // Verificar si la transición está permitida
@@ -556,38 +546,76 @@ function Management() {
     feedbackData: TaskFeedback | null = null,
     additionalData: any = null
   ) {
-    const table = isSubtask ? 'subtasks' : 'tasks';
-    
-    // 1. Obtener el estado actual para registrarlo en el historial
-    const { data: currentItem, error: fetchError } = await supabase
+    try {
+      const table = isSubtask ? 'subtasks' : 'tasks';
+      
+      // 1. Obtener el estado actual para registrarlo en el historial
+      const { data: currentItem, error: fetchError } = await supabase
         .from(table)
         .select('status')
         .eq('id', itemId)
         .single();
 
-    if (fetchError) {
+      if (fetchError) {
         console.error(`[HISTORY] No se pudo obtener el estado actual para ${table}#${itemId}:`, fetchError);
-        // Si no podemos obtener el estado anterior, no podemos registrar el historial, pero continuamos con la actualización.
-    }
-    const previousStatus = currentItem?.status || 'unknown';
+      }
+      const previousStatus = currentItem?.status || 'unknown';
+      
+      // Preparar datos de actualización base
+      let updateData: any = { 
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      };
 
+      // Siempre agregar información de quién realizó la acción
+      const actionData = {
+        reviewed_by: user?.id,
+        reviewed_at: new Date().toISOString(),
+        action: newStatus
+      };
 
-    const updateData: any = { status: newStatus };
+      // Si hay feedback, incluirlo
+      if (feedbackData) {
+        updateData.feedback = feedbackData;
+      } else {
+        // Si no hay feedback pero es una acción importante, crear un registro básico
+        if (['in_review', 'approved', 'returned', 'pending'].includes(newStatus)) {
+          updateData.feedback = actionData;
+        }
+      }
 
-    if (feedbackData) {
-      updateData.feedback = feedbackData;
-    }
+      // Si hay datos adicionales, incluirlos
+      if (additionalData) {
+        updateData = { ...updateData, ...additionalData };
+      }
 
-    try {
+      // Para cambios de estado específicos, agregar campos especiales
+      if (newStatus === 'returned') {
+        updateData.returned_at = new Date().toISOString();
+      }
+
+      // Actualizar en la base de datos
       const { data, error } = await supabase
         .from(table)
         .update(updateData)
         .eq('id', itemId)
-        .select('*, task_id') // Asegurarse de que task_id se devuelva para las subtareas
+        .select()
         .single();
 
-      if (error) throw error;
-      
+      if (error) {
+        console.error('Error al actualizar estado:', error);
+        toast.error('Error al actualizar el estado');
+        return;
+      }
+
+      console.log('Estado actualizado correctamente:', data);
+      toast.success(`${isSubtask ? 'Subtarea' : 'Tarea'} ${
+        newStatus === 'approved' ? 'aprobada' : 
+        newStatus === 'returned' ? 'devuelta' : 
+        newStatus === 'in_review' ? 'puesta en revisión' :
+        newStatus === 'pending' ? 'desbloqueada' : 'actualizada'
+      } correctamente`);
+
       // 2. Registrar el cambio de estado en la tabla de historial
       if (previousStatus !== 'unknown' && user) {
         const historyRecord = {
@@ -596,12 +624,7 @@ function Management() {
             changed_by: user.id,
             previous_status: previousStatus,
             new_status: newStatus,
-            metadata: {
-                ...additionalData,
-                ...(feedbackData?.feedback && { feedback: feedbackData.feedback }),
-                ...(feedbackData?.rating && { rating: feedbackData.rating }),
-                reason: `Admin changed status from ${currentItem.status} to ${newStatus}`
-            }
+            metadata: feedbackData, // El feedback es una buena metadata para este evento
         };
 
         const { error: historyError } = await supabase
@@ -614,8 +637,6 @@ function Management() {
             console.log('✅ [HISTORY] Cambio de estado registrado con éxito desde Management.');
         }
       }
-
-      toast.success('Estado actualizado correctamente');
 
       // Actualizar la UI
       if (isSubtask) {
@@ -1144,7 +1165,7 @@ function Management() {
                                         setSelectedItem({ id: subtask.id, type: 'subtask', status: subtask.status });
                                         setShowUnblockModal(true);
                                       } else {
-                                        handleStatusChange(subtask.id, 'in_review', true);
+                                      handleStatusChange(subtask.id, 'in_review', true);
                                       }
                                     }}
                                   >
@@ -1291,13 +1312,13 @@ function Management() {
                                       setSelectedItem({ id: task.id, type: 'task', status: task.status });
                                       setShowUnblockModal(true);
                                     } else {
-                                      handleStatusChange(task.id, 'in_review', false);
+                                    handleStatusChange(task.id, 'in_review', false);
                                     }
                                   }}
-                                  >
-                                    <ArrowRight className="w-2.5 h-2.5 mr-1" />
+                                >
+                                  <ArrowRight className="w-2.5 h-2.5 mr-1" />
                                     {task.status === 'blocked' ? 'Desbloquear' : 'En revisión'}
-                                  </button>
+                                </button>
                               </div>
                             ) : task.status === 'in_review' ? (
                               <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
@@ -2018,7 +2039,7 @@ function Management() {
                              <ArrowLeft className="w-3 h-3" />
                              <span>Desbloquear</span>
                            </button>
-                         )}
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -3217,7 +3238,7 @@ function Management() {
                >
                  Confirmar Desbloqueo
                </button>
-            </div>
+             </div>
           </div>
         </div>
       )}
