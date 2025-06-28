@@ -2901,7 +2901,7 @@ export default function UserProjectView() {
                         </div>
                      </div>
                      <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
-                        <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                        <div className="grid grid-cols-10 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
                            <div>PROYECTO</div>
                            <div>ACTIVIDAD</div>
                            <div>DESCRIPCION</div>
@@ -2910,6 +2910,7 @@ export default function UserProjectView() {
                            <div>DURACIÓN REAL</div>
                            <div>RESULTADO</div>
                            <div>FECHA</div>
+                           <div>RESPONSABLE</div>
                            <div>ACCIONES</div>
                         </div>
                         <div className="divide-y divide-gray-200">
@@ -2924,9 +2925,10 @@ export default function UserProjectView() {
                                  const entregables = metadata.entregables || (typeof task.notes === "string" ? task.notes : "-");
                                  const duracionReal = metadata.duracion_real || task.estimated_duration;
                                  const completionDate = task.assignment_date || "-";
+                                 const feedback = typeof task.feedback === 'object' ? task.feedback : null;
 
                                  return (
-                                    <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                                    <div key={task.id} className="grid grid-cols-10 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
                                        <div className="text-sm text-gray-700 py-1">
                                           {(() => {
                                              const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
@@ -2967,6 +2969,9 @@ export default function UserProjectView() {
                                        <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
                                        <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
                                        <div className="text-sm text-gray-700">{completionDate !== "-" ? format(new Date(completionDate), "dd/MM/yyyy") : "-"}</div>
+                                       <div className="text-xs text-gray-500">
+                                          Pendiente de revisión
+                                       </div>
                                        <div className="flex space-x-2">
                                           <button onClick={() => handleViewTaskDetails(task)} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
                                              Ver Entrega
@@ -3002,7 +3007,7 @@ export default function UserProjectView() {
                               <h3 className="text-lg font-semibold text-yellow-700">En Revisión ({inReviewTaskItems.length})</h3>
                            </div>
                            <div className="bg-yellow-50 rounded-md shadow-sm border border-yellow-200 overflow-hidden">
-                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-yellow-300 font-medium text-yellow-800 bg-yellow-100">
+                              <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-yellow-300 font-medium text-yellow-800 bg-yellow-100">
                                  <div>PROYECTO</div>
                                  <div>ACTIVIDAD</div>
                                  <div>DESCRIPCION</div>
@@ -3011,29 +3016,43 @@ export default function UserProjectView() {
                                  <div>DURACIÓN REAL</div>
                                  <div>RESULTADO</div>
                                  <div>ESTADO</div>
+                                 <div>RESPONSABLE</div>
                               </div>
                               <div className="divide-y divide-yellow-200">
-                                 {inReviewTaskItems.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-yellow-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
+                                 {inReviewTaskItems.map((task) => {
+                                    const feedback = typeof task.feedback === 'object' ? task.feedback : null;
+                                    const reviewerId = feedback?.reviewed_by || null;
+
+                                    return (
+                                       <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-yellow-50 px-3">
+                                          <div className="text-sm text-gray-700 py-1">
+                                             {(() => {
+                                                const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                                return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                             })()}
+                                          </div>
+                                          <div className="font-medium">{task.title}</div>
+                                          <div className="text-sm text-gray-600">
+                                             <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                          </div>
+                                          <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
+                                          <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
+                                          <div className="text-sm font-medium text-yellow-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
+                                          <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
+                                          <div>
+                                             <TaskStatusDisplay status={task.status} />
+                                          </div>
+                                          <div className="text-xs text-gray-500">
+                                             {reviewerId ? (
+                                                <>
+                                                   Revisado por:
+                                                   <UserNameDisplay userId={reviewerId} />
+                                                </>
+                                             ) : "N/A"}
+                                          </div>
                                        </div>
-                                       <div className="font-medium">{task.title}</div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
-                                       <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
-                                       <div className="text-sm font-medium text-yellow-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
-                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
-                                       <div>
-                                          <TaskStatusDisplay status={task.status} />
-                                       </div>
-                                    </div>
-                                 ))}
+                                    );
+                                 })}
                               </div>
                            </div>
                         </div>
@@ -3059,7 +3078,7 @@ export default function UserProjectView() {
                               <h3 className="text-lg font-semibold text-green-700">Aprobadas ({approvedTaskItems.length})</h3>
                            </div>
                            <div className="bg-green-50 rounded-md shadow-sm border border-green-200 overflow-hidden">
-                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
+                              <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
                                  <div>PROYECTO</div>
                                  <div>ACTIVIDAD</div>
                                  <div>DESCRIPCION</div>
@@ -3068,29 +3087,43 @@ export default function UserProjectView() {
                                  <div>DURACIÓN REAL</div>
                                  <div>RESULTADO</div>
                                  <div>ESTADO</div>
+                                 <div>RESPONSABLE</div>
                               </div>
                               <div className="divide-y divide-green-200">
-                                 {approvedTaskItems.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
+                                 {approvedTaskItems.map((task) => {
+                                    const feedback = typeof task.feedback === 'object' ? task.feedback : null;
+                                    const reviewerId = feedback?.reviewed_by || null;
+
+                                    return (
+                                       <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
+                                          <div className="text-sm text-gray-700 py-1">
+                                             {(() => {
+                                                const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                                return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                             })()}
+                                          </div>
+                                          <div className="font-medium">{task.title}</div>
+                                          <div className="text-sm text-gray-600">
+                                             <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                          </div>
+                                          <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
+                                          <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
+                                          <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
+                                          <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
+                                          <div>
+                                             <TaskStatusDisplay status={task.status} />
+                                          </div>
+                                          <div className="text-xs text-gray-500">
+                                             {reviewerId ? (
+                                                <>
+                                                   Aprobado por:
+                                                   <UserNameDisplay userId={reviewerId} />
+                                                </>
+                                             ) : "N/A"}
+                                          </div>
                                        </div>
-                                       <div className="font-medium">{task.title}</div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
-                                       <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
-                                       <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
-                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
-                                       <div>
-                                          <TaskStatusDisplay status={task.status} />
-                                       </div>
-                                    </div>
-                                 ))}
+                                    );
+                                 })}
                               </div>
                            </div>
                         </div>

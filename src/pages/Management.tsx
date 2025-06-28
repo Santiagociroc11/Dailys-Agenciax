@@ -504,11 +504,21 @@ function Management() {
     
     const currentStatus = currentItem.status;
     
+    // Si el nuevo estado es 'in_review', no necesitamos modal, solo registrar quién lo movió.
+    if (newStatus === 'in_review') {
+      const reviewFeedback: TaskFeedback = {
+        reviewed_by: user!.id,
+        reviewed_at: new Date().toISOString()
+      };
+      updateItemStatus(itemId, newStatus, isSubtask, reviewFeedback);
+      return;
+    }
+    
     // Validar transiciones permitidas
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
       'blocked': ['pending'], // <-- CAMBIO: De 'assigned' a 'pending'
-      'in_review': ['returned', 'approved', 'completed']
+      'in_review': ['returned', 'approved']
     };
     
     // Verificar si la transición está permitida
@@ -586,7 +596,12 @@ function Management() {
             changed_by: user.id,
             previous_status: previousStatus,
             new_status: newStatus,
-            metadata: feedbackData, // El feedback es una buena metadata para este evento
+            metadata: {
+                ...additionalData,
+                ...(feedbackData?.feedback && { feedback: feedbackData.feedback }),
+                ...(feedbackData?.rating && { rating: feedbackData.rating }),
+                reason: `Admin changed status from ${currentItem.status} to ${newStatus}`
+            }
         };
 
         const { error: historyError } = await supabase
