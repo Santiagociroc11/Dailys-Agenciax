@@ -27,11 +27,6 @@ interface Task {
    subtask_title?: string;
    assignment_date?: string;
    notes?: string | TaskNotes;
-   feedback?: {
-      reviewed_by?: string;
-      reviewed_at?: string;
-      feedback?: string;
-   };
 }
 
 // Interfaz para los metadatos de las notas de las tareas
@@ -3595,8 +3590,6 @@ export default function UserProjectView() {
                                  // Verificar si hay retroalimentación disponible
                                  const notes = selectedReturnedTask?.notes;
                                  let feedback = "";
-                                 let reviewedBy = "";
-                                 let reviewedAt = "";
 
                                  if (notes && typeof notes === "object" && notes.returned_feedback) {
                                     // Si la retroalimentación es un objeto, convertirlo a string legible
@@ -3611,122 +3604,46 @@ export default function UserProjectView() {
                                        feedback = String(notes.returned_feedback);
                                     }
 
-                                    // Obtener información de quién y cuándo
-                                    if (notes.returned_by) {
-                                       reviewedBy = notes.returned_by;
-                                    }
-                                    if (notes.returned_at) {
-                                       reviewedAt = notes.returned_at;
-                                    }
-
+                                    return <RichTextDisplay text={feedback} />;
+                                 } else {
+                                    // Si no hay retroalimentación específica
                                     return (
                                        <div>
-                                          <RichTextDisplay text={feedback} />
-                                          {(reviewedBy || reviewedAt) && (
-                                             <div className="mt-3 pt-2 border-t border-orange-200 text-xs text-gray-600">
-                                                {reviewedBy && <UserNameDisplay userId={reviewedBy} />} devolvió esta tarea
-                                                {reviewedAt && (
-                                                   <span> el {new Date(reviewedAt).toLocaleString()}</span>
-                                                )}
-                                             </div>
-                                          )}
+                                          <p>No se encontró retroalimentación específica para esta tarea.</p>
+                                          <p className="mt-2 text-orange-700">Esta tarea fue marcada como "Devuelta" y requiere revisión.</p>
                                        </div>
                                     );
                                  }
-
-                                 // Fallback a feedback directo de la tarea
-                                 if (selectedReturnedTask?.feedback) {
-                                    const feedbackData = selectedReturnedTask.feedback;
-                                    if (typeof feedbackData === 'object') {
-                                       feedback = feedbackData.feedback || "";
-                                       reviewedBy = feedbackData.reviewed_by || "";
-                                       reviewedAt = feedbackData.reviewed_at || "";
-                                    }
-
-                                    return (
-                                       <div>
-                                          <RichTextDisplay text={feedback} />
-                                          {(reviewedBy || reviewedAt) && (
-                                             <div className="mt-3 pt-2 border-t border-orange-200 text-xs text-gray-600">
-                                                <UserNameDisplay userId={reviewedBy} /> devolvió esta tarea
-                                                {reviewedAt && (
-                                                   <span> el {new Date(reviewedAt).toLocaleString()}</span>
-                                                )}
-                                             </div>
-                                          )}
-                                       </div>
-                                    );
-                                 }
-
-                                 return <p className="text-gray-500 italic">No hay información de retroalimentación disponible.</p>;
                               } catch (error) {
-                                 console.error("Error al procesar retroalimentación:", error);
-                                 return <p className="text-red-500">Error al cargar la retroalimentación.</p>;
+                                 console.error("Error al procesar la retroalimentación:", error);
+                                 return <p>Error al cargar la retroalimentación. Por favor, inténtelo de nuevo.</p>;
                               }
                            })()}
                         </div>
-                     </div>
 
-                     <div className="flex justify-end space-x-3">
-                        {selectedTaskDetails && (
-                           <div className="mb-4">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Estado:</label>
-                              <div className="flex items-center space-x-2">
-                                 <TaskStatusDisplay status={selectedTaskDetails.status} />
-                                 {selectedTaskDetails.status === 'approved' && selectedTaskDetails.feedback && (
-                                    <div className="text-xs text-gray-600">
-                                       Aprobada por <UserNameDisplay userId={selectedTaskDetails.feedback.reviewed_by || ""} />
-                                       {selectedTaskDetails.feedback.reviewed_at && (
-                                          <span> el {new Date(selectedTaskDetails.feedback.reviewed_at).toLocaleString()}</span>
-                                       )}
-                                    </div>
-                                 )}
-                                 {selectedTaskDetails.status === 'returned' && selectedTaskDetails.feedback && (
-                                    <div className="text-xs text-gray-600">
-                                       Devuelta por <UserNameDisplay userId={selectedTaskDetails.feedback.reviewed_by || ""} />
-                                       {selectedTaskDetails.feedback.reviewed_at && (
-                                          <span> el {new Date(selectedTaskDetails.feedback.reviewed_at).toLocaleString()}</span>
-                                       )}
-                                    </div>
-                                 )}
-                                 {selectedTaskDetails.status === 'in_review' && selectedTaskDetails.feedback && (
-                                    <div className="text-xs text-gray-600">
-                                       En revisión por <UserNameDisplay userId={selectedTaskDetails.feedback.reviewed_by || ""} />
-                                       {selectedTaskDetails.feedback.reviewed_at && (
-                                          <span> desde el {new Date(selectedTaskDetails.feedback.reviewed_at).toLocaleString()}</span>
-                                       )}
-                                    </div>
-                                 )}
-                              </div>
+                        {selectedReturnedTask?.notes && typeof selectedReturnedTask?.notes === "object" && selectedReturnedTask?.notes?.returned_at && (
+                           <div className="mt-3 text-xs text-gray-600">
+                              Devuelta el {format(new Date(selectedReturnedTask?.notes.returned_at), "dd/MM/yyyy HH:mm")}
+                              {selectedReturnedTask?.notes.returned_by && (
+                                 <span>
+                                    {" "}
+                                    por{" "}
+                                    {
+                                       // Si el ID parece un UUID, obtener el nombre del usuario
+                                       selectedReturnedTask?.notes?.returned_by.includes("-")
+                                          ? (() => {
+                                               // Intentar encontrar el usuario en la lista de usuarios del proyecto
+                                               const userId = selectedReturnedTask?.notes?.returned_by;
+                                               // Devolver un componente que carga el nombre del usuario
+                                               return <UserNameDisplay userId={userId} />;
+                                            })()
+                                          : // Si no es un UUID, mostrar directamente (podría ser un nombre)
+                                            selectedReturnedTask?.notes?.returned_by
+                                    }
+                                 </span>
+                              )}
                            </div>
                         )}
-
-                        <div className="mb-4">
-                           <label className="block text-sm font-medium text-gray-700 mb-2">Fecha de devolución:</label>
-                           {selectedTaskDetails.status === "returned" && selectedTaskDetails.notes && typeof selectedTaskDetails.notes === "object" && selectedTaskDetails.notes.returned_at && (
-                              <div className="text-sm text-gray-600">
-                                 Devuelta el {format(new Date(selectedTaskDetails.notes.returned_at), "dd/MM/yyyy HH:mm")}
-                                 {selectedTaskDetails.notes.returned_by && (
-                                    <span>
-                                       {" "}
-                                       por{" "}
-                                       {
-                                          // Si el ID parece un UUID, obtener el nombre del usuario
-                                          selectedTaskDetails.notes?.returned_by.includes("-")
-                                             ? (() => {
-                                                  // Intentar encontrar el usuario en la lista de usuarios del proyecto
-                                                  const userId = selectedTaskDetails.notes?.returned_by;
-                                                  // Devolver un componente que carga el nombre del usuario
-                                                  return <UserNameDisplay userId={userId} />;
-                                               })()
-                                             : // Si no es un UUID, mostrar directamente (podría ser un nombre)
-                                               selectedTaskDetails.notes?.returned_by
-                                       }
-                                    </span>
-                                 )}
-                              </div>
-                           )}
-                        </div>
                      </div>
 
                      <div className="mt-5 border-t border-gray-200 pt-4">

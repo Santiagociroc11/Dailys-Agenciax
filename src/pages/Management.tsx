@@ -546,76 +546,38 @@ function Management() {
     feedbackData: TaskFeedback | null = null,
     additionalData: any = null
   ) {
-    try {
-      const table = isSubtask ? 'subtasks' : 'tasks';
-      
-      // 1. Obtener el estado actual para registrarlo en el historial
-      const { data: currentItem, error: fetchError } = await supabase
+    const table = isSubtask ? 'subtasks' : 'tasks';
+    
+    // 1. Obtener el estado actual para registrarlo en el historial
+    const { data: currentItem, error: fetchError } = await supabase
         .from(table)
         .select('status')
         .eq('id', itemId)
         .single();
 
-      if (fetchError) {
+    if (fetchError) {
         console.error(`[HISTORY] No se pudo obtener el estado actual para ${table}#${itemId}:`, fetchError);
-      }
-      const previousStatus = currentItem?.status || 'unknown';
-      
-      // Preparar datos de actualización base
-      let updateData: any = { 
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      };
+        // Si no podemos obtener el estado anterior, no podemos registrar el historial, pero continuamos con la actualización.
+    }
+    const previousStatus = currentItem?.status || 'unknown';
 
-      // Siempre agregar información de quién realizó la acción
-      const actionData = {
-        reviewed_by: user?.id,
-        reviewed_at: new Date().toISOString(),
-        action: newStatus
-      };
 
-      // Si hay feedback, incluirlo
-      if (feedbackData) {
-        updateData.feedback = feedbackData;
-      } else {
-        // Si no hay feedback pero es una acción importante, crear un registro básico
-        if (['in_review', 'approved', 'returned', 'pending'].includes(newStatus)) {
-          updateData.feedback = actionData;
-        }
-      }
+    const updateData: any = { status: newStatus };
 
-      // Si hay datos adicionales, incluirlos
-      if (additionalData) {
-        updateData = { ...updateData, ...additionalData };
-      }
+    if (feedbackData) {
+      updateData.feedback = feedbackData;
+    }
 
-      // Para cambios de estado específicos, agregar campos especiales
-      if (newStatus === 'returned') {
-        updateData.returned_at = new Date().toISOString();
-      }
-
-      // Actualizar en la base de datos
+    try {
       const { data, error } = await supabase
         .from(table)
         .update(updateData)
         .eq('id', itemId)
-        .select()
+        .select('*, task_id') // Asegurarse de que task_id se devuelva para las subtareas
         .single();
 
-      if (error) {
-        console.error('Error al actualizar estado:', error);
-        toast.error('Error al actualizar el estado');
-        return;
-      }
-
-      console.log('Estado actualizado correctamente:', data);
-      toast.success(`${isSubtask ? 'Subtarea' : 'Tarea'} ${
-        newStatus === 'approved' ? 'aprobada' : 
-        newStatus === 'returned' ? 'devuelta' : 
-        newStatus === 'in_review' ? 'puesta en revisión' :
-        newStatus === 'pending' ? 'desbloqueada' : 'actualizada'
-      } correctamente`);
-
+      if (error) throw error;
+      
       // 2. Registrar el cambio de estado en la tabla de historial
       if (previousStatus !== 'unknown' && user) {
         const historyRecord = {
@@ -637,6 +599,8 @@ function Management() {
             console.log('✅ [HISTORY] Cambio de estado registrado con éxito desde Management.');
         }
       }
+
+      toast.success('Estado actualizado correctamente');
 
       // Actualizar la UI
       if (isSubtask) {
