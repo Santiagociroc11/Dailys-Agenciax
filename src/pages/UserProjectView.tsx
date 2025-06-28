@@ -3706,14 +3706,14 @@ function UserNameDisplay({ userId }: { userId: string }) {
    useEffect(() => {
       async function fetchUserName() {
          try {
-            const { data, error } = await supabase.from("profiles").select("full_name, email").eq("id", userId).single();
+            const { data, error } = await supabase.from("users").select("name, email").eq("id", userId).single();
 
             if (error) {
                console.error("Error al buscar nombre de usuario:", error);
                setUserName("Usuario");
             } else if (data) {
-               // Usar el nombre completo si existe, sino el email, y si no hay ninguno, mostrar 'Usuario'
-               setUserName(data.full_name || data.email || "Usuario");
+               // Usar el nombre si existe, sino el email, y si no hay ninguno, mostrar 'Usuario'
+               setUserName(data.name || data.email || "Usuario");
             } else {
                setUserName("Usuario");
             }

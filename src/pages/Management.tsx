@@ -372,9 +372,11 @@ function Management() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, name');
+        .select('id, email, name')
+        .order('name');
 
       if (error) throw error;
+      console.log('Usuarios cargados:', data?.length, data?.map(u => ({ id: u.id, name: u.name, email: u.email })));
       setUsers(data || []);
     } catch (error) {
       console.error('Error al cargar usuarios:', error);
@@ -2864,7 +2866,12 @@ function Management() {
                           </p>
                           {getItemDetails(taskDetails).returnedFeedback?.reviewed_at && (
                             <p className="text-xs text-gray-500">
-                              Devuelta el: {new Date(getItemDetails(taskDetails).returnedFeedback!.reviewed_at!).toLocaleString()} por {users.find(u => u.id === getItemDetails(taskDetails).returnedFeedback?.reviewed_by)?.name || 'Usuario'}
+                              Devuelta el: {new Date(getItemDetails(taskDetails).returnedFeedback!.reviewed_at!).toLocaleString()} por {(() => {
+                                const reviewedBy = getItemDetails(taskDetails).returnedFeedback?.reviewed_by;
+                                const foundUser = users.find(u => u.id === reviewedBy);
+                                console.log('Buscando usuario:', reviewedBy, 'En lista:', users.map(u => u.id), 'Encontrado:', foundUser);
+                                return foundUser?.name || foundUser?.email || 'Usuario no encontrado';
+                              })()}
                             </p>
                           )}
                         </div>
