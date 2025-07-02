@@ -673,7 +673,8 @@ function Tasks() {
           estimated_duration: editedTask.estimated_duration,
           priority: editedTask.priority,
           is_sequential: editedTask.is_sequential,
-          project_id: editedTask.project_id
+          project_id: editedTask.project_id,
+          assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
       
