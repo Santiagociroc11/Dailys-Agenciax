@@ -534,8 +534,8 @@ function Management() {
     } else if (newStatus === 'approved') {
       setShowApprovalModal(true);
       return; // No actualizar hasta que se envíe el formulario
-    } else if (newStatus === 'in_review' || newStatus === 'completed') {
-      // Para 'in_review' o para regresar a 'completed' no necesitamos feedback, actualizamos directamente
+    } else if (newStatus === 'in_review' || newStatus === 'completed' || newStatus === 'pending') {
+      // Para 'in_review', 'completed' o 'pending' (desbloqueo) no necesitamos feedback, actualizamos directamente
       updateItemStatus(itemId, newStatus, isSubtask);
     }
   }
