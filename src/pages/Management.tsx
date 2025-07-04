@@ -575,7 +575,7 @@ function Management() {
         .from(table)
         .update(updateData)
         .eq('id', itemId)
-        .select('*, task_id') // Asegurarse de que task_id se devuelva para las subtareas
+        .select(isSubtask ? '*, task_id' : '*') // Solo seleccionar task_id para subtareas
         .single();
 
       if (error) throw error;
