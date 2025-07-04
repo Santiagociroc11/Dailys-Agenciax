@@ -580,7 +580,12 @@ function Management() {
 
       if (error) throw error;
       
-      // 2. Registrar el cambio de estado en la tabla de historial
+      // 2. Si se desbloquea una tarea (cambio de 'blocked' a 'pending'), eliminar task_work_assignments
+      if (previousStatus === 'blocked' && newStatus === 'pending') {
+        await removeTaskWorkAssignments(itemId, isSubtask ? 'subtask' : 'task');
+      }
+      
+      // 3. Registrar el cambio de estado en la tabla de historial
       if (previousStatus !== 'unknown' && user) {
         const historyRecord = {
             task_id: isSubtask ? (data as Subtask).task_id : itemId,
@@ -813,6 +818,27 @@ function Management() {
     } catch (err) {
       console.error('Error al actualizar task_work_assignment:', err);
       toast.error('Error al actualizar la asignación de trabajo');
+    }
+  }
+  
+  // Función para eliminar task_work_assignments al desbloquear
+  async function removeTaskWorkAssignments(itemId: string, itemType: 'task' | 'subtask') {
+    try {
+      const { error } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq(itemType === 'subtask' ? 'subtask_id' : 'task_id', itemId)
+        .eq('task_type', itemType);
+      
+      if (error) {
+        console.error('Error al eliminar task_work_assignments:', error);
+        toast.error('Error al limpiar las asignaciones de trabajo');
+      } else {
+        console.log('Task work assignments eliminados correctamente al desbloquear');
+      }
+    } catch (err) {
+      console.error('Error al eliminar task_work_assignments:', err);
+      toast.error('Error al limpiar las asignaciones de trabajo');
     }
   }
   
