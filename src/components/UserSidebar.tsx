@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { FolderOpen, LogOut, CheckSquare, Calendar, User, SwitchCamera, Settings } from 'lucide-react';
+import { FolderOpen, LogOut, CheckSquare, Calendar, User, SwitchCamera } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import VersionInfo from './VersionInfo';
@@ -70,6 +70,8 @@ export default function UserSidebar() {
         <h1 className="text-2xl font-bold text-gray-800">USUARIO</h1>
       </div>
       <nav className="mt-6">
+
+        
         <div className="px-6 py-3">
           <div className="flex items-center text-gray-700">
             <FolderOpen className="w-5 h-5 mr-3" />
@@ -88,17 +90,6 @@ export default function UserSidebar() {
           </NavLink>
           </div>
         </div>
-        <NavLink
-            to="/user/settings"
-            className={({ isActive }) =>
-                `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
-                isActive ? 'bg-gray-100' : ''
-                }`
-            }
-        >
-            <Settings className="w-5 h-5 mr-3" />
-            Configuración
-        </NavLink>
       </nav>
       <div className="absolute bottom-0 w-64 p-6">
         <VersionInfo />
