@@ -73,104 +73,15 @@ status - Verificar estado del bot
 
 ## 🏃‍♂️ Uso
 
-### Desarrollo Local
+### Desarrollo
 ```bash
 npm run dev
 ```
 
-### Producción Local
+### Producción
 ```bash
 npm run build
 npm start
-```
-
-### 🐳 Despliegue con Docker
-
-#### Opción 1: Docker Compose (Recomendado)
-```bash
-# 1. Clonar el repositorio
-git clone <tu-repositorio>
-cd telegram-bot-server
-
-# 2. Crear archivo .env con tus configuraciones
-cp .env.example .env
-# Editar .env con tus variables
-
-# 3. Construir y ejecutar con Docker Compose
-docker-compose up -d
-
-# 4. Ver logs
-docker-compose logs -f telegram-bot
-
-# 5. Detener el servicio
-docker-compose down
-```
-
-#### Opción 2: Docker Manual
-```bash
-# 1. Construir la imagen
-docker build -t telegram-bot-server .
-
-# 2. Ejecutar el contenedor
-docker run -d \
-  --name telegram-bot \
-  -p 3000:3000 \
-  --env-file .env \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/logs:/app/logs \
-  --restart unless-stopped \
-  telegram-bot-server
-
-# 3. Ver logs
-docker logs -f telegram-bot
-
-# 4. Detener el contenedor
-docker stop telegram-bot
-docker rm telegram-bot
-```
-
-#### Comandos Útiles de Docker
-```bash
-# Ver estado del contenedor
-docker-compose ps
-
-# Reiniciar el servicio
-docker-compose restart telegram-bot
-
-# Ver logs en tiempo real
-docker-compose logs -f
-
-# Entrar al contenedor para debugging
-docker-compose exec telegram-bot sh
-
-# Actualizar la aplicación
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
-
-# Limpiar imágenes no utilizadas
-docker system prune -f
-```
-
-### 🔧 Variables de Entorno para Docker
-
-Crea un archivo `.env` en la raíz del directorio `telegram-bot-server`:
-
-```env
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=tu_token_del_bot_aqui
-ADMIN_GROUP_CHAT_ID=tu_chat_id_del_grupo_admin_aqui
-
-# Supabase Configuration
-SUPABASE_URL=tu_url_de_supabase
-SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_de_supabase
-
-# Server Configuration
-PORT=3000
-NODE_ENV=production
-
-# Optional: Logging level
-LOG_LEVEL=info
 ```
 
 ## 📡 API Endpoints
