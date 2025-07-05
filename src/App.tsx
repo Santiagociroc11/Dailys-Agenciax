@@ -15,6 +15,8 @@ import UserProjectView from './pages/UserProjectView';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
+import AdminSettings from './pages/AdminSettings';
+import UserSettings from './pages/UserSettings';
 
 // Route guard for admin routes
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
@@ -67,6 +69,7 @@ function App() {
             <Route path="users" element={<Users />} />
             <Route path="areas" element={<Areas />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
 
           {/* User routes */}
@@ -76,6 +79,7 @@ function App() {
             </UserRoute>
           }>
             <Route path="projects/:projectId" element={<UserProjectView />} />
+            <Route path="settings" element={<UserSettings />} />
           </Route>
         </Routes>
       </AuthProvider>
