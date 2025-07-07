@@ -77,8 +77,46 @@ const Settings = () => {
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Configuración de Administrador</h1>
       
-      {/* Instrucciones paso a paso */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+      {/* Estado de configuración */}
+      {telegramId ? (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <div className="w-3 h-3 bg-green-500 rounded-full mr-3"></div>
+              <h2 className="text-lg font-semibold text-green-800">
+                ✅ Notificaciones Configuradas
+              </h2>
+            </div>
+            <span className="text-sm text-green-600 bg-green-100 px-3 py-1 rounded-full">
+              Activo
+            </span>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm text-green-700">
+              <strong>ID configurado:</strong> <span className="font-mono bg-green-100 px-2 py-1 rounded">{telegramId}</span>
+            </p>
+            <p className="text-sm text-green-600">
+              Las notificaciones globales del sistema se están enviando correctamente.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center mb-2">
+            <div className="w-3 h-3 bg-orange-500 rounded-full mr-3"></div>
+            <h2 className="text-lg font-semibold text-orange-800">
+              ⚠️ Configuración Pendiente
+            </h2>
+          </div>
+          <p className="text-sm text-orange-700">
+            No hay notificaciones de Telegram configuradas. Configure un ID para recibir alertas importantes del sistema.
+          </p>
+        </div>
+      )}
+      
+      {/* Instrucciones paso a paso - Solo si no está configurado */}
+      {!telegramId && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
         <h2 className="text-lg font-semibold text-blue-800 mb-4">
           📋 Cómo configurar las notificaciones de Telegram (Paso a paso)
         </h2>
@@ -124,10 +162,11 @@ const Settings = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* Aviso importante para el administrador */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-        <h3 className="font-medium text-amber-800 mb-2">⚠️ Recordatorio importante:</h3>
+        <h3 className="font-medium text-amber-800 mb-2">💡 Información del bot:</h3>
         <p className="text-sm text-amber-700">
           Comparte este enlace con todos los usuarios del sistema: 
           <a href="https://t.me/agenciaxbot" target="_blank" rel="noopener noreferrer" className="font-mono bg-amber-100 px-2 py-1 rounded text-amber-800 hover:underline ml-1">
@@ -139,10 +178,13 @@ const Settings = () => {
       <div className="space-y-4">
         <div>
           <label htmlFor="telegramId" className="block text-sm font-medium text-gray-700 mb-1">
-            ID del Chat de Telegram para Notificaciones Globales
+            {telegramId ? 'Modificar ID del Chat de Telegram' : 'ID del Chat de Telegram para Notificaciones Globales'}
           </label>
           <p className="text-xs text-gray-500 mb-2">
-            Este ID se usará para enviar notificaciones importantes a un grupo o canal de administradores.
+            {telegramId 
+              ? 'Puedes cambiar el ID si necesitas usar un chat o canal diferente.'
+              : 'Este ID se usará para enviar notificaciones importantes a un grupo o canal de administradores.'
+            }
           </p>
           <input
             id="telegramId"
@@ -158,16 +200,20 @@ const Settings = () => {
             <button 
               onClick={handleSave} 
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              className={`px-4 py-2 text-white rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed ${
+                telegramId 
+                  ? 'bg-orange-600 hover:bg-orange-700' 
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              {isLoading ? 'Guardando...' : 'Guardar'}
+              {isLoading ? 'Guardando...' : (telegramId ? 'Actualizar Configuración' : 'Guardar Configuración')}
             </button>
             <button 
               onClick={sendTestNotification} 
               disabled={!telegramId || isLoading}
-              className="px-4 py-2 bg-gray-200 text-gray-800 border border-gray-300 rounded-md hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
             >
-              Enviar Notificación de Prueba
+              {telegramId ? '🧪 Probar Notificación' : 'Enviar Notificación de Prueba'}
             </button>
         </div>
       </div>
