@@ -1,18 +1,12 @@
 {
-  "name": "telegram-bot-helper",
+  "name": "telegram-bot",
   "version": "1.0.0",
-  "description": "Helper bot to get user/group chat ID for Dailys notifications.",
-  "main": "bot.js",
   "type": "module",
   "scripts": {
-    "start": "node bot.js",
-    "dev": "nodemon bot.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0",
+    "node-telegram-bot-api": "^0.64.0",
     "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.4"
   }
-} 
+}

@@ -1,18 +1,27 @@
 # Stage 1: Build the application
-FROM node:20-alpine AS build
+# Build stage
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files
 COPY package*.json ./
-RUN npm install
 
-# Copy the rest of the application source code
+# Install dependencies
+RUN npm ci
+
+# Copy source files
 COPY . .
 
 # Set build-time arguments
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
+ARG TELEGRAM_BOT_TOKEN
+
+
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+ENV TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 
 # Build the frontend
 RUN npm run build
@@ -33,8 +42,11 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.ts ./dist/
 COPY --from=build /app/api ./dist/api
 
+# Copy Telegram bot files
+COPY --from=build /app/telegram-bot ./telegram-bot  
+
 # Expose port
 EXPOSE 3000
 
-# Start server
-CMD ["npm", "start"] 
+# Start both the server and the Telegram bot
+CMD ["sh", "-c", "cd telegram-bot && npm install && node bot.js & node dist/server/server.js"]

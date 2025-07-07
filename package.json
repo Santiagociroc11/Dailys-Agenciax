@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "start": "node dist/server.js",
-    "dev:server": "nodemon --watch 'server.ts' --watch 'api/**/*.ts' --exec 'ts-node-esm' server.ts"
+    "dev:server": "tsx watch server.ts",
+    "build:frontend": "vite build",
+    "build:server": "tsc --project tsconfig.server.json",
+    "build": "rimraf dist && npm run build:frontend && npm run build:server",
+    "start": "node dist/server/server.js",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
