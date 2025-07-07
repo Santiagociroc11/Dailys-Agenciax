@@ -3,35 +3,38 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Declare build arguments
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
-
-# Set them as environment variables
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
-ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
-
 # Copy package files and install dependencies
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm install
 
 # Copy the rest of the application source code
 COPY . .
 
-# Build the application
+# Set build-time arguments
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Build the frontend
 RUN npm run build
 
-# Stage 2: Serve the application with Nginx
-FROM nginx:stable-alpine AS final
+# Stage 2: Production environment
+FROM node:20-alpine AS final
 
-# Copy the build output from the build stage
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-# Copy the Nginx configuration file
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy package.json to install only production dependencies
+COPY package*.json ./
+RUN npm install --omit=dev
 
-# Expose port 80
-EXPOSE 80
+# Copy built frontend from build stage
+COPY --from=build /app/dist ./dist
 
-# Start Nginx
-CMD ["nginx", "-g", "daemon off;"] 
+# Copy server files
+COPY --from=build /app/server.ts ./dist/
+COPY --from=build /app/api ./dist/api
+
+# Expose port
+EXPOSE 3000
+
+# Start server
+CMD ["npm", "start"] 

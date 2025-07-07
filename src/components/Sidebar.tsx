@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -106,6 +106,16 @@ export default function Sidebar() {
             >
               <BarChart3 className="w-5 h-5 mr-3" />
               Estadísticas
+            </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+                  isActive ? 'bg-gray-100' : ''
+                }`
+              }
+            >
+              Ajustes
             </NavLink>
           </>
         )}
