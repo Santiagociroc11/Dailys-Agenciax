@@ -74,8 +74,68 @@ const Settings = () => {
 
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Configuración de Administrador</h1>
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">Configuración de Administrador</h1>
+      
+      {/* Instrucciones paso a paso */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-semibold text-blue-800 mb-4">
+          📋 Cómo configurar las notificaciones de Telegram (Paso a paso)
+        </h2>
+        <div className="space-y-4">
+          <div className="flex items-start space-x-3">
+            <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">1</div>
+            <div>
+              <p className="font-medium text-gray-800">Abre Telegram en tu teléfono o computadora</p>
+              <p className="text-sm text-gray-600">
+                Busca el bot: <span className="font-mono bg-gray-100 px-2 py-1 rounded text-blue-600">@agenciaxbot</span>
+                <br />
+                <span className="text-xs text-gray-500">O haz clic aquí para abrir directamente: </span>
+                <a href="https://t.me/agenciaxbot" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs">
+                  https://t.me/agenciaxbot
+                </a>
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">2</div>
+            <div>
+              <p className="font-medium text-gray-800">Escribe el comando <span className="font-mono bg-gray-100 px-2 py-1 rounded">/start</span></p>
+              <p className="text-sm text-gray-600">El bot te dará tu ID de chat automáticamente</p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">3</div>
+            <div>
+              <p className="font-medium text-gray-800">Copia el ID y pégalo en el campo de abajo</p>
+              <p className="text-sm text-gray-600">Para chat personal: será un número positivo (ej: 123456789)</p>
+              <p className="text-sm text-gray-600">Para grupo: será un número negativo (ej: -1001234567890)</p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">4</div>
+            <div>
+              <p className="font-medium text-gray-800">Haz clic en "Guardar" y luego "Enviar Notificación de Prueba"</p>
+              <p className="text-sm text-gray-600">¡Listo! Ya recibirás notificaciones importantes del sistema</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Aviso importante para el administrador */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <h3 className="font-medium text-amber-800 mb-2">⚠️ Recordatorio importante:</h3>
+        <p className="text-sm text-amber-700">
+          Comparte este enlace con todos los usuarios del sistema: 
+          <a href="https://t.me/agenciaxbot" target="_blank" rel="noopener noreferrer" className="font-mono bg-amber-100 px-2 py-1 rounded text-amber-800 hover:underline ml-1">
+            https://t.me/agenciaxbot
+          </a>
+        </p>
+      </div>
+
       <div className="space-y-4">
         <div>
           <label htmlFor="telegramId" className="block text-sm font-medium text-gray-700 mb-1">
@@ -89,7 +149,7 @@ const Settings = () => {
             type="text"
             value={telegramId}
             onChange={(e) => setTelegramId(e.target.value)}
-            placeholder="Ej: -1001234567890"
+            placeholder="Ej: -1001234567890 (para grupo) o 123456789 (para chat personal)"
             disabled={isLoading}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />

@@ -75,8 +75,62 @@ const UserSettings = () => {
   };
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Tu Configuración de Notificaciones</h1>
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">Tu Configuración de Notificaciones</h1>
+      
+      {/* Instrucciones paso a paso */}
+      <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-semibold text-green-800 mb-4">
+          🔔 Cómo activar tus notificaciones de Telegram (Súper fácil)
+        </h2>
+        <div className="space-y-4">
+          <div className="flex items-start space-x-3">
+            <div className="bg-green-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">1</div>
+            <div>
+              <p className="font-medium text-gray-800">Abre Telegram en tu teléfono</p>
+              <p className="text-sm text-gray-600">
+                Busca el bot: <span className="font-mono bg-gray-100 px-2 py-1 rounded text-blue-600">@agenciaxbot</span>
+                <br />
+                <span className="text-xs text-gray-500">O haz clic aquí para abrir directamente: </span>
+                <a href="https://t.me/agenciaxbot" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs">
+                  https://t.me/agenciaxbot
+                </a>
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-green-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">2</div>
+            <div>
+              <p className="font-medium text-gray-800">Escribe <span className="font-mono bg-gray-100 px-2 py-1 rounded">/start</span> y envía el mensaje</p>
+              <p className="text-sm text-gray-600">El bot te dirá tu ID de chat (guárdalo, lo necesitarás)</p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-green-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">3</div>
+            <div>
+              <p className="font-medium text-gray-800">Copia el número que te dio el bot</p>
+              <p className="text-sm text-gray-600">Se verá algo así: <span className="font-mono bg-gray-100 px-2 py-1 rounded">123456789</span></p>
+            </div>
+          </div>
+          
+          <div className="flex items-start space-x-3">
+            <div className="bg-green-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-semibold">4</div>
+            <div>
+              <p className="font-medium text-gray-800">Pega el número en el campo de abajo y haz clic en "Guardar"</p>
+              <p className="text-sm text-gray-600">¡Ya está! Ahora recibirás notificaciones de tus tareas 🎉</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-sm text-yellow-800">
+            <strong>💡 Tip:</strong> Usa el botón "Enviar Notificación de Prueba" para verificar que todo funciona correctamente.
+          </p>
+        </div>
+      </div>
+
       <div className="space-y-4">
         <div>
           <label htmlFor="telegramId" className="block text-sm font-medium text-gray-700 mb-1">
@@ -90,7 +144,7 @@ const UserSettings = () => {
             type="text"
             value={telegramId}
             onChange={(e) => setTelegramId(e.target.value)}
-            placeholder="Ej: 123456789"
+            placeholder="Ej: 123456789 (copia el número que te dio el bot)"
             disabled={isLoading}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
