@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 app.post('/api/telegram/test', handleTestNotification);
 
 // Servir la aplicación de React
-const clientBuildPath = path.join(__dirname, '../dist');
+const clientBuildPath = path.join(__dirname, '..');
 app.use(express.static(clientBuildPath));
 
 // Servir index.html para cualquier otra ruta (manejo de rutas de React)

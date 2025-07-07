@@ -35,12 +35,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
-    # Copy built frontend from build stage
+    # Copy built frontend and server from build stage
     COPY --from=builder /app/dist ./dist
-    
-    # Copy server files
-    COPY --from=builder /app/server.ts ./dist/
-    COPY --from=builder /app/api ./dist/api
     
     # Copy Telegram bot files
     COPY --from=builder /app/telegram-bot ./telegram-bot  
