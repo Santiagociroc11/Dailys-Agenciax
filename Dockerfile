@@ -35,15 +35,15 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# Copy built frontend from build stage
-COPY --from=build /app/dist ./dist
-
-# Copy server files
-COPY --from=build /app/server.ts ./dist/
-COPY --from=build /app/api ./dist/api
-
-# Copy Telegram bot files
-COPY --from=build /app/telegram-bot ./telegram-bot  
+    # Copy built frontend from build stage
+    COPY --from=builder /app/dist ./dist
+    
+    # Copy server files
+    COPY --from=builder /app/server.ts ./dist/
+    COPY --from=builder /app/api ./dist/api
+    
+    # Copy Telegram bot files
+    COPY --from=builder /app/telegram-bot ./telegram-bot  
 
 # Expose port
 EXPOSE 3000
