@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { handleTestNotification } from './api/telegram';
+import { handleTestNotification } from './api/telegram.js';
 
 const app = express();
 const port = process.env.PORT || 3000;

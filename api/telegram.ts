@@ -1,5 +1,3 @@
-import { supabase } from '../src/lib/supabase.js';
-
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 interface TelegramMessage {
