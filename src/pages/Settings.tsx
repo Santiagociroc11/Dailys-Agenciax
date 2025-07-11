@@ -203,7 +203,7 @@ const Settings = () => {
               <p>• ✅ <strong>Aprobadas:</strong> Cuando apruebas una tarea completada</p>
               <p>• 🔄 <strong>Devueltas:</strong> Cuando devuelves una tarea con feedback</p>
             </div>
-            <p className="text-xs text-blue-600 mt-2">💡 <strong>Info incluida:</strong> Usuario asignado, admin que hizo la acción, título de tarea, proyecto, feedback (cuando aplique)</p>
+            <p className="text-xs text-blue-600 mt-2">💡 <strong>Info incluida:</strong> Usuario asignado, área de trabajo, admin que hizo la acción, título de tarea, proyecto, feedback (cuando aplique)</p>
           </div>
         </div>
       )}

@@ -6,6 +6,97 @@ interface TelegramMessage {
   parse_mode?: 'HTML' | 'Markdown';
 }
 
+// Función para formatear duración en formato legible
+export function formatDuration(startDate: string, endDate: string): string {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const diffMs = end.getTime() - start.getTime();
+  
+  if (diffMs < 0) return "Tiempo inválido";
+  
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  
+  const parts = [];
+  
+  if (days > 0) {
+    parts.push(`${days}d`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes}m`);
+  }
+  
+  if (parts.length === 0) {
+    return "< 1m";
+  }
+  
+  return parts.join(' ');
+}
+
+// Función para obtener información de tiempo desde la base de datos
+export async function getTimeInfo(itemId: string, isSubtask: boolean, currentStatus: string): Promise<{
+  assignedAt?: string;
+  completedAt?: string;
+  inReviewAt?: string;
+  approvedAt?: string;
+  returnedAt?: string;
+  blockedAt?: string;
+}> {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Variables de entorno de Supabase no configuradas');
+      return {};
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // Obtener historial de estados
+    const { data: history, error } = await supabase
+      .from('status_history')
+      .select('*')
+      .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
+      .order('changed_at', { ascending: true });
+
+    if (error) {
+      console.error('Error obteniendo historial de estados:', error);
+      return {};
+    }
+
+    const timeInfo: any = {};
+
+    // Buscar fechas específicas en el historial
+    history?.forEach((record: any) => {
+      if (record.new_status === 'assigned' || record.new_status === 'in_progress') {
+        timeInfo.assignedAt = record.changed_at;
+      } else if (record.new_status === 'completed') {
+        timeInfo.completedAt = record.changed_at;
+      } else if (record.new_status === 'in_review') {
+        timeInfo.inReviewAt = record.changed_at;
+      } else if (record.new_status === 'approved') {
+        timeInfo.approvedAt = record.changed_at;
+      } else if (record.new_status === 'returned') {
+        timeInfo.returnedAt = record.changed_at;
+      } else if (record.new_status === 'blocked') {
+        timeInfo.blockedAt = record.changed_at;
+      }
+    });
+
+    return timeInfo;
+  } catch (error) {
+    console.error('Error obteniendo información de tiempo:', error);
+    return {};
+  }
+}
+
 export async function sendTelegramMessage(chatId: string, message: string): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('Error: El token del bot de Telegram no está configurado.');
@@ -105,6 +196,7 @@ export function createTaskCompletedMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  areaName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
@@ -116,6 +208,7 @@ export function createTaskCompletedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+🏷️ <b>Área:</b> ${areaName}
 
 ✅ La ${taskType} ha sido marcada como completada y está lista para revisión.`;
 }
@@ -125,6 +218,7 @@ export function createTaskBlockedMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  areaName: string,
   blockReason: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
@@ -137,6 +231,7 @@ export function createTaskBlockedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+🏷️ <b>Área:</b> ${areaName}
 
 ⚠️ <b>Motivo del bloqueo:</b> ${blockReason}
 
@@ -148,6 +243,7 @@ export function createTaskInReviewMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  areaName: string,
   adminName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
@@ -160,6 +256,7 @@ export function createTaskInReviewMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+🏷️ <b>Área:</b> ${areaName}
 👩‍💼 <b>Admin:</b> ${adminName}
 
 📋 La ${taskType} ha sido puesta en revisión por ${adminName}.`;
@@ -170,6 +267,7 @@ export function createTaskApprovedMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  areaName: string,
   adminName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
@@ -182,6 +280,7 @@ export function createTaskApprovedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+🏷️ <b>Área:</b> ${areaName}
 👩‍💼 <b>Admin:</b> ${adminName}
 
 🎉 La ${taskType} ha sido aprobada por ${adminName} y está finalizada.`;
@@ -192,6 +291,7 @@ export function createTaskReturnedMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  areaName: string,
   returnFeedback: string,
   adminName: string,
   isSubtask: boolean = false,
@@ -205,6 +305,7 @@ export function createTaskReturnedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+🏷️ <b>Área:</b> ${areaName}
 👩‍💼 <b>Admin:</b> ${adminName}
 
 📝 <b>Feedback:</b> ${returnFeedback}

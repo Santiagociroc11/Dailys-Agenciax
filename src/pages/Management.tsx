@@ -618,6 +618,7 @@ function Management() {
           let taskTitle = itemData.title;
           let projectName = "Proyecto sin nombre";
           let assignedUserName = "Usuario desconocido";
+          let assignedUserAreaName = "Sin área";
           
           if (isSubtask) {
             // Obtener información de la tarea padre
@@ -644,7 +645,7 @@ function Management() {
               }
             }
             
-            // Obtener información del usuario asignado a la subtarea
+            // Obtener información del usuario asignado a la subtarea y su área
             if (itemData.assigned_to) {
               const { data: assignedUser } = await supabase
                 .from('users')
@@ -654,6 +655,18 @@ function Management() {
                 
               if (assignedUser) {
                 assignedUserName = assignedUser.name || assignedUser.email;
+              }
+
+              // Obtener el área del usuario asignado
+              try {
+                const { data: userAreas } = await supabase
+                  .rpc('get_areas_by_user', { user_uuid: itemData.assigned_to });
+                
+                if (userAreas && userAreas.length > 0) {
+                  assignedUserAreaName = userAreas[0].area_name || "Sin área";
+                }
+              } catch (error) {
+                console.error("Error obteniendo área del usuario asignado:", error);
               }
             }
           } else {
@@ -670,16 +683,30 @@ function Management() {
               }
             }
             
-            // Para tareas principales, obtener el primer usuario asignado
+            // Para tareas principales, obtener el primer usuario asignado y su área
             if (itemData.assigned_users && itemData.assigned_users.length > 0) {
+              const firstUserId = itemData.assigned_users[0];
+              
               const { data: assignedUser } = await supabase
                 .from('users')
                 .select('name, email')
-                .eq('id', itemData.assigned_users[0])
+                .eq('id', firstUserId)
                 .single();
                 
               if (assignedUser) {
                 assignedUserName = assignedUser.name || assignedUser.email;
+              }
+
+              // Obtener el área del primer usuario asignado
+              try {
+                const { data: userAreas } = await supabase
+                  .rpc('get_areas_by_user', { user_uuid: firstUserId });
+                
+                if (userAreas && userAreas.length > 0) {
+                  assignedUserAreaName = userAreas[0].area_name || "Sin área";
+                }
+              } catch (error) {
+                console.error("Error obteniendo área del usuario asignado:", error);
               }
             }
           }
@@ -689,6 +716,7 @@ function Management() {
             taskTitle: taskTitle,
             userName: assignedUserName,
             projectName: projectName,
+            areaName: assignedUserAreaName,
             status: newStatus,
             adminName: user?.name || user?.email || 'Administrador',
             isSubtask: isSubtask,

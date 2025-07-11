@@ -31,6 +31,7 @@ app.post('/api/telegram/test-admin', async (req, res) => {
       "Tarea de prueba - Sistema de login",
       "Juan Pérez", 
       "Proyecto de prueba",
+      "Área de Desarrollo",
       "Admin de Prueba",
       false
     );
@@ -64,6 +65,7 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       taskTitle, 
       userName, 
       projectName, 
+      areaName,
       status, 
       blockReason, 
       returnFeedback,
@@ -107,19 +109,19 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
     let message;
     switch (status) {
       case 'completed':
-        message = createTaskCompletedMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        message = createTaskCompletedMessage(taskTitle, userName, projectName, areaName || 'Sin área', isSubtask, parentTaskTitle);
         break;
       case 'blocked':
-        message = createTaskBlockedMessage(taskTitle, userName, projectName, blockReason, isSubtask, parentTaskTitle);
+        message = createTaskBlockedMessage(taskTitle, userName, projectName, areaName || 'Sin área', blockReason, isSubtask, parentTaskTitle);
         break;
       case 'in_review':
-        message = createTaskInReviewMessage(taskTitle, userName, projectName, adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskInReviewMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       case 'approved':
-        message = createTaskApprovedMessage(taskTitle, userName, projectName, adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskApprovedMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       case 'returned':
-        message = createTaskReturnedMessage(taskTitle, userName, projectName, returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskReturnedMessage(taskTitle, userName, projectName, areaName || 'Sin área', returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       default:
         return res.status(400).json({ 

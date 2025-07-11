@@ -1659,10 +1659,24 @@ export default function UserProjectView() {
                   parentTaskTitle = taskForStatusUpdate.subtask_title;
                }
 
+               // Obtener el área del usuario actual
+               let userAreaName = "Sin área";
+               try {
+                  const { data: userAreas, error: areaError } = await supabase
+                     .rpc('get_areas_by_user', { user_uuid: user!.id });
+                  
+                  if (!areaError && userAreas && userAreas.length > 0) {
+                     userAreaName = userAreas[0].area_name || "Sin área";
+                  }
+               } catch (error) {
+                  console.error("Error obteniendo área del usuario:", error);
+               }
+
                const notificationData = {
                   taskTitle: taskForStatusUpdate.title,
                   userName: user!.name || user!.email,
                   projectName: taskForStatusUpdate.projectName || "Proyecto sin nombre",
+                  areaName: userAreaName,
                   status: selectedStatus,
                   isSubtask: isSubtask,
                   parentTaskTitle: parentTaskTitle,
