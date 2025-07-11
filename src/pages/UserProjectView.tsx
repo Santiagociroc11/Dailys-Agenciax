@@ -1022,18 +1022,41 @@ export default function UserProjectView() {
             onConflict: "user_id,date,task_type,subtask_id",
          });
 
-         // 5. Actualizar estado de subtareas a "assigned"
+         // 5. Actualizar estado de subtareas a "assigned" y registrar en historial
          if (subtaskIdsToUpdate.length > 0) {
-            const { data: updatedSubtasks, error: updateSubtaskError } = await supabase.from("subtasks").update({ status: "assigned" }).in("id", subtaskIdsToUpdate).select("id, title, status");
+            const { data: updatedSubtasks, error: updateSubtaskError } = await supabase.from("subtasks").update({ status: "assigned" }).in("id", subtaskIdsToUpdate).select("id, title, status, task_id");
 
             if (updateSubtaskError) {
                console.error("Error al actualizar estado de subtareas:", updateSubtaskError);
             } else {
                console.log("[SAVE] Subtareas actualizadas a 'assigned':", updatedSubtasks);
+               
+               // Registrar en historial para cada subtarea
+               if (updatedSubtasks) {
+                  const historyRecords = updatedSubtasks.map(subtask => ({
+                     task_id: subtask.task_id,
+                     subtask_id: subtask.id,
+                     changed_by: user.id,
+                     previous_status: 'pending',
+                     new_status: 'assigned',
+                     metadata: {
+                        reason: 'Task assigned for daily work',
+                        assigned_date: today
+                     }
+                  }));
+
+                  const { error: historyError } = await supabase.from('status_history').insert(historyRecords);
+                  
+                  if (historyError) {
+                     console.error('⚠️ [HISTORY] Error registrando asignación de subtareas:', historyError);
+                  } else {
+                     console.log('✅ [HISTORY] Asignación de subtareas registrada en historial');
+                  }
+               }
             }
          }
 
-         // 6. Actualizar estado de tareas principales sin subtareas a "assigned"
+         // 6. Actualizar estado de tareas principales sin subtareas a "assigned" y registrar en historial
          if (taskIdsToUpdate.length > 0) {
             const { data: updatedTasks, error: updateTaskError } = await supabase.from("tasks").update({ status: "assigned" }).in("id", taskIdsToUpdate).select("id, title, status");
 
@@ -1041,10 +1064,33 @@ export default function UserProjectView() {
                console.error("Error al actualizar estado de tareas:", updateTaskError);
             } else {
                console.log("[SAVE] Tareas actualizadas a 'assigned':", updatedTasks);
+               
+               // Registrar en historial para cada tarea
+               if (updatedTasks) {
+                  const historyRecords = updatedTasks.map(task => ({
+                     task_id: task.id,
+                     subtask_id: null,
+                     changed_by: user.id,
+                     previous_status: 'pending',
+                     new_status: 'assigned',
+                     metadata: {
+                        reason: 'Task assigned for daily work',
+                        assigned_date: today
+                     }
+                  }));
+
+                  const { error: historyError } = await supabase.from('status_history').insert(historyRecords);
+                  
+                  if (historyError) {
+                     console.error('⚠️ [HISTORY] Error registrando asignación de tareas:', historyError);
+                  } else {
+                     console.log('✅ [HISTORY] Asignación de tareas registrada en historial');
+                  }
+               }
             }
          }
 
-         // 7. Actualizar estado de tareas principales que tienen subtareas asignadas a "in_progress"
+         // 7. Actualizar estado de tareas principales que tienen subtareas asignadas a "in_progress" y registrar en historial
          if (parentTasksOfSubtasks.size > 0) {
             const parentTaskIds = Array.from(parentTasksOfSubtasks);
             const { data: updatedParentTasks, error: updateParentError } = await supabase.from("tasks").update({ status: "in_progress" }).in("id", parentTaskIds).select("id, title, status");
@@ -1053,6 +1099,29 @@ export default function UserProjectView() {
                console.error("Error al actualizar estado de tareas principales:", updateParentError);
             } else {
                console.log("[SAVE] Tareas principales de subtareas actualizadas a 'in_progress':", updatedParentTasks);
+               
+               // Registrar en historial para tareas padre
+               if (updatedParentTasks) {
+                  const historyRecords = updatedParentTasks.map(task => ({
+                     task_id: task.id,
+                     subtask_id: null,
+                     changed_by: user.id,
+                     previous_status: 'pending',
+                     new_status: 'in_progress',
+                     metadata: {
+                        reason: 'Parent task moved to in_progress because subtasks were assigned',
+                        assigned_date: today
+                     }
+                  }));
+
+                  const { error: historyError } = await supabase.from('status_history').insert(historyRecords);
+                  
+                  if (historyError) {
+                     console.error('⚠️ [HISTORY] Error registrando cambio de tareas padre:', historyError);
+                  } else {
+                     console.log('✅ [HISTORY] Cambio de tareas padre registrado en historial');
+                  }
+               }
             }
          }
 

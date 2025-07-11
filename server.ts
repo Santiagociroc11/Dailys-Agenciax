@@ -120,12 +120,16 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
     // Obtener información de tiempo si tenemos el ID de la tarea
     let timeInfo = {};
     if (taskId) {
+      console.log(`[SERVER] Obteniendo información de tiempo para ${isSubtask ? 'subtask' : 'task'} ID: ${taskId}, status: ${status}`);
       try {
         timeInfo = await getTimeInfo(taskId, isSubtask, status);
+        console.log(`[SERVER] Información de tiempo obtenida:`, timeInfo);
       } catch (error) {
         console.warn('No se pudo obtener información de tiempo:', error);
         // Continuar sin información de tiempo si hay error
       }
+    } else {
+      console.warn('[SERVER] No se proporcionó taskId para obtener información de tiempo');
     }
 
     // Crear el mensaje apropiado según el estado

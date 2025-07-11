@@ -6,6 +6,17 @@ interface TelegramMessage {
   parse_mode?: 'HTML' | 'Markdown';
 }
 
+// Función para escapar caracteres HTML especiales
+function escapeHtml(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Función para formatear duración en formato legible
 export function formatDuration(startDate: string, endDate: string): string {
   const start = new Date(startDate);
@@ -98,11 +109,11 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
     });
 
     // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
-    if (!timeInfo.assignedAt && !timeInfo.completedAt) {
+    if (!timeInfo.assignedAt || !timeInfo.completedAt) {
       try {
         const { data: workData, error: workError } = await supabase
           .from('task_work_assignments')
-          .select('date, created_at, end_time, status')
+          .select('date, created_at, end_time, status, updated_at')
           .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
           .eq('task_type', isSubtask ? 'subtask' : 'task')
           .single();
@@ -111,17 +122,27 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
           // Usar la fecha de creación como fecha de asignación si no la tenemos
           if (!timeInfo.assignedAt && workData.created_at) {
             timeInfo.assignedAt = workData.created_at;
+            console.log(`[TIME INFO] Usando created_at de work_assignment como assignedAt: ${workData.created_at}`);
           }
           
           // Usar end_time si existe y el estado es completado
-          if (!timeInfo.completedAt && workData.end_time && workData.status === 'completed') {
+          if (!timeInfo.completedAt && workData.end_time) {
             timeInfo.completedAt = workData.end_time;
+            console.log(`[TIME INFO] Usando end_time de work_assignment como completedAt: ${workData.end_time}`);
+          }
+          
+          // Como última opción, usar updated_at si el estado es completado y no tenemos end_time
+          if (!timeInfo.completedAt && workData.status === 'completed' && workData.updated_at) {
+            timeInfo.completedAt = workData.updated_at;
+            console.log(`[TIME INFO] Usando updated_at de work_assignment como completedAt: ${workData.updated_at}`);
           }
         }
       } catch (workError) {
         console.warn('No se pudo obtener información de work assignments:', workError);
       }
     }
+
+    console.log(`[TIME INFO] Información final para ${isSubtask ? 'subtask' : 'task'} ${itemId}:`, timeInfo);
 
     return timeInfo;
   } catch (error) {
@@ -143,6 +164,8 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
   };
 
   try {
+    console.log(`[TELEGRAM] Enviando mensaje a ${chatId}, longitud: ${message.length} caracteres`);
+    
     const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {
@@ -153,15 +176,16 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
 
     if (!response.ok) {
       const error = await response.json();
-      console.error('Error en la API de Telegram:', error);
+      console.error('❌ [TELEGRAM] Error en la API de Telegram:', error);
+      console.error('❌ [TELEGRAM] Mensaje que causó el error:', message.substring(0, 500) + '...');
       return false;
     }
     
-    console.log(`Mensaje de Telegram enviado a ${chatId}`);
+    console.log(`✅ [TELEGRAM] Mensaje enviado exitosamente a ${chatId}`);
     return true;
 
   } catch (error) {
-    console.error('Error al enviar mensaje de Telegram:', error);
+    console.error('❌ [TELEGRAM] Error de red al enviar mensaje:', error);
     return false;
   }
 }
@@ -235,21 +259,26 @@ export function createTaskCompletedMessage(
   timeInfo?: { assignedAt?: string; completedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
-  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
   // Calcular tiempo de trabajo si tenemos la información
   let timeWorked = '';
+  console.log(`[MESSAGE] Creando mensaje para tarea completada. TimeInfo recibido:`, timeInfo);
+  
   if (timeInfo?.assignedAt && timeInfo?.completedAt) {
     const duration = formatDuration(timeInfo.assignedAt, timeInfo.completedAt);
     timeWorked = `\n⏱️ <b>Tiempo de trabajo:</b> ${duration}`;
+    console.log(`[MESSAGE] Tiempo calculado: ${duration} (de ${timeInfo.assignedAt} a ${timeInfo.completedAt})`);
+  } else {
+    console.log(`[MESSAGE] No se pudo calcular tiempo. AssignedAt: ${timeInfo?.assignedAt}, CompletedAt: ${timeInfo?.completedAt}`);
   }
   
   return `🎉 <b>TAREA COMPLETADA</b>
 
-👤 <b>Usuario:</b> ${userName}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
-🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}${timeWorked}
+👤 <b>Usuario:</b> ${escapeHtml(userName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+🏷️ <b>Área:</b> ${escapeHtml(areaName)}${timeWorked}
 
 ✅ La ${taskType} ha sido marcada como completada y está lista para revisión.`;
 }
@@ -266,7 +295,7 @@ export function createTaskBlockedMessage(
   timeInfo?: { assignedAt?: string; blockedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
-  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
   // Calcular tiempo trabajado antes del bloqueo
   let timeWorked = '';
@@ -277,12 +306,12 @@ export function createTaskBlockedMessage(
   
   return `🚫 <b>TAREA BLOQUEADA</b>
 
-👤 <b>Usuario:</b> ${userName}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
-🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}${timeWorked}
+👤 <b>Usuario:</b> ${escapeHtml(userName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+🏷️ <b>Área:</b> ${escapeHtml(areaName)}${timeWorked}
 
-⚠️ <b>Motivo del bloqueo:</b> ${blockReason}
+⚠️ <b>Motivo del bloqueo:</b> ${escapeHtml(blockReason)}
 
 🔧 Esta ${taskType} requiere atención administrativa para poder continuar.`;
 }
@@ -299,7 +328,7 @@ export function createTaskInReviewMessage(
   timeInfo?: { completedAt?: string; inReviewAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
-  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
   // Calcular tiempo desde completada hasta puesta en revisión
   let reviewTime = '';
@@ -310,13 +339,13 @@ export function createTaskInReviewMessage(
   
   return `🔍 <b>TAREA EN REVISIÓN</b>
 
-👤 <b>Usuario:</b> ${userName}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
-🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}${reviewTime}
+👤 <b>Usuario:</b> ${escapeHtml(userName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+🏷️ <b>Área:</b> ${escapeHtml(areaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${reviewTime}
 
-📋 La ${taskType} ha sido puesta en revisión por ${adminName}.`;
+📋 La ${taskType} ha sido puesta en revisión por ${escapeHtml(adminName)}.`;
 }
 
 // Función para crear mensaje de notificación de tarea aprobada
@@ -331,7 +360,7 @@ export function createTaskApprovedMessage(
   timeInfo?: { inReviewAt?: string; approvedAt?: string; assignedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
-  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
   // Calcular tiempo de revisión y tiempo total
   let timeDetails = '';
@@ -347,13 +376,13 @@ export function createTaskApprovedMessage(
   
   return `✅ <b>TAREA APROBADA</b>
 
-👤 <b>Usuario:</b> ${userName}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
-🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}${timeDetails}
+👤 <b>Usuario:</b> ${escapeHtml(userName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+🏷️ <b>Área:</b> ${escapeHtml(areaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${timeDetails}
 
-🎉 La ${taskType} ha sido aprobada por ${adminName} y está finalizada.`;
+🎉 La ${taskType} ha sido aprobada por ${escapeHtml(adminName)} y está finalizada.`;
 }
 
 // Función para crear mensaje de notificación de tarea devuelta
@@ -369,7 +398,7 @@ export function createTaskReturnedMessage(
   timeInfo?: { inReviewAt?: string; returnedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
-  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
   // Calcular tiempo de revisión antes de devolver
   let reviewTime = '';
@@ -380,15 +409,15 @@ export function createTaskReturnedMessage(
   
   return `🔄 <b>TAREA DEVUELTA</b>
 
-👤 <b>Usuario:</b> ${userName}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
-🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}${reviewTime}
+👤 <b>Usuario:</b> ${escapeHtml(userName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+🏷️ <b>Área:</b> ${escapeHtml(areaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${reviewTime}
 
-📝 <b>Feedback:</b> ${returnFeedback}
+📝 <b>Feedback:</b> ${escapeHtml(returnFeedback)}
 
-🔧 La ${taskType} ha sido devuelta por ${adminName} al usuario para correcciones.`;
+🔧 La ${taskType} ha sido devuelta por ${escapeHtml(adminName)} al usuario para correcciones.`;
 }
 
 export async function handleTestNotification(req: any, res: any) {
