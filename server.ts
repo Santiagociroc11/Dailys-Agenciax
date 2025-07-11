@@ -1,7 +1,15 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { handleTestNotification, sendAdminNotification, createTaskCompletedMessage, createTaskBlockedMessage } from './api/telegram.js';
+import { 
+  handleTestNotification, 
+  sendAdminNotification, 
+  createTaskCompletedMessage, 
+  createTaskBlockedMessage,
+  createTaskInReviewMessage,
+  createTaskApprovedMessage,
+  createTaskReturnedMessage
+} from './api/telegram.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -19,9 +27,9 @@ app.post('/api/telegram/test', handleTestNotification);
 // Endpoint para probar notificaciones de administrador
 app.post('/api/telegram/test-admin', async (req, res) => {
   try {
-    const message = createTaskCompletedMessage(
-      "Tarea de prueba",
-      "Usuario de prueba", 
+    const message = createTaskApprovedMessage(
+      "Tarea de prueba - Sistema de login",
+      "Juan Pérez", 
       "Proyecto de prueba",
       false
     );
@@ -57,6 +65,7 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       projectName, 
       status, 
       blockReason, 
+      returnFeedback,
       isSubtask = false, 
       parentTaskTitle 
     } = req.body;
@@ -70,14 +79,14 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
     }
 
     // Validar que el status sea válido
-    if (!['completed', 'blocked'].includes(status)) {
+    if (!['completed', 'blocked', 'in_review', 'approved', 'returned'].includes(status)) {
       return res.status(400).json({ 
         success: false, 
-        error: 'El status debe ser "completed" o "blocked"' 
+        error: 'El status debe ser "completed", "blocked", "in_review", "approved" o "returned"' 
       });
     }
 
-    // Si es bloqueada, validar que haya razón del bloqueo
+    // Validaciones específicas por estado
     if (status === 'blocked' && !blockReason) {
       return res.status(400).json({ 
         success: false, 
@@ -85,12 +94,36 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       });
     }
 
+    if (status === 'returned' && !returnFeedback) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'El parámetro returnFeedback es requerido cuando status es "returned"' 
+      });
+    }
+
     // Crear el mensaje apropiado según el estado
     let message;
-    if (status === 'completed') {
-      message = createTaskCompletedMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
-    } else {
-      message = createTaskBlockedMessage(taskTitle, userName, projectName, blockReason, isSubtask, parentTaskTitle);
+    switch (status) {
+      case 'completed':
+        message = createTaskCompletedMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        break;
+      case 'blocked':
+        message = createTaskBlockedMessage(taskTitle, userName, projectName, blockReason, isSubtask, parentTaskTitle);
+        break;
+      case 'in_review':
+        message = createTaskInReviewMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        break;
+      case 'approved':
+        message = createTaskApprovedMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        break;
+      case 'returned':
+        message = createTaskReturnedMessage(taskTitle, userName, projectName, returnFeedback, isSubtask, parentTaskTitle);
+        break;
+      default:
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Status no reconocido' 
+        });
     }
 
     // Enviar la notificación

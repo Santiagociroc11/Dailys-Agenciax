@@ -607,8 +607,8 @@ function Management() {
         }
       }
 
-      // 🔔 Enviar notificación a administradores si la tarea fue completada o bloqueada por un usuario
-      if (['completed', 'blocked'].includes(newStatus) && data) {
+            // 🔔 Enviar notificación a administradores para acciones administrativas
+      if (['in_review', 'approved', 'returned'].includes(newStatus) && data) {
         try {
           // Obtener información del item actualizado
           const itemData = data as any;
@@ -619,30 +619,30 @@ function Management() {
           let projectName = "Proyecto sin nombre";
           let assignedUserName = "Usuario desconocido";
           
-                     if (isSubtask) {
-             // Obtener información de la tarea padre
-             const { data: parentTask } = await supabase
-               .from('tasks')
-               .select('title, project_id')
-               .eq('id', itemData.task_id)
-               .single();
-               
-             if (parentTask) {
-               parentTaskTitle = parentTask.title;
-               
-               // Obtener información del proyecto por separado
-               if (parentTask.project_id) {
-                 const { data: projectData } = await supabase
-                   .from('projects')
-                   .select('name')
-                   .eq('id', parentTask.project_id)
-                   .single();
-                   
-                 if (projectData) {
-                   projectName = projectData.name;
-                 }
-               }
-             }
+          if (isSubtask) {
+            // Obtener información de la tarea padre
+            const { data: parentTask } = await supabase
+              .from('tasks')
+              .select('title, project_id')
+              .eq('id', itemData.task_id)
+              .single();
+              
+            if (parentTask) {
+              parentTaskTitle = parentTask.title;
+              
+              // Obtener información del proyecto por separado
+              if (parentTask.project_id) {
+                const { data: projectData } = await supabase
+                  .from('projects')
+                  .select('name')
+                  .eq('id', parentTask.project_id)
+                  .single();
+                  
+                if (projectData) {
+                  projectName = projectData.name;
+                }
+              }
+            }
             
             // Obtener información del usuario asignado a la subtarea
             if (itemData.assigned_to) {
@@ -684,38 +684,35 @@ function Management() {
             }
           }
 
-          // Preparar datos para la notificación solo si un usuario completó/bloqueó la tarea
-          // (no enviar notificaciones por acciones administrativas como aprobar/devolver)
-          if (['completed', 'blocked'].includes(newStatus)) {
-            const notificationData = {
-              taskTitle: taskTitle,
-              userName: assignedUserName,
-              projectName: projectName,
-              status: newStatus,
-              isSubtask: isSubtask,
-              parentTaskTitle: parentTaskTitle,
-              ...(newStatus === 'blocked' && feedbackData?.feedback ? { blockReason: feedbackData.feedback } : {})
-            };
+          // Preparar datos para la notificación de acciones administrativas
+          const notificationData = {
+            taskTitle: taskTitle,
+            userName: assignedUserName,
+            projectName: projectName,
+            status: newStatus,
+            isSubtask: isSubtask,
+            parentTaskTitle: parentTaskTitle,
+            ...(newStatus === 'returned' && feedbackData?.feedback ? { returnFeedback: feedbackData.feedback } : {})
+          };
 
-            // Enviar notificación asíncrona (no bloquear el flujo del usuario)
-            fetch('/api/telegram/admin-notification', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(notificationData)
-            }).then(response => {
-              if (response.ok) {
-                console.log(`✅ [NOTIFICATION] Notificación de admin enviada desde Management para tarea ${newStatus}`);
-              } else {
-                console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de admin desde Management: ${response.status}`);
-              }
-            }).catch(error => {
-              console.error('🚨 [NOTIFICATION] Error al enviar notificación de admin desde Management:', error);
-            });
-          }
+          // Enviar notificación asíncrona (no bloquear el flujo del usuario)
+          fetch('/api/telegram/admin-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(notificationData)
+          }).then(response => {
+            if (response.ok) {
+              console.log(`✅ [NOTIFICATION] Notificación administrativa enviada para tarea ${newStatus}`);
+            } else {
+              console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación administrativa: ${response.status}`);
+            }
+          }).catch(error => {
+            console.error('🚨 [NOTIFICATION] Error al enviar notificación administrativa:', error);
+          });
 
         } catch (notificationError) {
           // No bloquear el flujo por errores de notificación
-          console.error('🚨 [NOTIFICATION] Error preparando notificación de admin desde Management:', notificationError);
+          console.error('🚨 [NOTIFICATION] Error preparando notificación administrativa:', notificationError);
         }
       }
 

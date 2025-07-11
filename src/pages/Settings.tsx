@@ -85,7 +85,7 @@ const Settings = () => {
         });
         const result = await response.json();
         if (result.success) {
-            toast.success('¡Notificación automática de prueba enviada! Verifica que llegue el mensaje sobre una tarea completada.');
+            toast.success('¡Notificación administrativa de prueba enviada! Verifica que llegue el mensaje sobre una tarea aprobada.');
         } else {
             toast.error(`Error al enviar la prueba: ${result.error}`);
         }
@@ -191,10 +191,19 @@ const Settings = () => {
       {telegramId && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <h3 className="font-medium text-blue-800 mb-3">🤖 Notificaciones Automáticas Activas</h3>
-          <div className="space-y-2 text-sm text-blue-700">
-            <p>✅ <strong>Tareas completadas:</strong> Recibirás una notificación cada vez que un usuario marque una tarea como completada.</p>
-            <p>🚫 <strong>Tareas bloqueadas:</strong> Recibirás una notificación cuando un usuario bloquee una tarea con el motivo del bloqueo.</p>
-            <p>📊 <strong>Información incluida:</strong> Nombre del usuario, título de la tarea, proyecto, y detalles relevantes.</p>
+          <div className="space-y-3 text-sm text-blue-700">
+            <div>
+              <p className="font-semibold mb-1">📋 Acciones de Usuarios:</p>
+              <p>• ✅ <strong>Tareas completadas:</strong> Cuando un usuario marca una tarea como completada</p>
+              <p>• 🚫 <strong>Tareas bloqueadas:</strong> Cuando un usuario bloquea una tarea (incluye motivo)</p>
+            </div>
+            <div>
+              <p className="font-semibold mb-1">👩‍💼 Acciones Administrativas:</p>
+              <p>• 🔍 <strong>En revisión:</strong> Cuando pones una tarea en revisión</p>
+              <p>• ✅ <strong>Aprobadas:</strong> Cuando apruebas una tarea completada</p>
+              <p>• 🔄 <strong>Devueltas:</strong> Cuando devuelves una tarea con feedback</p>
+            </div>
+            <p className="text-xs text-blue-600 mt-2">💡 <strong>Info incluida:</strong> Usuario asignado, título de tarea, proyecto, feedback (cuando aplique)</p>
           </div>
         </div>
       )}
@@ -255,7 +264,7 @@ const Settings = () => {
               disabled={!telegramId || isLoading}
               className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
             >
-              {telegramId ? '🎯 Probar Notificación de Tarea' : 'Probar Notificación Automática'}
+              {telegramId ? '🎯 Probar Notificación Admin' : 'Probar Notificación Administrativa'}
             </button>
         </div>
       </div>

@@ -143,6 +143,69 @@ ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.
 🔧 Esta ${taskType} requiere atención administrativa para poder continuar.`;
 }
 
+// Función para crear mensaje de notificación de tarea en revisión
+export function createTaskInReviewMessage(
+  taskTitle: string, 
+  userName: string, 
+  projectName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  return `🔍 <b>TAREA EN REVISIÓN</b>
+
+👤 <b>Usuario:</b> ${userName}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
+🏢 <b>Proyecto:</b> ${projectName}
+
+📋 La ${taskType} ha sido puesta en revisión por un administrador.`;
+}
+
+// Función para crear mensaje de notificación de tarea aprobada
+export function createTaskApprovedMessage(
+  taskTitle: string, 
+  userName: string, 
+  projectName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  return `✅ <b>TAREA APROBADA</b>
+
+👤 <b>Usuario:</b> ${userName}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
+🏢 <b>Proyecto:</b> ${projectName}
+
+🎉 La ${taskType} ha sido aprobada por un administrador y está finalizada.`;
+}
+
+// Función para crear mensaje de notificación de tarea devuelta
+export function createTaskReturnedMessage(
+  taskTitle: string, 
+  userName: string, 
+  projectName: string,
+  returnFeedback: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  return `🔄 <b>TAREA DEVUELTA</b>
+
+👤 <b>Usuario:</b> ${userName}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
+🏢 <b>Proyecto:</b> ${projectName}
+
+📝 <b>Feedback:</b> ${returnFeedback}
+
+🔧 La ${taskType} ha sido devuelta al usuario para correcciones.`;
+}
+
 export async function handleTestNotification(req: any, res: any) {
     const { chatId, message } = req.body;
   
