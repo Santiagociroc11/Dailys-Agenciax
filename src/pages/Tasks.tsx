@@ -8,9 +8,7 @@ import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import RichTextSummary from '../components/RichTextSummary';
 import QuillEditor from '../components/QuillEditor';
-import { 
-  notifyTaskCompleted 
-} from '../../api/telegram';
+// Notificaciones de Telegram a través de endpoints API
 
 
 interface Task {
@@ -432,7 +430,14 @@ function Tasks() {
             .single();
           
           if (subtaskData) {
-            await notifyTaskCompleted(subtaskData.task_id, subtaskId);
+            fetch('/api/telegram/notify-completed', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                taskId: subtaskData.task_id,
+                subtaskId: subtaskId
+              })
+            }).catch(error => console.error('Error enviando notificación de completación:', error));
           }
         } catch (notifyError) {
           console.error('Error enviando notificación de Telegram:', notifyError);

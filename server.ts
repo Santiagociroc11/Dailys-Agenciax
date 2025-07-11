@@ -57,6 +57,55 @@ app.post('/api/telegram/test-status', async (req, res) => {
   }
 });
 
+// Endpoints para notificaciones reales desde el frontend
+app.post('/api/telegram/notify-completed', async (req, res) => {
+  const { taskId, subtaskId } = req.body;
+  
+  try {
+    const success = await notifyTaskCompleted(taskId, subtaskId);
+    res.json({ success });
+  } catch (error) {
+    console.error('Error notifying task completed:', error);
+    res.json({ success: false });
+  }
+});
+
+app.post('/api/telegram/notify-approved', async (req, res) => {
+  const { taskId, subtaskId, approvedBy } = req.body;
+  
+  try {
+    const success = await notifyTaskApproved(taskId, subtaskId, approvedBy);
+    res.json({ success });
+  } catch (error) {
+    console.error('Error notifying task approved:', error);
+    res.json({ success: false });
+  }
+});
+
+app.post('/api/telegram/notify-returned', async (req, res) => {
+  const { taskId, subtaskId, returnedBy, reason } = req.body;
+  
+  try {
+    const success = await notifyTaskReturned(taskId, subtaskId, returnedBy, reason);
+    res.json({ success });
+  } catch (error) {
+    console.error('Error notifying task returned:', error);
+    res.json({ success: false });
+  }
+});
+
+app.post('/api/telegram/notify-blocked', async (req, res) => {
+  const { taskId, subtaskId, blockedBy, reason } = req.body;
+  
+  try {
+    const success = await notifyTaskBlocked(taskId, subtaskId, blockedBy, reason);
+    res.json({ success });
+  } catch (error) {
+    console.error('Error notifying task blocked:', error);
+    res.json({ success: false });
+  }
+});
+
 // Servir la aplicación de React
 const clientBuildPath = path.join(__dirname, '..');
 app.use(express.static(clientBuildPath));
