@@ -721,6 +721,7 @@ function Management() {
             adminName: user?.name || user?.email || 'Administrador',
             isSubtask: isSubtask,
             parentTaskTitle: parentTaskTitle,
+            taskId: itemId, // Agregar el ID del item para obtener información de tiempo
             ...(newStatus === 'returned' && feedbackData?.feedback ? { returnFeedback: feedbackData.feedback } : {})
           };
 

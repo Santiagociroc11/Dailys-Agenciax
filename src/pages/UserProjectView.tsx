@@ -806,7 +806,7 @@ export default function UserProjectView() {
 
             if (currentSubtask && currentSubtask.task_id) {
                // Get all subtasks for this parent task
-               const { data: relatedSubtasks, error: relatedError } = await supabase.from("subtasks").select("id, title, sequence_order, status, assigned_to").eq("task_id", currentSubtask.task_id).order("sequence_order", { ascending: true });
+               const { data: relatedSubtasks, error: relatedError } = await supabase.from("subtasks").select("id, title, description, estimated_duration, sequence_order, status, assigned_to").eq("task_id", currentSubtask.task_id).order("sequence_order", { ascending: true });
 
                if (relatedError) {
                   console.error("Error fetching related subtasks:", relatedError);
@@ -819,12 +819,30 @@ export default function UserProjectView() {
 
                   if (currentIndex > 0) {
                      // There is a previous subtask
-                     setPreviousSubtask(relatedSubtasks[currentIndex - 1]);
+                     const prev = relatedSubtasks[currentIndex - 1];
+                     setPreviousSubtask({
+                        ...prev,
+                        description: prev.description || null,
+                        estimated_duration: prev.estimated_duration || 0,
+                        task_id: currentSubtask.task_id,
+                        subtask_id: prev.id,
+                        start_date: null,
+                        deadline: null
+                     });
                   }
 
                   if (currentIndex < relatedSubtasks.length - 1) {
                      // There is a next subtask
-                     setNextSubtask(relatedSubtasks[currentIndex + 1]);
+                     const next = relatedSubtasks[currentIndex + 1];
+                     setNextSubtask({
+                        ...next,
+                        description: next.description || null,
+                        estimated_duration: next.estimated_duration || 0,
+                        task_id: currentSubtask.task_id,
+                        subtask_id: next.id,
+                        start_date: null,
+                        deadline: null
+                     });
                   }
 
                   // Get user info for all related subtasks
@@ -1680,6 +1698,7 @@ export default function UserProjectView() {
                   status: selectedStatus,
                   isSubtask: isSubtask,
                   parentTaskTitle: parentTaskTitle,
+                  taskId: originalId, // Agregar el ID de la tarea para obtener información de tiempo
                   ...(selectedStatus === "blocked" ? { blockReason: statusDetails } : {})
                };
 
@@ -1706,8 +1725,8 @@ export default function UserProjectView() {
 
          // 6️⃣ Si era subtarea completada, actualiza la tarea padre
          if (isSubtask && selectedStatus === "completed") {
-            const { data: { task_id: parentId } = {} } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
-            if (parentId) await updateParentTaskStatus(parentId);
+            const { data: subtaskData } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
+            if (subtaskData?.task_id) await updateParentTaskStatus(subtaskData.task_id);
          }
 
          // 7️⃣ Refrescar estado local

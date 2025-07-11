@@ -18,7 +18,7 @@ export function formatDuration(startDate: string, endDate: string): string {
   const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
   const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
   
-  const parts = [];
+  const parts: string[] = [];
   
   if (days > 0) {
     parts.push(`${days}d`);
@@ -71,7 +71,14 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       return {};
     }
 
-    const timeInfo: any = {};
+    const timeInfo: {
+      assignedAt?: string;
+      completedAt?: string;
+      inReviewAt?: string;
+      approvedAt?: string;
+      returnedAt?: string;
+      blockedAt?: string;
+    } = {};
 
     // Buscar fechas específicas en el historial
     history?.forEach((record: any) => {
@@ -89,6 +96,32 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
         timeInfo.blockedAt = record.changed_at;
       }
     });
+
+    // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
+    if (!timeInfo.assignedAt && !timeInfo.completedAt) {
+      try {
+        const { data: workData, error: workError } = await supabase
+          .from('task_work_assignments')
+          .select('date, created_at, end_time, status')
+          .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
+          .eq('task_type', isSubtask ? 'subtask' : 'task')
+          .single();
+
+        if (!workError && workData) {
+          // Usar la fecha de creación como fecha de asignación si no la tenemos
+          if (!timeInfo.assignedAt && workData.created_at) {
+            timeInfo.assignedAt = workData.created_at;
+          }
+          
+          // Usar end_time si existe y el estado es completado
+          if (!timeInfo.completedAt && workData.end_time && workData.status === 'completed') {
+            timeInfo.completedAt = workData.end_time;
+          }
+        }
+      } catch (workError) {
+        console.warn('No se pudo obtener información de work assignments:', workError);
+      }
+    }
 
     return timeInfo;
   } catch (error) {
@@ -198,17 +231,25 @@ export function createTaskCompletedMessage(
   projectName: string,
   areaName: string,
   isSubtask: boolean = false,
-  parentTaskTitle?: string
+  parentTaskTitle?: string,
+  timeInfo?: { assignedAt?: string; completedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  // Calcular tiempo de trabajo si tenemos la información
+  let timeWorked = '';
+  if (timeInfo?.assignedAt && timeInfo?.completedAt) {
+    const duration = formatDuration(timeInfo.assignedAt, timeInfo.completedAt);
+    timeWorked = `\n⏱️ <b>Tiempo de trabajo:</b> ${duration}`;
+  }
   
   return `🎉 <b>TAREA COMPLETADA</b>
 
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}
+🏷️ <b>Área:</b> ${areaName}${timeWorked}
 
 ✅ La ${taskType} ha sido marcada como completada y está lista para revisión.`;
 }
@@ -221,17 +262,25 @@ export function createTaskBlockedMessage(
   areaName: string,
   blockReason: string,
   isSubtask: boolean = false,
-  parentTaskTitle?: string
+  parentTaskTitle?: string,
+  timeInfo?: { assignedAt?: string; blockedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  // Calcular tiempo trabajado antes del bloqueo
+  let timeWorked = '';
+  if (timeInfo?.assignedAt && timeInfo?.blockedAt) {
+    const duration = formatDuration(timeInfo.assignedAt, timeInfo.blockedAt);
+    timeWorked = `\n⏱️ <b>Tiempo trabajado antes del bloqueo:</b> ${duration}`;
+  }
   
   return `🚫 <b>TAREA BLOQUEADA</b>
 
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
-🏷️ <b>Área:</b> ${areaName}
+🏷️ <b>Área:</b> ${areaName}${timeWorked}
 
 ⚠️ <b>Motivo del bloqueo:</b> ${blockReason}
 
@@ -246,10 +295,18 @@ export function createTaskInReviewMessage(
   areaName: string,
   adminName: string,
   isSubtask: boolean = false,
-  parentTaskTitle?: string
+  parentTaskTitle?: string,
+  timeInfo?: { completedAt?: string; inReviewAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  // Calcular tiempo desde completada hasta puesta en revisión
+  let reviewTime = '';
+  if (timeInfo?.completedAt && timeInfo?.inReviewAt) {
+    const duration = formatDuration(timeInfo.completedAt, timeInfo.inReviewAt);
+    reviewTime = `\n⏱️ <b>Tiempo hasta revisión:</b> ${duration}`;
+  }
   
   return `🔍 <b>TAREA EN REVISIÓN</b>
 
@@ -257,7 +314,7 @@ export function createTaskInReviewMessage(
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
 🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}
+👩‍💼 <b>Admin:</b> ${adminName}${reviewTime}
 
 📋 La ${taskType} ha sido puesta en revisión por ${adminName}.`;
 }
@@ -270,10 +327,23 @@ export function createTaskApprovedMessage(
   areaName: string,
   adminName: string,
   isSubtask: boolean = false,
-  parentTaskTitle?: string
+  parentTaskTitle?: string,
+  timeInfo?: { inReviewAt?: string; approvedAt?: string; assignedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  // Calcular tiempo de revisión y tiempo total
+  let timeDetails = '';
+  if (timeInfo?.inReviewAt && timeInfo?.approvedAt) {
+    const reviewDuration = formatDuration(timeInfo.inReviewAt, timeInfo.approvedAt);
+    timeDetails += `\n⏱️ <b>Tiempo de revisión:</b> ${reviewDuration}`;
+  }
+  
+  if (timeInfo?.assignedAt && timeInfo?.approvedAt) {
+    const totalDuration = formatDuration(timeInfo.assignedAt, timeInfo.approvedAt);
+    timeDetails += `\n🏁 <b>Tiempo total del ciclo:</b> ${totalDuration}`;
+  }
   
   return `✅ <b>TAREA APROBADA</b>
 
@@ -281,7 +351,7 @@ export function createTaskApprovedMessage(
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
 🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}
+👩‍💼 <b>Admin:</b> ${adminName}${timeDetails}
 
 🎉 La ${taskType} ha sido aprobada por ${adminName} y está finalizada.`;
 }
@@ -295,10 +365,18 @@ export function createTaskReturnedMessage(
   returnFeedback: string,
   adminName: string,
   isSubtask: boolean = false,
-  parentTaskTitle?: string
+  parentTaskTitle?: string,
+  timeInfo?: { inReviewAt?: string; returnedAt?: string }
 ): string {
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  // Calcular tiempo de revisión antes de devolver
+  let reviewTime = '';
+  if (timeInfo?.inReviewAt && timeInfo?.returnedAt) {
+    const duration = formatDuration(timeInfo.inReviewAt, timeInfo.returnedAt);
+    reviewTime = `\n⏱️ <b>Tiempo en revisión:</b> ${duration}`;
+  }
   
   return `🔄 <b>TAREA DEVUELTA</b>
 
@@ -306,7 +384,7 @@ export function createTaskReturnedMessage(
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
 🏷️ <b>Área:</b> ${areaName}
-👩‍💼 <b>Admin:</b> ${adminName}
+👩‍💼 <b>Admin:</b> ${adminName}${reviewTime}
 
 📝 <b>Feedback:</b> ${returnFeedback}
 

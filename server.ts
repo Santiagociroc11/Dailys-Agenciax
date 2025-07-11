@@ -8,7 +8,8 @@ import {
   createTaskBlockedMessage,
   createTaskInReviewMessage,
   createTaskApprovedMessage,
-  createTaskReturnedMessage
+  createTaskReturnedMessage,
+  getTimeInfo
 } from './api/telegram.js';
 
 const app = express();
@@ -27,13 +28,23 @@ app.post('/api/telegram/test', handleTestNotification);
 // Endpoint para probar notificaciones de administrador
 app.post('/api/telegram/test-admin', async (req, res) => {
   try {
+    // Simular información de tiempo para la prueba
+    const timeInfo = {
+      assignedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), // 4 horas atrás
+      completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 horas atrás
+      inReviewAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 minutos atrás
+      approvedAt: new Date().toISOString() // Ahora
+    };
+
     const message = createTaskApprovedMessage(
       "Tarea de prueba - Sistema de login",
       "Juan Pérez", 
       "Proyecto de prueba",
       "Área de Desarrollo",
       "Admin de Prueba",
-      false
+      false,
+      undefined,
+      timeInfo
     );
     
     const success = await sendAdminNotification(message);
@@ -41,7 +52,7 @@ app.post('/api/telegram/test-admin', async (req, res) => {
     if (success) {
       return res.status(200).json({ 
         success: true, 
-        message: 'Notificación de prueba enviada a administradores.' 
+        message: 'Notificación de prueba enviada a administradores con información de tiempo.' 
       });
     } else {
       return res.status(500).json({ 
@@ -71,7 +82,8 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       returnFeedback,
       adminName,
       isSubtask = false, 
-      parentTaskTitle 
+      parentTaskTitle,
+      taskId // Nuevo parámetro para obtener información de tiempo
     } = req.body;
 
     // Validar parámetros requeridos
@@ -105,23 +117,34 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       });
     }
 
+    // Obtener información de tiempo si tenemos el ID de la tarea
+    let timeInfo = {};
+    if (taskId) {
+      try {
+        timeInfo = await getTimeInfo(taskId, isSubtask, status);
+      } catch (error) {
+        console.warn('No se pudo obtener información de tiempo:', error);
+        // Continuar sin información de tiempo si hay error
+      }
+    }
+
     // Crear el mensaje apropiado según el estado
     let message;
     switch (status) {
       case 'completed':
-        message = createTaskCompletedMessage(taskTitle, userName, projectName, areaName || 'Sin área', isSubtask, parentTaskTitle);
+        message = createTaskCompletedMessage(taskTitle, userName, projectName, areaName || 'Sin área', isSubtask, parentTaskTitle, timeInfo);
         break;
       case 'blocked':
-        message = createTaskBlockedMessage(taskTitle, userName, projectName, areaName || 'Sin área', blockReason, isSubtask, parentTaskTitle);
+        message = createTaskBlockedMessage(taskTitle, userName, projectName, areaName || 'Sin área', blockReason, isSubtask, parentTaskTitle, timeInfo);
         break;
       case 'in_review':
-        message = createTaskInReviewMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskInReviewMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle, timeInfo);
         break;
       case 'approved':
-        message = createTaskApprovedMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskApprovedMessage(taskTitle, userName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle, timeInfo);
         break;
       case 'returned':
-        message = createTaskReturnedMessage(taskTitle, userName, projectName, areaName || 'Sin área', returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle);
+        message = createTaskReturnedMessage(taskTitle, userName, projectName, areaName || 'Sin área', returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle, timeInfo);
         break;
       default:
         return res.status(400).json({ 

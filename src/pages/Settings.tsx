@@ -194,16 +194,17 @@ const Settings = () => {
           <div className="space-y-3 text-sm text-blue-700">
             <div>
               <p className="font-semibold mb-1">📋 Acciones de Usuarios:</p>
-              <p>• ✅ <strong>Tareas completadas:</strong> Cuando un usuario marca una tarea como completada</p>
-              <p>• 🚫 <strong>Tareas bloqueadas:</strong> Cuando un usuario bloquea una tarea (incluye motivo)</p>
+              <p>• ✅ <strong>Tareas completadas:</strong> Cuando un usuario marca una tarea como completada <span className="text-xs">(+ tiempo de trabajo)</span></p>
+              <p>• 🚫 <strong>Tareas bloqueadas:</strong> Cuando un usuario bloquea una tarea con motivo <span className="text-xs">(+ tiempo antes del bloqueo)</span></p>
             </div>
             <div>
               <p className="font-semibold mb-1">👩‍💼 Acciones Administrativas:</p>
-              <p>• 🔍 <strong>En revisión:</strong> Cuando pones una tarea en revisión</p>
-              <p>• ✅ <strong>Aprobadas:</strong> Cuando apruebas una tarea completada</p>
-              <p>• 🔄 <strong>Devueltas:</strong> Cuando devuelves una tarea con feedback</p>
+              <p>• 🔍 <strong>En revisión:</strong> Cuando pones una tarea en revisión <span className="text-xs">(+ tiempo hasta revisión)</span></p>
+              <p>• ✅ <strong>Aprobadas:</strong> Cuando apruebas una tarea completada <span className="text-xs">(+ tiempo de revisión + tiempo total del ciclo)</span></p>
+              <p>• 🔄 <strong>Devueltas:</strong> Cuando devuelves una tarea con feedback <span className="text-xs">(+ tiempo en revisión)</span></p>
             </div>
             <p className="text-xs text-blue-600 mt-2">💡 <strong>Info incluida:</strong> Usuario asignado, área de trabajo, admin que hizo la acción, título de tarea, proyecto, feedback (cuando aplique)</p>
+            <p className="text-xs text-blue-600 mt-1">⏱️ <strong>Tiempos incluidos:</strong> Cada notificación muestra los tiempos relevantes (trabajo, revisión, ciclo total) para análisis de rendimiento</p>
           </div>
         </div>
       )}
