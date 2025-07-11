@@ -31,6 +31,7 @@ app.post('/api/telegram/test-admin', async (req, res) => {
       "Tarea de prueba - Sistema de login",
       "Juan Pérez", 
       "Proyecto de prueba",
+      "Admin de Prueba",
       false
     );
     
@@ -66,6 +67,7 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
       status, 
       blockReason, 
       returnFeedback,
+      adminName,
       isSubtask = false, 
       parentTaskTitle 
     } = req.body;
@@ -111,13 +113,13 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
         message = createTaskBlockedMessage(taskTitle, userName, projectName, blockReason, isSubtask, parentTaskTitle);
         break;
       case 'in_review':
-        message = createTaskInReviewMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        message = createTaskInReviewMessage(taskTitle, userName, projectName, adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       case 'approved':
-        message = createTaskApprovedMessage(taskTitle, userName, projectName, isSubtask, parentTaskTitle);
+        message = createTaskApprovedMessage(taskTitle, userName, projectName, adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       case 'returned':
-        message = createTaskReturnedMessage(taskTitle, userName, projectName, returnFeedback, isSubtask, parentTaskTitle);
+        message = createTaskReturnedMessage(taskTitle, userName, projectName, returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       default:
         return res.status(400).json({ 

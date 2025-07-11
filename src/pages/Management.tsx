@@ -690,6 +690,7 @@ function Management() {
             userName: assignedUserName,
             projectName: projectName,
             status: newStatus,
+            adminName: user?.name || user?.email || 'Administrador',
             isSubtask: isSubtask,
             parentTaskTitle: parentTaskTitle,
             ...(newStatus === 'returned' && feedbackData?.feedback ? { returnFeedback: feedbackData.feedback } : {})

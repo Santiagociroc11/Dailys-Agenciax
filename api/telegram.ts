@@ -148,6 +148,7 @@ export function createTaskInReviewMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  adminName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
@@ -159,8 +160,9 @@ export function createTaskInReviewMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+👩‍💼 <b>Admin:</b> ${adminName}
 
-📋 La ${taskType} ha sido puesta en revisión por un administrador.`;
+📋 La ${taskType} ha sido puesta en revisión por ${adminName}.`;
 }
 
 // Función para crear mensaje de notificación de tarea aprobada
@@ -168,6 +170,7 @@ export function createTaskApprovedMessage(
   taskTitle: string, 
   userName: string, 
   projectName: string,
+  adminName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
@@ -179,8 +182,9 @@ export function createTaskApprovedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+👩‍💼 <b>Admin:</b> ${adminName}
 
-🎉 La ${taskType} ha sido aprobada por un administrador y está finalizada.`;
+🎉 La ${taskType} ha sido aprobada por ${adminName} y está finalizada.`;
 }
 
 // Función para crear mensaje de notificación de tarea devuelta
@@ -189,6 +193,7 @@ export function createTaskReturnedMessage(
   userName: string, 
   projectName: string,
   returnFeedback: string,
+  adminName: string,
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
@@ -200,10 +205,11 @@ export function createTaskReturnedMessage(
 👤 <b>Usuario:</b> ${userName}
 ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
 🏢 <b>Proyecto:</b> ${projectName}
+👩‍💼 <b>Admin:</b> ${adminName}
 
 📝 <b>Feedback:</b> ${returnFeedback}
 
-🔧 La ${taskType} ha sido devuelta al usuario para correcciones.`;
+🔧 La ${taskType} ha sido devuelta por ${adminName} al usuario para correcciones.`;
 }
 
 export async function handleTestNotification(req: any, res: any) {
