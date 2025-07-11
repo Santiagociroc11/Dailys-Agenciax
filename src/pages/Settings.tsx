@@ -72,6 +72,29 @@ const Settings = () => {
     }
   };
 
+  const sendTestAdminNotification = async () => {
+    if (!telegramId) {
+        toast.error('Por favor, guarda un ID de chat antes de enviar una prueba.');
+        return;
+    }
+    try {
+        const response = await fetch('/api/telegram/test-admin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const result = await response.json();
+        if (result.success) {
+            toast.success('¡Notificación automática de prueba enviada! Verifica que llegue el mensaje sobre una tarea completada.');
+        } else {
+            toast.error(`Error al enviar la prueba: ${result.error}`);
+        }
+    } catch (error) {
+        toast.error('Error de red al enviar la notificación de prueba.');
+        console.error(error);
+    }
+  };
+
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -164,6 +187,18 @@ const Settings = () => {
       </div>
       )}
 
+      {/* Información sobre notificaciones automáticas */}
+      {telegramId && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <h3 className="font-medium text-blue-800 mb-3">🤖 Notificaciones Automáticas Activas</h3>
+          <div className="space-y-2 text-sm text-blue-700">
+            <p>✅ <strong>Tareas completadas:</strong> Recibirás una notificación cada vez que un usuario marque una tarea como completada.</p>
+            <p>🚫 <strong>Tareas bloqueadas:</strong> Recibirás una notificación cuando un usuario bloquee una tarea con el motivo del bloqueo.</p>
+            <p>📊 <strong>Información incluida:</strong> Nombre del usuario, título de la tarea, proyecto, y detalles relevantes.</p>
+          </div>
+        </div>
+      )}
+
       {/* Aviso importante para el administrador */}
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
         <h3 className="font-medium text-amber-800 mb-2">💡 Información del bot:</h3>
@@ -214,6 +249,13 @@ const Settings = () => {
               className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
             >
               {telegramId ? '🧪 Probar Notificación' : 'Enviar Notificación de Prueba'}
+            </button>
+            <button 
+              onClick={sendTestAdminNotification} 
+              disabled={!telegramId || isLoading}
+              className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
+            >
+              {telegramId ? '🎯 Probar Notificación de Tarea' : 'Probar Notificación Automática'}
             </button>
         </div>
       </div>

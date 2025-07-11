@@ -42,6 +42,106 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
   }
 }
 
+// Función para obtener el ID de chat de admin desde app_settings
+export async function getAdminTelegramId(): Promise<string | null> {
+  try {
+    // Usando import dinámico para evitar problemas de dependencias circulares
+    const { createClient } = await import('@supabase/supabase-js');
+    
+    // En el servidor, usar las variables sin prefijo VITE_
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Variables de entorno de Supabase no configuradas');
+      return null;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'admin_telegram_chat_id')
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') { // Ignorar "no rows found"
+        console.error('Error al obtener ID de admin de Telegram:', error);
+      }
+      return null;
+    }
+
+    if (data && data.value && typeof data.value === 'object' && data.value.id) {
+      return data.value.id;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error al conectar con la base de datos para obtener admin ID:', error);
+    return null;
+  }
+}
+
+// Función para enviar notificaciones a administradores
+export async function sendAdminNotification(message: string): Promise<boolean> {
+  try {
+    const adminChatId = await getAdminTelegramId();
+    
+    if (!adminChatId) {
+      console.warn('No hay ID de chat de admin configurado. Saltando notificación.');
+      return false;
+    }
+
+    return await sendTelegramMessage(adminChatId, message);
+  } catch (error) {
+    console.error('Error al enviar notificación a admin:', error);
+    return false;
+  }
+}
+
+// Función para crear mensaje de notificación de tarea completada
+export function createTaskCompletedMessage(
+  taskTitle: string, 
+  userName: string, 
+  projectName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  return `🎉 <b>TAREA COMPLETADA</b>
+
+👤 <b>Usuario:</b> ${userName}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
+🏢 <b>Proyecto:</b> ${projectName}
+
+✅ La ${taskType} ha sido marcada como completada y está lista para revisión.`;
+}
+
+// Función para crear mensaje de notificación de tarea bloqueada
+export function createTaskBlockedMessage(
+  taskTitle: string, 
+  userName: string, 
+  projectName: string,
+  blockReason: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${parentTaskTitle}` : '';
+  
+  return `🚫 <b>TAREA BLOQUEADA</b>
+
+👤 <b>Usuario:</b> ${userName}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${taskTitle}${parentInfo}
+🏢 <b>Proyecto:</b> ${projectName}
+
+⚠️ <b>Motivo del bloqueo:</b> ${blockReason}
+
+🔧 Esta ${taskType} requiere atención administrativa para poder continuar.`;
+}
 
 export async function handleTestNotification(req: any, res: any) {
     const { chatId, message } = req.body;

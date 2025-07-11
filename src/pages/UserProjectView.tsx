@@ -1650,6 +1650,46 @@ export default function UserProjectView() {
             }
          }
 
+         // 🔔 Enviar notificación a administradores si la tarea fue completada o bloqueada
+         if (["completed", "blocked"].includes(selectedStatus) && taskForStatusUpdate) {
+            try {
+               // Preparar datos para la notificación
+               let parentTaskTitle = undefined;
+               if (isSubtask && taskForStatusUpdate.subtask_title) {
+                  parentTaskTitle = taskForStatusUpdate.subtask_title;
+               }
+
+               const notificationData = {
+                  taskTitle: taskForStatusUpdate.title,
+                  userName: user!.name || user!.email,
+                  projectName: taskForStatusUpdate.projectName || "Proyecto sin nombre",
+                  status: selectedStatus,
+                  isSubtask: isSubtask,
+                  parentTaskTitle: parentTaskTitle,
+                  ...(selectedStatus === "blocked" ? { blockReason: statusDetails } : {})
+               };
+
+               // Enviar notificación asíncrona (no bloquear el flujo del usuario)
+               fetch('/api/telegram/admin-notification', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(notificationData)
+               }).then(response => {
+                  if (response.ok) {
+                     console.log(`✅ [NOTIFICATION] Notificación de admin enviada para tarea ${selectedStatus}`);
+                  } else {
+                     console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de admin: ${response.status}`);
+                  }
+               }).catch(error => {
+                  console.error('🚨 [NOTIFICATION] Error al enviar notificación de admin:', error);
+               });
+
+            } catch (notificationError) {
+               // No bloquear el flujo del usuario por errores de notificación
+               console.error('🚨 [NOTIFICATION] Error preparando notificación de admin:', notificationError);
+            }
+         }
+
          // 6️⃣ Si era subtarea completada, actualiza la tarea padre
          if (isSubtask && selectedStatus === "completed") {
             const { data: { task_id: parentId } = {} } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
