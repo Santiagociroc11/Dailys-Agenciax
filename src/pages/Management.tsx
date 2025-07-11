@@ -8,7 +8,6 @@ import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import { Area, AreaUserAssignment } from '../types/Area';
-// Notificaciones de Telegram a través de endpoints API
 
 interface TaskFeedback {
   feedback?: string;
@@ -643,49 +642,6 @@ function Management() {
         }
       }
 
-      // 4. Enviar notificaciones de Telegram para cambios de estado importantes
-      try {
-        if (newStatus === 'approved') {
-          fetch('/api/telegram/notify-approved', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              taskId: isSubtask ? (data as any).task_id : itemId,
-              subtaskId: isSubtask ? itemId : undefined,
-              approvedBy: user?.id
-            })
-          }).catch(error => console.error('Error enviando notificación de aprobación:', error));
-        } else if (newStatus === 'returned') {
-          const reason = feedbackData?.feedback || '';
-          fetch('/api/telegram/notify-returned', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              taskId: isSubtask ? (data as any).task_id : itemId,
-              subtaskId: isSubtask ? itemId : undefined,
-              returnedBy: user?.id,
-              reason
-            })
-          }).catch(error => console.error('Error enviando notificación de devolución:', error));
-        } else if (newStatus === 'blocked') {
-          // Obtener el motivo del bloqueo desde las notas
-          const blockReason = feedbackData?.feedback || '';
-          fetch('/api/telegram/notify-blocked', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              taskId: isSubtask ? (data as any).task_id : itemId,
-              subtaskId: isSubtask ? itemId : undefined,
-              blockedBy: user?.id,
-              reason: blockReason
-            })
-          }).catch(error => console.error('Error enviando notificación de bloqueo:', error));
-        }
-      } catch (notifyError) {
-        console.error('Error enviando notificación de Telegram:', notifyError);
-        // No fallar la operación si las notificaciones fallan
-      }
-
       // Cerrar modales
       setShowFeedbackModal(false);
       setShowApprovalModal(false);
@@ -768,21 +724,6 @@ function Management() {
                     ? { ...task, status: newStatus as any } 
                     : task
             ));
-
-            // 5. Enviar notificación de aprobación automática de tarea padre
-            try {
-              fetch('/api/telegram/notify-approved', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  taskId: parentId,
-                  subtaskId: undefined,
-                  approvedBy: user?.id
-                })
-              }).catch(error => console.error('Error enviando notificación de aprobación automática:', error));
-            } catch (notifyError) {
-              console.error('Error enviando notificación de aprobación automática:', notifyError);
-            }
         }
     } catch (e) {
         console.error(`Error checking and approving parent task ${parentId}:`, e);

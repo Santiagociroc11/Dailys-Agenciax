@@ -8,7 +8,6 @@ import { toast } from "react-hot-toast";
 import TaskStatusDisplay from "../components/TaskStatusDisplay";
 import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
-// Notificaciones de Telegram a través de endpoints API
 
 interface Task {
    id: string;
@@ -1655,36 +1654,6 @@ export default function UserProjectView() {
          if (isSubtask && selectedStatus === "completed") {
             const { data: { task_id: parentId } = {} } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
             if (parentId) await updateParentTaskStatus(parentId);
-         }
-
-         // 6.5️⃣ Enviar notificaciones de Telegram para cambios importantes
-         try {
-            if (selectedStatus === "completed") {
-               const taskId = isSubtask ? (await supabase.from("subtasks").select("task_id").eq("id", originalId).single()).data?.task_id : originalId;
-               fetch('/api/telegram/notify-completed', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                     taskId: taskId,
-                     subtaskId: isSubtask ? originalId : undefined
-                  })
-               }).catch(error => console.error('Error enviando notificación de completación:', error));
-            } else if (selectedStatus === "blocked") {
-               const taskId = isSubtask ? (await supabase.from("subtasks").select("task_id").eq("id", originalId).single()).data?.task_id : originalId;
-               fetch('/api/telegram/notify-blocked', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                     taskId: taskId,
-                     subtaskId: isSubtask ? originalId : undefined,
-                     blockedBy: user?.id,
-                     reason: statusDetails
-                  })
-               }).catch(error => console.error('Error enviando notificación de bloqueo:', error));
-            }
-         } catch (notifyError) {
-            console.error('Error enviando notificación de Telegram:', notifyError);
-            // No fallar la operación si las notificaciones fallan
          }
 
          // 7️⃣ Refrescar estado local
