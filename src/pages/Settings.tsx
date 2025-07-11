@@ -72,6 +72,36 @@ const Settings = () => {
     }
   };
 
+  const sendStatusNotificationTest = async (notificationType: string) => {
+    if (!telegramId) {
+        toast.error('Por favor, guarda un ID de chat antes de enviar una prueba.');
+        return;
+    }
+    try {
+        const response = await fetch('/api/telegram/test-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                notificationType,
+                taskId: 'test-task-id',
+                subtaskId: notificationType === 'completed' ? 'test-subtask-id' : undefined,
+                approvedBy: 'admin-test-id',
+                reason: notificationType === 'returned' ? 'Esta es una razón de prueba para devolver la tarea' : 
+                        notificationType === 'blocked' ? 'Esta es una razón de prueba para bloquear la tarea' : undefined
+            }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            toast.success(`¡Notificación de ${notificationType} enviada!`);
+        } else {
+            toast.error(`Error al enviar la notificación: ${result.error}`);
+        }
+    } catch (error) {
+        toast.error('Error de red al enviar la notificación de prueba.');
+        console.error(error);
+    }
+  };
+
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -217,6 +247,56 @@ const Settings = () => {
             </button>
         </div>
       </div>
+
+      {/* Sección de pruebas de notificaciones de cambio de estado */}
+      {telegramId && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">
+            🔔 Pruebas de Notificaciones de Cambio de Estado
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Prueba las notificaciones automáticas que se envían cuando cambian los estados de las tareas:
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button 
+              onClick={() => sendStatusNotificationTest('completed')}
+              disabled={!telegramId || isLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400 text-sm"
+            >
+              🎉 Probar: Tarea Completada
+            </button>
+            
+            <button 
+              onClick={() => sendStatusNotificationTest('approved')}
+              disabled={!telegramId || isLoading}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400 text-sm"
+            >
+              ✅ Probar: Tarea Aprobada
+            </button>
+            
+            <button 
+              onClick={() => sendStatusNotificationTest('returned')}
+              disabled={!telegramId || isLoading}
+              className="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400 text-sm"
+            >
+              🔄 Probar: Tarea Devuelta
+            </button>
+            
+            <button 
+              onClick={() => sendStatusNotificationTest('blocked')}
+              disabled={!telegramId || isLoading}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400 text-sm"
+            >
+              🚫 Probar: Tarea Bloqueada
+            </button>
+          </div>
+          
+          <p className="text-xs text-gray-500 mt-4">
+            Estas son notificaciones de prueba que usan datos simulados. Las notificaciones reales se envían automáticamente cuando ocurren cambios en las tareas.
+          </p>
+        </div>
+      )}
     </div>
   );
 };

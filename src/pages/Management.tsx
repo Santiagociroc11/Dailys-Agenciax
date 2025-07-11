@@ -8,6 +8,12 @@ import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import { Area, AreaUserAssignment } from '../types/Area';
+import { 
+  notifyTaskCompleted, 
+  notifyTaskApproved, 
+  notifyTaskReturned, 
+  notifyTaskBlocked 
+} from '../../api/telegram';
 
 interface TaskFeedback {
   feedback?: string;
@@ -642,6 +648,37 @@ function Management() {
         }
       }
 
+      // 4. Enviar notificaciones de Telegram para cambios de estado importantes
+      try {
+        if (newStatus === 'approved') {
+          await notifyTaskApproved(
+            isSubtask ? (data as Subtask).task_id : itemId,
+            isSubtask ? itemId : undefined,
+            user?.id
+          );
+        } else if (newStatus === 'returned') {
+          const reason = feedbackData?.feedback || '';
+          await notifyTaskReturned(
+            isSubtask ? (data as Subtask).task_id : itemId,
+            isSubtask ? itemId : undefined,
+            user?.id,
+            reason
+          );
+        } else if (newStatus === 'blocked') {
+          // Obtener el motivo del bloqueo desde las notas
+          const blockReason = feedbackData?.feedback || '';
+          await notifyTaskBlocked(
+            isSubtask ? (data as Subtask).task_id : itemId,
+            isSubtask ? itemId : undefined,
+            user?.id,
+            blockReason
+          );
+        }
+      } catch (notifyError) {
+        console.error('Error enviando notificación de Telegram:', notifyError);
+        // No fallar la operación si las notificaciones fallan
+      }
+
       // Cerrar modales
       setShowFeedbackModal(false);
       setShowApprovalModal(false);
@@ -724,6 +761,13 @@ function Management() {
                     ? { ...task, status: newStatus as any } 
                     : task
             ));
+
+            // 5. Enviar notificación de aprobación automática de tarea padre
+            try {
+              await notifyTaskApproved(parentId, undefined, user?.id);
+            } catch (notifyError) {
+              console.error('Error enviando notificación de aprobación automática:', notifyError);
+            }
         }
     } catch (e) {
         console.error(`Error checking and approving parent task ${parentId}:`, e);

@@ -8,6 +8,9 @@ import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import RichTextSummary from '../components/RichTextSummary';
 import QuillEditor from '../components/QuillEditor';
+import { 
+  notifyTaskCompleted 
+} from '../../api/telegram';
 
 
 interface Task {
@@ -418,6 +421,25 @@ function Tasks() {
         throw error;
       }
       console.log('Status updated successfully');
+      
+      // Enviar notificación si se completa la subtarea
+      if (newStatus === 'completed') {
+        try {
+          const { data: subtaskData } = await supabase
+            .from('subtasks')
+            .select('task_id')
+            .eq('id', subtaskId)
+            .single();
+          
+          if (subtaskData) {
+            await notifyTaskCompleted(subtaskData.task_id, subtaskId);
+          }
+        } catch (notifyError) {
+          console.error('Error enviando notificación de Telegram:', notifyError);
+          // No fallar la operación si las notificaciones fallan
+        }
+      }
+      
       await fetchSubtasks();
     } catch (error) {
       console.error('Error al actualizar el estado:', error);

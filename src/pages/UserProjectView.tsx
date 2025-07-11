@@ -8,6 +8,10 @@ import { toast } from "react-hot-toast";
 import TaskStatusDisplay from "../components/TaskStatusDisplay";
 import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
+import { 
+  notifyTaskCompleted, 
+  notifyTaskBlocked 
+} from '../../api/telegram';
 
 interface Task {
    id: string;
@@ -1654,6 +1658,26 @@ export default function UserProjectView() {
          if (isSubtask && selectedStatus === "completed") {
             const { data: { task_id: parentId } = {} } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
             if (parentId) await updateParentTaskStatus(parentId);
+         }
+
+         // 6.5️⃣ Enviar notificaciones de Telegram para cambios importantes
+         try {
+            if (selectedStatus === "completed") {
+               await notifyTaskCompleted(
+                  isSubtask ? (await supabase.from("subtasks").select("task_id").eq("id", originalId).single()).data?.task_id : originalId,
+                  isSubtask ? originalId : undefined
+               );
+            } else if (selectedStatus === "blocked") {
+               await notifyTaskBlocked(
+                  isSubtask ? (await supabase.from("subtasks").select("task_id").eq("id", originalId).single()).data?.task_id : originalId,
+                  isSubtask ? originalId : undefined,
+                  user?.id,
+                  statusDetails
+               );
+            }
+         } catch (notifyError) {
+            console.error('Error enviando notificación de Telegram:', notifyError);
+            // No fallar la operación si las notificaciones fallan
          }
 
          // 7️⃣ Refrescar estado local
