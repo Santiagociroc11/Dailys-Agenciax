@@ -520,6 +520,18 @@ function Tasks() {
     if (!selectedTask || !editedTask) return;
     
     try {
+      // 🔔 Verificar cambios en asignación antes de actualizar
+      const previousAssignedUsers = selectedTask.assigned_users || [];
+      const newAssignedUsers = editedTask.assigned_users || [];
+      const previousIsSequential = selectedTask.is_sequential;
+      const newIsSequential = editedTask.is_sequential;
+      
+      // Detectar usuarios recién asignados
+      const newlyAssignedUsers = newAssignedUsers.filter(userId => !previousAssignedUsers.includes(userId));
+      
+      // Detectar cambio de secuencial a paralelo
+      const sequentialToParallel = previousIsSequential && !newIsSequential;
+      
       const { error } = await supabase
         .from('tasks')
         .update({
@@ -540,6 +552,89 @@ function Tasks() {
         throw error;
       }
       
+      // 🔔 Notificar cambios después de actualización exitosa
+      try {
+        // Obtener nombre del proyecto
+        let projectName = "Proyecto sin nombre";
+        if (editedTask.project_id) {
+          const { data: projectData } = await supabase
+            .from('projects')
+            .select('name')
+            .eq('id', editedTask.project_id)
+            .single();
+            
+          if (projectData) {
+            projectName = projectData.name;
+          }
+        }
+        
+        // Notificar usuarios recién asignados (solo si tarea está pendiente)
+        if (newlyAssignedUsers.length > 0 && selectedTask.status === 'pending') {
+          const { data: subtasksData } = await supabase
+            .from('subtasks')
+            .select('*')
+            .eq('task_id', selectedTask.id);
+            
+          if (!subtasksData || subtasksData.length === 0) {
+            // Tarea sin subtareas - notificar directamente
+            fetch('/api/telegram/task-available', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userIds: newlyAssignedUsers,
+                taskTitle: editedTask.title,
+                projectName: projectName,
+                reason: 'created_available',
+                isSubtask: false
+              })
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ [NOTIFICATION] Notificación de asignación enviada a nuevos usuarios`);
+              }
+            }).catch(error => {
+              console.error('🚨 [NOTIFICATION] Error enviando notificación de asignación:', error);
+            });
+          }
+        }
+        
+        // Notificar cambio de secuencial a paralelo
+        if (sequentialToParallel && selectedTask.status === 'pending') {
+          const { data: pendingSubtasks } = await supabase
+            .from('subtasks')
+            .select('assigned_to, title')
+            .eq('task_id', selectedTask.id)
+            .eq('status', 'pending')
+            .gt('sequence_order', 1); // Subtareas que no están en el primer nivel
+            
+          if (pendingSubtasks && pendingSubtasks.length > 0) {
+            for (const subtask of pendingSubtasks) {
+              if (subtask.assigned_to) {
+                fetch('/api/telegram/task-available', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userIds: [subtask.assigned_to],
+                    taskTitle: subtask.title,
+                    projectName: projectName,
+                    reason: 'sequential_dependency_completed',
+                    isSubtask: true,
+                    parentTaskTitle: editedTask.title
+                  })
+                }).then(response => {
+                  if (response.ok) {
+                    console.log(`✅ [NOTIFICATION] Notificación de cambio secuencial→paralelo enviada`);
+                  }
+                }).catch(error => {
+                  console.error('🚨 [NOTIFICATION] Error enviando notificación secuencial→paralelo:', error);
+                });
+              }
+            }
+          }
+        }
+      } catch (notificationError) {
+        console.error('🚨 [NOTIFICATION] Error en notificaciones de actualización de tarea:', notificationError);
+      }
+      
       await fetchTasks();
       setShowTaskDetailModal(false);
     } catch (error) {
@@ -552,8 +647,20 @@ function Tasks() {
     if (!selectedSubtask || !editedSubtask) return;
     
     try {
-        const { error } = await supabase
-          .from('subtasks')
+      // 🔔 Verificar cambios antes de actualizar
+      const previousAssignedTo = selectedSubtask.assigned_to;
+      const newAssignedTo = editedSubtask.assigned_to;
+      const previousSequenceOrder = selectedSubtask.sequence_order;
+      const newSequenceOrder = editedSubtask.sequence_order;
+      
+      // Detectar cambio de usuario asignado
+      const assignmentChanged = previousAssignedTo !== newAssignedTo;
+      
+      // Detectar cambio de orden de secuencia
+      const sequenceOrderChanged = previousSequenceOrder !== newSequenceOrder;
+      
+      const { error } = await supabase
+        .from('subtasks')
         .update({
           title: editedSubtask.title,
           description: editedSubtask.description,
@@ -566,10 +673,124 @@ function Tasks() {
         })
         .eq('id', selectedSubtask.id);
 
-        if (error) {
+      if (error) {
         console.error("Error al actualizar la subtarea:", error);
-          throw error;
+        throw error;
+      }
+      
+      // 🔔 Notificar cambios después de actualización exitosa
+      try {
+        // Obtener información de la tarea padre y proyecto
+        let projectName = "Proyecto sin nombre";
+        let parentTaskTitle = "Tarea sin nombre";
+        let isTaskSequential = false;
+        
+        const { data: parentTask } = await supabase
+          .from('tasks')
+          .select('title, project_id, is_sequential')
+          .eq('id', selectedSubtask.task_id)
+          .single();
+          
+        if (parentTask) {
+          parentTaskTitle = parentTask.title;
+          isTaskSequential = parentTask.is_sequential;
+          
+          if (parentTask.project_id) {
+            const { data: projectData } = await supabase
+              .from('projects')
+              .select('name')
+              .eq('id', parentTask.project_id)
+              .single();
+              
+            if (projectData) {
+              projectName = projectData.name;
+            }
+          }
         }
+        
+        // Notificar nuevo usuario asignado (solo si subtarea está pendiente)
+        if (assignmentChanged && newAssignedTo && selectedSubtask.status === 'pending') {
+          // Verificar si la subtarea está disponible según dependencias secuenciales
+          let isAvailable = true;
+          
+          if (isTaskSequential && newSequenceOrder && newSequenceOrder > 1) {
+            // Verificar que todos los niveles anteriores estén aprobados
+            const { data: previousSubtasks } = await supabase
+              .from('subtasks')
+              .select('status, sequence_order')
+              .eq('task_id', selectedSubtask.task_id)
+              .lt('sequence_order', newSequenceOrder);
+              
+            if (previousSubtasks) {
+              const groupedByLevel = previousSubtasks.reduce((acc, st) => {
+                const level = st.sequence_order || 0;
+                if (!acc[level]) acc[level] = [];
+                acc[level].push(st);
+                return acc;
+              }, {} as Record<number, any[]>);
+              
+              // Verificar que todos los niveles anteriores estén completamente aprobados
+              for (const level in groupedByLevel) {
+                if (parseInt(level) < newSequenceOrder) {
+                  const levelSubtasks = groupedByLevel[level];
+                  if (!levelSubtasks.every(st => st.status === 'approved')) {
+                    isAvailable = false;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          if (isAvailable) {
+            fetch('/api/telegram/task-available', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userIds: [newAssignedTo],
+                taskTitle: editedSubtask.title,
+                projectName: projectName,
+                reason: 'created_available',
+                isSubtask: true,
+                parentTaskTitle: parentTaskTitle
+              })
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ [NOTIFICATION] Notificación de reasignación de subtarea enviada`);
+              }
+            }).catch(error => {
+              console.error('🚨 [NOTIFICATION] Error enviando notificación de reasignación:', error);
+            });
+          }
+        }
+        
+        // Notificar cambios de orden de secuencia que pueden liberar dependencias
+        if (sequenceOrderChanged && isTaskSequential && selectedSubtask.status === 'pending') {
+          // Si se movió a un nivel anterior y está disponible, notificar
+          if (newSequenceOrder && previousSequenceOrder && newSequenceOrder < previousSequenceOrder) {
+            fetch('/api/telegram/task-available', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userIds: [newAssignedTo || previousAssignedTo].filter(Boolean),
+                taskTitle: editedSubtask.title,
+                projectName: projectName,
+                reason: 'sequential_dependency_completed',
+                isSubtask: true,
+                parentTaskTitle: parentTaskTitle
+              })
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ [NOTIFICATION] Notificación de reordenamiento de secuencia enviada`);
+              }
+            }).catch(error => {
+              console.error('🚨 [NOTIFICATION] Error enviando notificación de reordenamiento:', error);
+            });
+          }
+        }
+      } catch (notificationError) {
+        console.error('🚨 [NOTIFICATION] Error en notificaciones de actualización de subtarea:', notificationError);
+      }
       
       await fetchSubtasks();
       setShowSubtaskDetailModal(false);
@@ -812,13 +1033,100 @@ function Tasks() {
           deadline: newSubtask.deadline || null
         }));
 
-        const { error: newSubtasksError } = await supabase
+        const { data: insertedSubtasks, error: newSubtasksError } = await supabase
           .from('subtasks')
-          .insert(subtasksToInsert);
+          .insert(subtasksToInsert)
+          .select();
 
         if (newSubtasksError) {
           console.error("Error al crear nuevas subtareas:", newSubtasksError);
           throw newSubtasksError;
+        }
+        
+        // 🔔 Notificar usuarios de nuevas subtareas creadas
+        if (insertedSubtasks && insertedSubtasks.length > 0) {
+          try {
+            // Obtener información del proyecto
+            let projectName = "Proyecto sin nombre";
+            if (editedTask.project_id) {
+              const { data: projectData } = await supabase
+                .from('projects')
+                .select('name')
+                .eq('id', editedTask.project_id)
+                .single();
+                
+              if (projectData) {
+                projectName = projectData.name;
+              }
+            }
+            
+            // Determinar qué subtareas están disponibles inmediatamente
+            let availableSubtasks = [];
+            
+            if (editedTask.is_sequential) {
+              // Para tareas secuenciales, verificar cuál es el primer nivel disponible
+              const { data: existingSubtasks } = await supabase
+                .from('subtasks')
+                .select('sequence_order, status')
+                .eq('task_id', selectedTask.id)
+                .order('sequence_order');
+              
+              if (existingSubtasks) {
+                // Agrupar todas las subtareas por nivel
+                const allSubtasks = [...existingSubtasks, ...insertedSubtasks.map(s => ({ sequence_order: s.sequence_order, status: s.status }))];
+                const groupedByLevel = allSubtasks.reduce((acc, st) => {
+                  const level = st.sequence_order || 0;
+                  if (!acc[level]) acc[level] = [];
+                  acc[level].push(st);
+                  return acc;
+                }, {} as Record<number, any[]>);
+                
+                // Encontrar el primer nivel que no está completamente aprobado
+                let firstAvailableLevel = 1;
+                for (const level in groupedByLevel) {
+                  const levelNum = parseInt(level);
+                  const levelSubtasks = groupedByLevel[levelNum];
+                  if (levelSubtasks.every(st => st.status === 'approved')) {
+                    firstAvailableLevel = levelNum + 1;
+                  } else {
+                    break;
+                  }
+                }
+                
+                // Solo notificar subtareas del primer nivel disponible
+                availableSubtasks = insertedSubtasks.filter(st => st.sequence_order === firstAvailableLevel);
+              }
+            } else {
+              // Para tareas paralelas, todas las nuevas subtareas están disponibles
+              availableSubtasks = insertedSubtasks;
+            }
+            
+            // Enviar notificaciones a usuarios de subtareas disponibles
+            for (const subtask of availableSubtasks) {
+              if (subtask.assigned_to) {
+                fetch('/api/telegram/task-available', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userIds: [subtask.assigned_to],
+                    taskTitle: subtask.title,
+                    projectName: projectName,
+                    reason: 'created_available',
+                    isSubtask: true,
+                    parentTaskTitle: editedTask.title
+                  })
+                }).then(response => {
+                  if (response.ok) {
+                    console.log(`✅ [NOTIFICATION] Notificación de nueva subtarea enviada: ${subtask.title}`);
+                  }
+                }).catch(error => {
+                  console.error('🚨 [NOTIFICATION] Error enviando notificación de nueva subtarea:', error);
+                });
+              }
+            }
+          } catch (notificationError) {
+            console.error('🚨 [NOTIFICATION] Error en notificaciones de nuevas subtareas:', notificationError);
+          }
         }
       }
       

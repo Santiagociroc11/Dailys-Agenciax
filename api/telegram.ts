@@ -519,7 +519,7 @@ export async function notifyTaskAvailable(
   }
 }
 
-// Función para notificar a múltiples usuarios sobre tarea disponible
+// Función para notificar a múltiples usuarios sobre tarea disponible con retry
 export async function notifyMultipleUsersTaskAvailable(
   userIds: string[],
   taskTitle: string,
@@ -531,7 +531,7 @@ export async function notifyMultipleUsersTaskAvailable(
   let successCount = 0;
   
   for (const userId of userIds) {
-    const success = await notifyTaskAvailable(userId, taskTitle, projectName, reason, isSubtask, parentTaskTitle);
+    const success = await notifyTaskAvailableWithRetry(userId, taskTitle, projectName, reason, isSubtask, parentTaskTitle);
     if (success) {
       successCount++;
     }
@@ -541,6 +541,94 @@ export async function notifyMultipleUsersTaskAvailable(
   
   console.log(`Notificaciones de tarea disponible enviadas: ${successCount}/${userIds.length}`);
   return successCount;
+}
+
+// Función con sistema de retry para notificaciones
+export async function notifyTaskAvailableWithRetry(
+  userId: string,
+  taskTitle: string,
+  projectName: string,
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  isSubtask: boolean = false,
+  parentTaskTitle?: string,
+  maxRetries: number = 3
+): Promise<boolean> {
+  let lastError: any = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const success = await notifyTaskAvailable(userId, taskTitle, projectName, reason, isSubtask, parentTaskTitle);
+      
+      if (success) {
+        if (attempt > 1) {
+          console.log(`✅ [RETRY] Notificación exitosa en intento ${attempt}/${maxRetries} para usuario ${userId}`);
+        }
+        return true;
+      } else {
+        lastError = new Error('Notification failed');
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ [RETRY] Intento ${attempt}/${maxRetries} falló para usuario ${userId}:`, error);
+    }
+    
+    // Esperar antes del siguiente intento (backoff exponencial)
+    if (attempt < maxRetries) {
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Max 10 segundos
+      console.log(`🔄 [RETRY] Esperando ${delay}ms antes del siguiente intento...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  console.error(`❌ [RETRY] Falló notificación después de ${maxRetries} intentos para usuario ${userId}:`, lastError);
+  return false;
+}
+
+// Función para envío robusto de notificaciones con manejo de errores mejorado
+export async function sendNotificationRobust(
+  endpoint: string,
+  payload: any,
+  description: string,
+  maxRetries: number = 2
+): Promise<boolean> {
+  let lastError: any = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        if (attempt > 1) {
+          console.log(`✅ [ROBUST] ${description} exitosa en intento ${attempt}/${maxRetries}`);
+        }
+        return true;
+      } else {
+        lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        
+        // Si es error 4xx, no reintentamos (error del cliente)
+        if (response.status >= 400 && response.status < 500) {
+          console.error(`❌ [ROBUST] Error de cliente para ${description}: ${response.status}`);
+          break;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ [ROBUST] Intento ${attempt}/${maxRetries} falló para ${description}:`, error);
+    }
+    
+    // Esperar antes del siguiente intento
+    if (attempt < maxRetries) {
+      const delay = 1000 * attempt; // 1s, 2s, 3s...
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  console.error(`❌ [ROBUST] Falló ${description} después de ${maxRetries} intentos:`, lastError);
+  return false;
 }
 
 export async function handleTestNotification(req: any, res: any) {

@@ -640,27 +640,24 @@ function Management() {
             }
           }
           
-          // Enviar notificaciones de tarea disponible
+          // Enviar notificaciones de tarea disponible con retry
           if (usersToNotify.length > 0) {
-            fetch('/api/telegram/task-available', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userIds: usersToNotify,
-                taskTitle: taskTitle,
-                projectName: projectName,
-                reason: 'unblocked',
-                isSubtask: isSubtask,
-                parentTaskTitle: parentTaskTitle
-              })
-            }).then(response => {
-              if (response.ok) {
-                console.log(`✅ [NOTIFICATION] Notificación de tarea desbloqueada enviada`);
-              } else {
-                console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de tarea desbloqueada: ${response.status}`);
-              }
+            // Importar la función sendNotificationRobust dinámicamente
+            import('../../api/telegram.js').then(({ sendNotificationRobust }) => {
+              sendNotificationRobust(
+                '/api/telegram/task-available',
+                {
+                  userIds: usersToNotify,
+                  taskTitle: taskTitle,
+                  projectName: projectName,
+                  reason: 'unblocked',
+                  isSubtask: isSubtask,
+                  parentTaskTitle: parentTaskTitle
+                },
+                'Notificación de tarea desbloqueada'
+              );
             }).catch(error => {
-              console.error('🚨 [NOTIFICATION] Error al enviar notificación de tarea desbloqueada:', error);
+              console.error('🚨 [NOTIFICATION] Error al cargar función de notificación:', error);
             });
           }
         } catch (notificationError) {

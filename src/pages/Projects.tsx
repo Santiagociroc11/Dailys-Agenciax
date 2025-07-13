@@ -192,6 +192,123 @@ function Projects() {
               
             if (updateError) {
               console.error("Error al actualizar usuario:", updateError);
+            } else {
+              // 🔔 Notificar al usuario sobre tareas disponibles en el nuevo proyecto
+              try {
+                // Obtener tareas pendientes del proyecto que están disponibles
+                const { data: availableTasks } = await supabase
+                  .from('tasks')
+                  .select('id, title, assigned_users, is_sequential')
+                  .eq('project_id', projectId)
+                  .eq('status', 'pending');
+                
+                const { data: availableSubtasks } = await supabase
+                  .from('subtasks')
+                  .select('id, title, assigned_to, task_id, sequence_order, tasks!inner(title, is_sequential, project_id)')
+                  .eq('status', 'pending')
+                  .eq('assigned_to', userId)
+                  .eq('tasks.project_id', projectId);
+                
+                let tasksToNotify = [];
+                
+                // Verificar tareas principales disponibles para el usuario
+                if (availableTasks) {
+                  const userTasks = availableTasks.filter(task => 
+                    task.assigned_users && task.assigned_users.includes(userId)
+                  );
+                  
+                  for (const task of userTasks) {
+                    // Verificar si la tarea no tiene subtareas (está directamente disponible)
+                    const { data: taskSubtasks } = await supabase
+                      .from('subtasks')
+                      .select('id')
+                      .eq('task_id', task.id)
+                      .limit(1);
+                    
+                    if (!taskSubtasks || taskSubtasks.length === 0) {
+                      tasksToNotify.push({
+                        title: task.title,
+                        isSubtask: false
+                      });
+                    }
+                  }
+                }
+                
+                // Verificar subtareas disponibles para el usuario
+                if (availableSubtasks) {
+                  for (const subtask of availableSubtasks) {
+                    let isAvailable = true;
+                    
+                    // Si es secuencial, verificar dependencias
+                    if (subtask.tasks.is_sequential && subtask.sequence_order && subtask.sequence_order > 1) {
+                      const { data: previousSubtasks } = await supabase
+                        .from('subtasks')
+                        .select('status, sequence_order')
+                        .eq('task_id', subtask.task_id)
+                        .lt('sequence_order', subtask.sequence_order);
+                      
+                      if (previousSubtasks) {
+                        // Agrupar por nivel y verificar que todos estén aprobados
+                        const groupedByLevel = previousSubtasks.reduce((acc, st) => {
+                          const level = st.sequence_order || 0;
+                          if (!acc[level]) acc[level] = [];
+                          acc[level].push(st);
+                          return acc;
+                        }, {} as Record<number, any[]>);
+                        
+                        for (const level in groupedByLevel) {
+                          if (parseInt(level) < subtask.sequence_order) {
+                            const levelSubtasks = groupedByLevel[level];
+                            if (!levelSubtasks.every(st => st.status === 'approved')) {
+                              isAvailable = false;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (isAvailable) {
+                      tasksToNotify.push({
+                        title: subtask.title,
+                        isSubtask: true,
+                        parentTaskTitle: subtask.tasks.title
+                      });
+                    }
+                  }
+                }
+                
+                // Enviar notificaciones si hay tareas disponibles
+                if (tasksToNotify.length > 0) {
+                  const projectData = projects.find(p => p.id === projectId);
+                  const projectName = projectData?.name || "Proyecto sin nombre";
+                  
+                  for (const taskInfo of tasksToNotify) {
+                    fetch('/api/telegram/task-available', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        userIds: [userId],
+                        taskTitle: taskInfo.title,
+                        projectName: projectName,
+                        reason: 'created_available',
+                        isSubtask: taskInfo.isSubtask,
+                        parentTaskTitle: taskInfo.parentTaskTitle
+                      })
+                    }).then(response => {
+                      if (response.ok) {
+                        console.log(`✅ [NOTIFICATION] Notificación de proyecto asignado enviada: ${taskInfo.title}`);
+                      }
+                    }).catch(error => {
+                      console.error('🚨 [NOTIFICATION] Error enviando notificación de proyecto asignado:', error);
+                    });
+                  }
+                  
+                  console.log(`🔔 [PROJECT_ASSIGNMENT] Usuario asignado a proyecto con ${tasksToNotify.length} tareas disponibles`);
+                }
+              } catch (notificationError) {
+                console.error('🚨 [NOTIFICATION] Error en notificaciones de asignación de proyecto:', notificationError);
+              }
             }
           }
         }
