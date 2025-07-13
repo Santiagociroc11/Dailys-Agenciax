@@ -68,6 +68,19 @@ interface Project {
    name: string;
 }
 
+interface WorkEvent {
+   id: string;
+   user_id: string;
+   title: string;
+   description?: string;
+   date: string;
+   start_time: string;
+   end_time: string;
+   event_type: 'meeting' | 'daily' | 'review' | 'planning' | 'training' | 'break' | 'other';
+   project_id?: string;
+   created_at: string;
+}
+
 // Función para calcular y formatear el tiempo restante o pasado
 function getTimeIndicator(dateStr: string | null, isStartDate: boolean): { text: string; color: string } {
    if (!dateStr) return { text: "", color: "" };
@@ -285,6 +298,28 @@ export default function UserProjectView() {
    const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
    const [showStatusModal, setShowStatusModal] = useState(false);
    const [showReturnedFeedbackModal, setShowReturnedFeedbackModal] = useState(false);
+
+   // Estados para planificación temporal
+   const [taskSchedules, setTaskSchedules] = useState<Record<string, { startTime: string; endTime: string; duration: number } | null>>({});
+   const [showTimeScheduling, setShowTimeScheduling] = useState(false);
+   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number; end: number } | null>(null);
+   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
+
+   // Estados para eventos de trabajo
+   const [showEventsModal, setShowEventsModal] = useState(false);
+   const [workEvents, setWorkEvents] = useState<WorkEvent[]>([]);
+   const [editingEvent, setEditingEvent] = useState<WorkEvent | null>(null);
+   const [loadingEvents, setLoadingEvents] = useState(false);
+   
+   // Estados para el formulario de eventos
+   const [eventForm, setEventForm] = useState({
+      title: '',
+      description: '',
+      event_type: 'meeting' as WorkEvent['event_type'],
+      start_time: 480, // 8:00 AM en minutos
+      end_time: 540,   // 9:00 AM en minutos
+   });
+   const [savingEvent, setSavingEvent] = useState(false);
    const [selectedReturnedTask, setSelectedReturnedTask] = useState<Task | null>(null);
    const [showUnassignConfirmModal, setShowUnassignConfirmModal] = useState(false);
    const [taskToUnassign, setTaskToUnassign] = useState<Task | null>(null);
@@ -370,15 +405,25 @@ export default function UserProjectView() {
    }, [activeTab, activeGestionSubTab, projectId, user]);
 
    useEffect(() => {
-      // Calculate total duration of selected tasks
-      const total = selectedTasks.reduce((acc, taskId) => {
+      // Calcular duración de tareas seleccionadas
+      const tasksTotal = selectedTasks.reduce((acc, taskId) => {
          const task = taskItems.find((t) => t.id === taskId);
          return acc + (task?.estimated_duration || 0);
       }, 0);
-      // Convertir total de minutos a horas
-      const totalHours = Math.round((total / 60) * 100) / 100;
+      
+      // Calcular duración de eventos de trabajo del día
+      const eventsTotal = workEvents.reduce((acc, event) => {
+         const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+         const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+         const durationMinutes = endMinutes - startMinutes;
+         return acc + durationMinutes;
+      }, 0);
+      
+      // Convertir total de minutos a horas (tareas + eventos)
+      const totalMinutes = tasksTotal + eventsTotal;
+      const totalHours = Math.round((totalMinutes / 60) * 100) / 100;
       setTotalEstimatedDuration(totalHours);
-   }, [selectedTasks, taskItems]);
+   }, [selectedTasks, taskItems, workEvents]);
 
    useEffect(() => {
       // Ordenar tareas cuando cambie solo el criterio de ordenamiento
@@ -921,9 +966,263 @@ export default function UserProjectView() {
    }
 
    function handleConfirmSave() {
+      setShowTimeScheduling(true);
+      // Cargar eventos del día para mostrar en el timeline
+      if (user) {
+         fetchWorkEvents();
+      }
+   }
+
+   function handleSaveWithoutSchedule() {
       handleSaveSelectedTasks();
       setShowConfirmModal(false);
    }
+
+   function handleSaveWithSchedule() {
+      handleSaveSelectedTasks();
+      setShowConfirmModal(false);
+      setShowTimeScheduling(false);
+   }
+
+   // Función para generar horarios del día (8:00 AM - 6:00 PM)
+   function generateTimeSlots() {
+      const slots = [];
+      for (let hour = 8; hour <= 18; hour++) {
+         for (let minutes = 0; minutes < 60; minutes += 30) {
+            const time = hour * 60 + minutes; // minutos desde medianoche
+            const displayTime = minutesToTimeAMPM(time);
+            slots.push({ time, display: displayTime });
+         }
+      }
+      return slots;
+   }
+
+   // Función para convertir minutos a formato de hora (24h)
+   function minutesToTime(minutes: number): string {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+   }
+
+   // Función para convertir minutos a formato AM/PM
+   function minutesToTimeAMPM(minutes: number): string {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      const period = hours >= 12 ? 'PM' : 'AM';
+      const displayHours = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+      return `${displayHours}:${mins.toString().padStart(2, '0')} ${period}`;
+   }
+
+   // Función para verificar conflictos de horarios
+   function hasScheduleConflict(startTime: number, endTime: number, excludeTaskId?: string): boolean {
+      return Object.entries(taskSchedules).some(([taskId, schedule]) => {
+         if (!schedule || taskId === excludeTaskId) return false;
+         const scheduleStart = parseInt(schedule.startTime.split(':')[0]) * 60 + parseInt(schedule.startTime.split(':')[1]);
+         const scheduleEnd = parseInt(schedule.endTime.split(':')[0]) * 60 + parseInt(schedule.endTime.split(':')[1]);
+         return (startTime < scheduleEnd && endTime > scheduleStart);
+      });
+   }
+
+   // Función para verificar si una hora de inicio específica causaría conflicto
+   function wouldStartTimeConflict(startMinutes: number, durationMinutes: number, excludeTaskId?: string): boolean {
+      const endMinutes = startMinutes + durationMinutes;
+      
+      // Verificar conflictos con tareas programadas
+      const hasTaskConflict = hasScheduleConflict(startMinutes, endMinutes, excludeTaskId);
+      
+      // Verificar conflictos con eventos de trabajo
+      const hasEventConflict = workEvents.some(event => {
+         const eventStartMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+         const eventEndMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+         return (startMinutes < eventEndMinutes && endMinutes > eventStartMinutes);
+      });
+      
+      return hasTaskConflict || hasEventConflict;
+   }
+
+   // Función para asignar horario a una tarea
+   function assignTimeToTask(taskId: string, startTime: string, endTime: string, duration: number) {
+      setTaskSchedules(prev => ({
+         ...prev,
+         [taskId]: { startTime, endTime, duration }
+      }));
+   }
+
+   // Función para remover horario de una tarea
+   function removeTimeFromTask(taskId: string) {
+      setTaskSchedules(prev => ({
+         ...prev,
+         [taskId]: null
+      }));
+   }
+
+   // Función para obtener sugerencias inteligentes de horarios
+   function getTimeSlotSuggestions(duration: number): Array<{ start: number; end: number; reason: string }> {
+      const suggestions = [];
+      const slots = generateTimeSlots();
+      
+      for (let i = 0; i < slots.length; i++) {
+         const startTime = slots[i].time;
+         const endTime = startTime + duration;
+         
+         if (endTime <= 20 * 60 && !hasScheduleConflict(startTime, endTime)) {
+            let reason = "Horario disponible";
+            if (startTime === 9 * 60) reason = "Primera hora del día";
+            else if (startTime === 14 * 60) reason = "Después del almuerzo";
+            else if (startTime === 8 * 60) reason = "Inicio temprano";
+            
+            suggestions.push({ start: startTime, end: endTime, reason });
+            
+            if (suggestions.length >= 3) break; // Máximo 3 sugerencias
+         }
+      }
+      
+      return suggestions;
+   }
+
+   // ===== FUNCIONES CRUD PARA EVENTOS DE TRABAJO =====
+   
+   async function fetchWorkEvents() {
+      if (!user) return;
+      
+      setLoadingEvents(true);
+      try {
+         const today = format(new Date(), "yyyy-MM-dd");
+         
+         const { data, error } = await supabase
+            .from('work_events')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('date', today)
+            .order('start_time', { ascending: true });
+            
+         if (error) throw error;
+         
+         setWorkEvents(data || []);
+      } catch (error) {
+         console.error('Error fetching work events:', error);
+         toast.error('Error al cargar eventos del día');
+      } finally {
+         setLoadingEvents(false);
+      }
+   }
+   
+   async function handleSaveEvent() {
+      if (!user) return;
+      
+      if (!eventForm.title.trim()) {
+         toast.error('El título del evento es obligatorio');
+         return;
+      }
+      
+      if (eventForm.start_time >= eventForm.end_time) {
+         toast.error('La hora de fin debe ser posterior a la hora de inicio');
+         return;
+      }
+      
+      setSavingEvent(true);
+      try {
+         const today = format(new Date(), "yyyy-MM-dd");
+         const startTime = minutesToTime(eventForm.start_time);
+         const endTime = minutesToTime(eventForm.end_time);
+         
+         const eventData = {
+            user_id: user.id,
+            title: eventForm.title.trim(),
+            description: eventForm.description.trim() || null,
+            date: today,
+            start_time: startTime,
+            end_time: endTime,
+            event_type: eventForm.event_type,
+            project_id: projectId !== 'all' ? projectId : null,
+         };
+         
+         if (editingEvent) {
+            // Actualizar evento existente
+            const { error } = await supabase
+               .from('work_events')
+               .update(eventData)
+               .eq('id', editingEvent.id);
+               
+            if (error) throw error;
+            toast.success('Evento actualizado correctamente');
+         } else {
+            // Crear nuevo evento
+            const { error } = await supabase
+               .from('work_events')
+               .insert([eventData]);
+               
+            if (error) throw error;
+            toast.success('Evento creado correctamente');
+         }
+         
+         // Limpiar formulario y recargar eventos
+         resetEventForm();
+         fetchWorkEvents();
+         
+      } catch (error) {
+         console.error('Error saving event:', error);
+         toast.error('Error al guardar el evento');
+      } finally {
+         setSavingEvent(false);
+      }
+   }
+   
+   async function handleDeleteEvent(eventId: string) {
+      if (!confirm('¿Estás seguro de que quieres eliminar este evento?')) {
+         return;
+      }
+      
+      try {
+         const { error } = await supabase
+            .from('work_events')
+            .delete()
+            .eq('id', eventId);
+            
+         if (error) throw error;
+         
+         toast.success('Evento eliminado correctamente');
+         fetchWorkEvents();
+         
+      } catch (error) {
+         console.error('Error deleting event:', error);
+         toast.error('Error al eliminar el evento');
+      }
+   }
+   
+   function handleEditEvent(event: WorkEvent) {
+      // Convertir tiempos de string a minutos
+      const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+      const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+      
+      setEventForm({
+         title: event.title,
+         description: event.description || '',
+         event_type: event.event_type,
+         start_time: startMinutes,
+         end_time: endMinutes,
+      });
+      
+      setEditingEvent(event);
+   }
+   
+   function resetEventForm() {
+      setEventForm({
+         title: '',
+         description: '',
+         event_type: 'meeting',
+         start_time: 480, // 8:00 AM
+         end_time: 540,   // 9:00 AM
+      });
+      setEditingEvent(null);
+   }
+   
+   // Cargar eventos cuando se abre el modal
+   useEffect(() => {
+      if (showEventsModal && user) {
+         fetchWorkEvents();
+      }
+   }, [showEventsModal, user]);
 
    async function handleSaveSelectedTasks() {
       if (selectedTasks.length === 0) {
@@ -983,6 +1282,18 @@ export default function UserProjectView() {
             const task = taskItems.find((t) => t.id === taskId)!;
             const isSubtask = task.type === "subtask";
             const originalId = isSubtask ? task.id.replace("subtask-", "") : task.id;
+            
+            // Obtener horarios programados para esta tarea
+            const schedule = taskSchedules[taskId];
+            let startTime = null;
+            let endTime = null;
+            
+            if (schedule) {
+               // Crear timestamps completos con la fecha de hoy
+               const todayStr = format(new Date(), "yyyy-MM-dd");
+               startTime = `${todayStr}T${schedule.startTime}:00`;
+               endTime = `${todayStr}T${schedule.endTime}:00`;
+            }
 
             return {
                user_id: user.id,
@@ -993,6 +1304,8 @@ export default function UserProjectView() {
                project_id: task.project_id,
                estimated_duration: task.estimated_duration,
                status: "assigned",
+               start_time: startTime,
+               end_time: endTime,
                created_at: new Date().toISOString(),
                updated_at: new Date().toISOString(),
             };
@@ -2551,18 +2864,28 @@ export default function UserProjectView() {
                <div className="mt-6 p-4 bg-white rounded-md shadow-sm border border-gray-200 flex justify-between items-center">
                   <div className="text-sm">
                      <p className="text-gray-600">DURACIÓN TOTAL DEL DÍA</p>
+                     <p className="text-xs text-gray-500">Tareas + Eventos</p>
                      <p className="font-bold text-lg mt-1">
                         {totalEstimatedDuration} HORA{totalEstimatedDuration !== 1 ? "S" : ""}
                      </p>
                   </div>
-                  <button
-                     onClick={handleShowConfirmModal}
-                     disabled={selectedTasks.length === 0 || saving}
-                     className="bg-yellow-500 text-white px-6 py-2 rounded-md font-medium 
-                        hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 
-                        disabled:bg-gray-400 disabled:cursor-not-allowed">
-                     {saving ? "GUARDANDO..." : "GUARDAR SELECCIÓN"}
-                  </button>
+                  <div className="flex gap-3">
+                     <button
+                        onClick={() => setShowEventsModal(true)}
+                        className="bg-purple-500 text-white px-6 py-2 rounded-md font-medium 
+                           hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 
+                           flex items-center gap-2">
+                        📅 GESTIONAR EVENTOS
+                     </button>
+                     <button
+                        onClick={handleShowConfirmModal}
+                        disabled={selectedTasks.length === 0 || saving}
+                        className="bg-yellow-500 text-white px-6 py-2 rounded-md font-medium 
+                           hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 
+                           disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        {saving ? "GUARDANDO..." : "GUARDAR SELECCIÓN"}
+                     </button>
+                  </div>
                </div>
             </div>
          )}
@@ -3319,67 +3642,540 @@ export default function UserProjectView() {
          {/* Modal de confirmación de guardar tareas */}
          {showConfirmModal && (
             <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
-               <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+               <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                     <h3 className="text-lg font-medium">Confirmar asignación de tareas</h3>
-                     <button onClick={() => setShowConfirmModal(false)} className="text-gray-400 hover:text-gray-500 focus:outline-none">
+                     <h3 className="text-lg font-medium">
+                        {showTimeScheduling ? "Programar horarios de trabajo" : "Confirmar asignación de tareas"}
+                     </h3>
+                     <button onClick={() => {
+                        setShowConfirmModal(false);
+                        setShowTimeScheduling(false);
+                        setTaskSchedules({});
+                     }} className="text-gray-400 hover:text-gray-500 focus:outline-none">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                      </button>
                   </div>
 
-                  <div className="px-6 py-4">
-                     <p className="mb-4 text-gray-700">
-                        Estás a punto de asignar estas {selectedTasks.length} tareas para el día de hoy ({format(new Date(), "dd/MM/yyyy")}). ¿Deseas continuar?
-                     </p>
+                  {!showTimeScheduling ? (
+                     <>
+                        <div className="px-6 py-4">
+                           <p className="mb-4 text-gray-700">
+                              Estás a punto de asignar estas {selectedTasks.length} tareas para el día de hoy ({format(new Date(), "dd/MM/yyyy")}). ¿Deseas continuar?
+                           </p>
 
-                     <div className="mb-4 p-3 bg-gray-50 rounded-md max-h-60 overflow-y-auto">
-                        <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de tareas seleccionadas:</h4>
-                        <ul className="divide-y divide-gray-200">
-                           {selectedTasks.map((taskId) => {
-                              const task = taskItems.find((t) => t.id === taskId);
-                              if (!task) return null;
+                           <div className="mb-4 p-3 bg-gray-50 rounded-md max-h-60 overflow-y-auto">
+                              <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de tareas seleccionadas:</h4>
+                              <ul className="divide-y divide-gray-200">
+                                 {selectedTasks.map((taskId) => {
+                                    const task = taskItems.find((t) => t.id === taskId);
+                                    if (!task) return null;
 
-                              return (
-                                 <li key={taskId} className="py-2">
-                                    <div className="flex items-start">
-                                       <div className="flex-shrink-0">{task.type === "subtask" ? <span className="inline-block w-6 h-6 rounded-full bg-indigo-100 text-indigo-800 text-xs font-medium flex items-center justify-center">S</span> : <span className="inline-block w-6 h-6 rounded-full bg-blue-100 text-blue-800 text-xs font-medium flex items-center justify-center">T</span>}</div>
-                                       <div className="ml-3">
-                                          <p className="text-sm font-medium text-gray-900">{task.title}</p>
-                                          {task.type === "subtask" && task.subtask_title && <p className="text-xs text-gray-500">Tarea principal: {task.subtask_title}</p>}
-                                          <div className="mt-1 flex items-center space-x-2">
-                                             {task.deadline && <span className="text-xs text-gray-500">Vence: {format(new Date(task.deadline), "dd/MM/yyyy")}</span>}
-                                             <span className="text-xs text-gray-500">Duración: {Math.round((task.estimated_duration / 60) * 100) / 100} h</span>
+                                    return (
+                                       <li key={taskId} className="py-1.5">
+                                          <div className="flex items-center">
+                                             <div className="flex-shrink-0">{task.type === "subtask" ? <span className="inline-block w-5 h-5 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">S</span> : <span className="inline-block w-5 h-5 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center">T</span>}</div>
+                                             <div className="ml-2 flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900">{task.title}</p>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                   {task.type === "subtask" && task.subtask_title && <span>T.P: {task.subtask_title}</span>}
+                                                   {task.deadline && <span className="flex-shrink-0">📅 {format(new Date(task.deadline), "dd/MM")}</span>}
+                                                   <span className="flex-shrink-0">⏱️ {Math.round((task.estimated_duration / 60) * 100) / 100} h</span>
+                                                </div>
+                                             </div>
+                                          </div>
+                                       </li>
+                                    );
+                                 })}
+                              </ul>
+                           </div>
+
+                           <div className="bg-yellow-50 p-3 rounded-md mb-4">
+                              <div className="flex items-center">
+                                 <svg className="h-5 w-5 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                 </svg>
+                                 <p className="text-sm font-medium text-yellow-800">
+                                    Tiempo total del día: {totalEstimatedDuration} hora{totalEstimatedDuration !== 1 ? "s" : ""} (tareas + eventos)
+                                 </p>
+                              </div>
+                           </div>
+                        </div>
+
+                        <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
+                           <button onClick={() => setShowConfirmModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                              Cancelar
+                           </button>
+                           <button onClick={handleSaveWithoutSchedule} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                              Asignar sin horarios
+                           </button>
+                           <button onClick={handleConfirmSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                              Programar horarios
+                           </button>
+                        </div>
+                     </>
+                  ) : (
+                     <>
+                        <div className="px-6 py-4">
+                           <p className="mb-4 text-gray-700">
+                              Asigna horarios específicos para cada tarea. Las tareas sin horario asignado se guardarán sin programación.
+                           </p>
+
+                           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                              {/* Lista de tareas para programar */}
+                              <div className="space-y-4">
+                                 <h4 className="text-lg font-medium text-gray-900">Tareas seleccionadas</h4>
+                                 {selectedTasks.map((taskId) => {
+                                    const task = taskItems.find((t) => t.id === taskId);
+                                    if (!task) return null;
+
+                                    const schedule = taskSchedules[taskId];
+                                    const durationHours = Math.round((task.estimated_duration / 60) * 100) / 100;
+
+                                    return (
+                                       <div key={taskId} className="p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
+                                          <div className="flex items-start justify-between gap-3">
+                                             <div className="flex-1 min-w-0">
+                                                <div className="flex items-center mb-1">
+                                                   <span className={`inline-block w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center mr-2 flex-shrink-0 ${
+                                                      task.type === "subtask" 
+                                                         ? "bg-indigo-500 text-white" 
+                                                         : "bg-blue-500 text-white"
+                                                   }`}>
+                                                      {task.type === "subtask" ? "S" : "T"}
+                                                   </span>
+                                                   <h5 className="text-sm font-medium text-gray-900 leading-tight">{task.title}</h5>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3 text-xs text-gray-500 ml-7">
+                                                   {task.type === "subtask" && task.subtask_title && (
+                                                      <span>T.P: {task.subtask_title}</span>
+                                                   )}
+                                                   <span className="flex-shrink-0">⏱️ {durationHours} h</span>
+                                                </div>
+                                                
+                                                {schedule && (
+                                                   <div className="mt-2 ml-7 px-2 py-1 bg-green-50 rounded text-xs">
+                                                      <span className="text-green-800 font-medium">
+                                                         📅 {(() => {
+                                                            const startMinutes = parseInt(schedule.startTime.split(':')[0]) * 60 + parseInt(schedule.startTime.split(':')[1]);
+                                                            const endMinutes = parseInt(schedule.endTime.split(':')[0]) * 60 + parseInt(schedule.endTime.split(':')[1]);
+                                                            return `${minutesToTimeAMPM(startMinutes)} - ${minutesToTimeAMPM(endMinutes)}`;
+                                                         })()}
+                                                      </span>
+                                                   </div>
+                                                )}
+                                             </div>
+                                             
+                                             <div className="flex flex-col gap-1.5 flex-shrink-0">
+                                                <button
+                                                   onClick={() => setSchedulingTaskId(taskId)}
+                                                   className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-sm whitespace-nowrap"
+                                                >
+                                                   {schedule ? "Cambiar" : "Asignar"}
+                                                </button>
+                                                {schedule && (
+                                                   <button
+                                                      onClick={() => {
+                                                         const newSchedules = { ...taskSchedules };
+                                                         delete newSchedules[taskId];
+                                                         setTaskSchedules(newSchedules);
+                                                      }}
+                                                      className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors shadow-sm whitespace-nowrap"
+                                                   >
+                                                      Quitar
+                                                   </button>
+                                                )}
+                                             </div>
                                           </div>
                                        </div>
+                                    );
+                                 })}
+                              </div>
+
+                              {/* Interfaz de selección de horario */}
+                              {schedulingTaskId && (
+                                 <div className="bg-gray-50 p-4 rounded-lg">
+                                    <h4 className="text-lg font-medium text-gray-900 mb-4">
+                                       Programar: {taskItems.find(t => t.id === schedulingTaskId)?.title}
+                                    </h4>
+                                    
+                                    <div className="mb-4">
+                                       <label className="block text-sm font-medium text-gray-700 mb-2">
+                                          Hora de inicio
+                                       </label>
+                                       <select
+                                          value={selectedTimeSlot?.start || ''}
+                                          onChange={(e) => {
+                                             const startMinutes = parseInt(e.target.value);
+                                             const task = taskItems.find(t => t.id === schedulingTaskId);
+                                             if (task) {
+                                                const durationMinutes = task.estimated_duration;
+                                                const endMinutes = startMinutes + durationMinutes;
+                                                setSelectedTimeSlot({ start: startMinutes, end: endMinutes });
+                                             }
+                                          }}
+                                          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                       >
+                                          <option value="">Seleccionar hora</option>
+                                          {generateTimeSlots().map((slot) => {
+                                             const task = taskItems.find(t => t.id === schedulingTaskId);
+                                             const durationMinutes = task?.estimated_duration || 0;
+                                             const hasConflict = wouldStartTimeConflict(slot.time, durationMinutes, schedulingTaskId);
+                                             
+                                             return (
+                                                <option 
+                                                   key={slot.time} 
+                                                   value={slot.time}
+                                                   disabled={hasConflict}
+                                                   style={{ 
+                                                      color: hasConflict ? '#9CA3AF' : 'inherit',
+                                                      fontStyle: hasConflict ? 'italic' : 'normal'
+                                                   }}
+                                                >
+                                                   {slot.display} {hasConflict ? '(ocupado)' : ''}
+                                                </option>
+                                             );
+                                          })}
+                                       </select>
                                     </div>
-                                 </li>
-                              );
-                           })}
-                        </ul>
-                     </div>
 
-                     <div className="bg-yellow-50 p-3 rounded-md mb-4">
-                        <div className="flex items-center">
-                           <svg className="h-5 w-5 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                           </svg>
-                           <p className="text-sm font-medium text-yellow-800">
-                              Tiempo total estimado: {totalEstimatedDuration} hora{totalEstimatedDuration !== 1 ? "s" : ""}
-                           </p>
+                                    {selectedTimeSlot && (
+                                       <div className="mb-4 p-3 bg-blue-50 rounded-md">
+                                          <p className="text-sm text-blue-800">
+                                             <strong>Horario seleccionado:</strong><br />
+                                             {minutesToTimeAMPM(selectedTimeSlot.start)} - {minutesToTimeAMPM(selectedTimeSlot.end)}
+                                          </p>
+                                          {hasScheduleConflict(selectedTimeSlot.start, selectedTimeSlot.end, schedulingTaskId) && (
+                                             <p className="text-sm text-red-600 mt-2">
+                                                ⚠️ Este horario tiene conflicto con otra tarea programada
+                                             </p>
+                                          )}
+                                       </div>
+                                    )}
+
+                                    <div className="flex space-x-2">
+                                       <button
+                                          onClick={() => {
+                                             if (selectedTimeSlot && schedulingTaskId) {
+                                                setTaskSchedules(prev => ({
+                                                   ...prev,
+                                                   [schedulingTaskId]: {
+                                                      startTime: minutesToTime(selectedTimeSlot.start),
+                                                      endTime: minutesToTime(selectedTimeSlot.end),
+                                                      duration: selectedTimeSlot.end - selectedTimeSlot.start
+                                                   }
+                                                }));
+                                                setSchedulingTaskId(null);
+                                                setSelectedTimeSlot(null);
+                                             }
+                                          }}
+                                          disabled={!selectedTimeSlot || (selectedTimeSlot && hasScheduleConflict(selectedTimeSlot.start, selectedTimeSlot.end, schedulingTaskId))}
+                                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                       >
+                                          Confirmar horario
+                                       </button>
+                                       <button
+                                          onClick={() => {
+                                             setSchedulingTaskId(null);
+                                             setSelectedTimeSlot(null);
+                                          }}
+                                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                       >
+                                          Cancelar
+                                       </button>
+                                    </div>
+                                 </div>
+                              )}
+
+                              {/* Timeline visual del día */}
+                              <div className="bg-gray-50 p-4 rounded-lg">
+                                 <h4 className="text-lg font-medium text-gray-900 mb-4">
+                                    📅 Vista del día - {format(new Date(), "dd/MM/yyyy")}
+                                 </h4>
+                                 
+                                 <div className="relative border border-gray-200 rounded-lg bg-white overflow-hidden">
+                                    {/* Grid de fondo con horarios */}
+                                    <div className="relative">
+                                       {(() => {
+                                          const timeSlots = [];
+                                          const SLOT_HEIGHT = 30; // Altura de cada slot de 30 minutos
+                                          
+                                          // Generar slots de 30 minutos (8 AM - 6 PM)
+                                          for (let hour = 8; hour <= 18; hour++) {
+                                             for (let minutes = 0; minutes < 60; minutes += 30) {
+                                                if (hour === 18 && minutes > 0) break;
+                                                
+                                                const timeInMinutes = hour * 60 + minutes;
+                                                const timeAMPM = minutesToTimeAMPM(timeInMinutes);
+                                                const isHourMark = minutes === 0;
+                                                
+                                                timeSlots.push({
+                                                   timeInMinutes,
+                                                   timeAMPM,
+                                                   isHourMark
+                                                });
+                                             }
+                                          }
+                                          
+                                          return (
+                                             <div className="relative" style={{ height: `${timeSlots.length * SLOT_HEIGHT}px` }}>
+                                                {/* Grid de tiempo de fondo */}
+                                                {timeSlots.map((slot, index) => (
+                                                   <div
+                                                      key={slot.timeInMinutes}
+                                                      className={`absolute w-full border-b ${
+                                                         slot.isHourMark ? 'border-gray-300' : 'border-gray-100'
+                                                      }`}
+                                                      style={{
+                                                         height: `${SLOT_HEIGHT}px`,
+                                                         top: `${index * SLOT_HEIGHT}px`,
+                                                         minHeight: `${SLOT_HEIGHT}px`,
+                                                         maxHeight: `${SLOT_HEIGHT}px`
+                                                      }}
+                                                   >
+                                                      <div className="flex items-center h-full">
+                                                         <div 
+                                                            className={`w-16 flex-shrink-0 text-xs font-mono px-2 flex items-center justify-start ${
+                                                               slot.isHourMark ? 'text-gray-700 font-medium' : 'text-gray-400'
+                                                            }`}
+                                                            style={{ height: `${SLOT_HEIGHT}px` }}
+                                                         >
+                                                            {slot.isHourMark ? slot.timeAMPM : ''}
+                                                         </div>
+                                                         <div 
+                                                            className="flex-1 bg-gray-50 bg-opacity-20"
+                                                            style={{ height: `${SLOT_HEIGHT}px` }}
+                                                         ></div>
+                                                      </div>
+                                                   </div>
+                                                ))}
+                                                
+                                                {/* Tareas programadas posicionadas absolutamente */}
+                                                {Object.entries(taskSchedules).map(([taskId, schedule]) => {
+                                                   if (!schedule) return null;
+                                                   
+                                                   const startMinutes = parseInt(schedule.startTime.split(':')[0]) * 60 + parseInt(schedule.startTime.split(':')[1]);
+                                                   const endMinutes = parseInt(schedule.endTime.split(':')[0]) * 60 + parseInt(schedule.endTime.split(':')[1]);
+                                                   const durationMinutes = endMinutes - startMinutes;
+                                                   
+                                                   // Calcular posición relativa desde las 8 AM
+                                                   const startOffset = (startMinutes - 8 * 60) / 30; // En slots de 30 min
+                                                   const durationSlots = durationMinutes / 30;
+                                                   
+                                                   const task = taskItems.find(t => t.id === taskId);
+                                                   
+                                                   return (
+                                                      <div
+                                                         key={taskId}
+                                                         className="absolute px-3 py-2 rounded-lg text-sm border-l-4 border-blue-500 bg-gradient-to-r from-blue-50 to-blue-100 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer"
+                                                         style={{
+                                                            top: `${startOffset * SLOT_HEIGHT + 1}px`,
+                                                            height: `${durationSlots * SLOT_HEIGHT - 2}px`,
+                                                            left: '68px', // 64px (w-16) + 4px de margen
+                                                            right: '8px'
+                                                         }}
+                                                         title={`${task?.title || 'Tarea sin título'} (${minutesToTimeAMPM(startMinutes)} - ${minutesToTimeAMPM(endMinutes)})`}
+                                                      >
+                                                         <div className="flex items-start h-full">
+                                                            <span className={`inline-block w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center mr-3 mt-0.5 flex-shrink-0 shadow-sm transition-transform duration-200 hover:scale-110 ${
+                                                               task?.type === "subtask" 
+                                                                  ? "bg-indigo-500 text-white"
+                                                                  : "bg-blue-500 text-white"
+                                                            }`}>
+                                                               {task?.type === "subtask" ? "S" : "T"}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0 overflow-hidden">
+                                                               <div className="font-semibold leading-tight text-blue-900 mb-1 truncate">
+                                                                  {task?.title || 'Tarea sin título'}
+                                                               </div>
+                                                               <div className="text-xs text-blue-600 font-medium truncate opacity-90">
+                                                                  {minutesToTimeAMPM(startMinutes)} - {minutesToTimeAMPM(endMinutes)}
+                                                               </div>
+                                                            </div>
+                                                         </div>
+                                                      </div>
+                                                   );
+                                                })}
+                                                
+                                                {/* Eventos de trabajo posicionados absolutamente */}
+                                                {workEvents.map((event) => {
+                                                   const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                                   const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                                   const durationMinutes = endMinutes - startMinutes;
+                                                   
+                                                   // Calcular posición relativa desde las 8 AM
+                                                   const startOffset = (startMinutes - 8 * 60) / 30; // En slots de 30 min
+                                                   const durationSlots = durationMinutes / 30;
+                                                   
+                                                   return (
+                                                      <div
+                                                         key={event.id}
+                                                         className="absolute px-3 py-2 rounded-lg text-sm border-l-4 border-purple-500 bg-gradient-to-r from-purple-50 to-purple-100 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer"
+                                                         style={{
+                                                            top: `${startOffset * SLOT_HEIGHT + 1}px`,
+                                                            height: `${durationSlots * SLOT_HEIGHT - 2}px`,
+                                                            left: '68px', // 64px (w-16) + 4px de margen
+                                                            right: '8px'
+                                                         }}
+                                                         title={`${event.title} (${minutesToTimeAMPM(startMinutes)} - ${minutesToTimeAMPM(endMinutes)})`}
+                                                      >
+                                                         <div className="flex items-start h-full">
+                                                            <span className="text-lg mr-3 mt-0.5 flex-shrink-0 transition-transform duration-200 hover:scale-110">
+                                                               {event.event_type === 'meeting' ? '🤝' :
+                                                                event.event_type === 'daily' ? '🗣️' :
+                                                                event.event_type === 'review' ? '📋' :
+                                                                event.event_type === 'planning' ? '📅' :
+                                                                event.event_type === 'training' ? '📚' :
+                                                                event.event_type === 'break' ? '☕' : '📌'}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0 overflow-hidden">
+                                                               <div className="font-semibold leading-tight text-purple-900 mb-1 truncate">
+                                                                  {event.title}
+                                                               </div>
+                                                               <div className="text-xs text-purple-600 font-medium truncate opacity-90">
+                                                                  {minutesToTimeAMPM(startMinutes)} - {minutesToTimeAMPM(endMinutes)}
+                                                               </div>
+                                                            </div>
+                                                         </div>
+                                                      </div>
+                                                   );
+                                                })}
+                                             </div>
+                                          );
+                                       })()}
+                                    </div>
+                                 </div>
+
+                                 {Object.keys(taskSchedules).length === 0 && (
+                                    <div className="text-center py-8 text-gray-500">
+                                       <div className="text-4xl mb-2">📅</div>
+                                       <p className="text-sm">Programa horarios para ver tu día</p>
+                                    </div>
+                                 )}
+
+                                 {Object.keys(taskSchedules).length > 0 && (
+                                    <div className="mt-4 p-3 bg-white rounded border">
+                                       <h5 className="text-sm font-medium text-gray-700 mb-2">Resumen del día:</h5>
+                                       <div className="grid grid-cols-2 gap-2 text-xs">
+                                          <div>
+                                             <span className="text-gray-500">Tareas programadas:</span>
+                                             <span className="ml-1 font-medium">{Object.keys(taskSchedules).length}</span>
+                                          </div>
+                                          <div>
+                                             <span className="text-gray-500">Tiempo total:</span>
+                                             <span className="ml-1 font-medium">
+                                                {(() => {
+                                                   // Tiempo de tareas programadas
+                                                   const taskTime = Object.values(taskSchedules).reduce((total, schedule) => {
+                                                      if (!schedule) return total;
+                                                      return total + schedule.duration;
+                                                   }, 0);
+                                                   
+                                                   // Tiempo de eventos
+                                                   const eventTime = workEvents.reduce((total, event) => {
+                                                      const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                                      const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                                      return total + (endMinutes - startMinutes);
+                                                   }, 0);
+                                                   
+                                                   return ((taskTime + eventTime) / 60).toFixed(1);
+                                                })()} h
+                                             </span>
+                                          </div>
+                                       </div>
+                                       
+                                       {(() => {
+                                          // Detectar conflictos entre tareas
+                                          const conflicts = [];
+                                          const scheduleEntries = Object.entries(taskSchedules).filter(([, schedule]) => schedule);
+                                          
+                                          for (let i = 0; i < scheduleEntries.length; i++) {
+                                             for (let j = i + 1; j < scheduleEntries.length; j++) {
+                                                const [taskId1, schedule1] = scheduleEntries[i];
+                                                const [taskId2, schedule2] = scheduleEntries[j];
+                                                
+                                                if (!schedule1 || !schedule2) continue;
+                                                
+                                                const start1 = parseInt(schedule1.startTime.split(':')[0]) * 60 + parseInt(schedule1.startTime.split(':')[1]);
+                                                const end1 = parseInt(schedule1.endTime.split(':')[0]) * 60 + parseInt(schedule1.endTime.split(':')[1]);
+                                                const start2 = parseInt(schedule2.startTime.split(':')[0]) * 60 + parseInt(schedule2.startTime.split(':')[1]);
+                                                const end2 = parseInt(schedule2.endTime.split(':')[0]) * 60 + parseInt(schedule2.endTime.split(':')[1]);
+                                                
+                                                if (start1 < end2 && start2 < end1) {
+                                                   const task1 = taskItems.find(t => t.id === taskId1);
+                                                   const task2 = taskItems.find(t => t.id === taskId2);
+                                                   conflicts.push({
+                                                      item1: task1?.title || 'Tarea desconocida',
+                                                      item2: task2?.title || 'Tarea desconocida',
+                                                      type: 'task-task'
+                                                   });
+                                                }
+                                             }
+                                          }
+                                          
+                                          // Detectar conflictos entre tareas y eventos
+                                          scheduleEntries.forEach(([taskId, schedule]) => {
+                                             if (!schedule) return;
+                                             
+                                             const taskStart = parseInt(schedule.startTime.split(':')[0]) * 60 + parseInt(schedule.startTime.split(':')[1]);
+                                             const taskEnd = parseInt(schedule.endTime.split(':')[0]) * 60 + parseInt(schedule.endTime.split(':')[1]);
+                                             
+                                             workEvents.forEach(event => {
+                                                const eventStart = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                                const eventEnd = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                                
+                                                if (taskStart < eventEnd && eventStart < taskEnd) {
+                                                   const task = taskItems.find(t => t.id === taskId);
+                                                   conflicts.push({
+                                                      item1: task?.title || 'Tarea desconocida',
+                                                      item2: event.title,
+                                                      type: 'task-event'
+                                                   });
+                                                }
+                                             });
+                                          });
+                                          
+                                          if (conflicts.length > 0) {
+                                             return (
+                                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded">
+                                                   <div className="flex items-center text-red-700 text-xs font-medium mb-1">
+                                                      ⚠️ Conflictos detectados
+                                                   </div>
+                                                   {conflicts.map((conflict, index) => (
+                                                      <div key={index} className="text-xs text-red-600">
+                                                         • {conflict.item1} vs {conflict.item2}
+                                                         {conflict.type === 'task-event' && <span className="text-purple-600"> (evento)</span>}
+                                                      </div>
+                                                   ))}
+                                                </div>
+                                             );
+                                          }
+                                          return null;
+                                       })()}
+                                    </div>
+                                 )}
+                              </div>
+                           </div>
                         </div>
-                     </div>
-                  </div>
 
-                  <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
-                     <button onClick={() => setShowConfirmModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500">
-                        Cancelar
-                     </button>
-                     <button onClick={handleConfirmSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                        {saving ? "Guardando..." : "Confirmar y guardar"}
-                     </button>
-                  </div>
+                        <div className="px-6 py-3 bg-gray-50 flex justify-between border-t border-gray-200">
+                           <button 
+                              onClick={() => setShowTimeScheduling(false)} 
+                              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                           >
+                              ← Volver
+                           </button>
+                           
+                           <div className="flex space-x-3">
+                              <button onClick={handleSaveWithSchedule} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                 {saving ? "Guardando..." : "Guardar con horarios"}
+                              </button>
+                           </div>
+                        </div>
+                     </>
+                  )}
                </div>
             </div>
          )}
@@ -3832,6 +4628,217 @@ export default function UserProjectView() {
                      </button>
                      <button onClick={handleConfirmUnassign} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 disabled:bg-gray-400">
                         {saving ? "DESASIGNANDO..." : "Sí, desasignar"}
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* Modal de gestión de eventos de trabajo */}
+         {showEventsModal && (
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+               <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                     <h3 className="text-lg font-medium">
+                        📅 Gestionar eventos del día - {format(new Date(), "dd/MM/yyyy")}
+                     </h3>
+                     <button 
+                        onClick={() => {
+                           setShowEventsModal(false);
+                           resetEventForm();
+                        }} 
+                        className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                     >
+                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                     </button>
+                  </div>
+
+                  <div className="px-6 py-4">
+                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Formulario para crear/editar eventos */}
+                        <div className="space-y-4">
+                           <h4 className="text-lg font-medium text-gray-900">
+                              {editingEvent ? "Editar evento" : "Nuevo evento"}
+                           </h4>
+                           
+                           <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                 Título del evento
+                              </label>
+                              <input
+                                 type="text"
+                                 value={eventForm.title}
+                                 onChange={(e) => setEventForm(prev => ({ ...prev, title: e.target.value }))}
+                                 placeholder="ej: Daily standup, Reunión con cliente..."
+                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                              />
+                           </div>
+
+                           <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                 Tipo de evento
+                              </label>
+                              <select 
+                                 value={eventForm.event_type}
+                                 onChange={(e) => setEventForm(prev => ({ ...prev, event_type: e.target.value as WorkEvent['event_type'] }))}
+                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                              >
+                                 <option value="meeting">🤝 Reunión</option>
+                                 <option value="daily">🗣️ Daily standup</option>
+                                 <option value="review">📋 Revisión</option>
+                                 <option value="planning">📅 Planificación</option>
+                                 <option value="training">📚 Capacitación</option>
+                                 <option value="break">☕ Descanso</option>
+                                 <option value="other">📌 Otro</option>
+                              </select>
+                           </div>
+
+                           <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Hora de inicio
+                                 </label>
+                                 <select 
+                                    value={eventForm.start_time}
+                                    onChange={(e) => setEventForm(prev => ({ ...prev, start_time: parseInt(e.target.value) }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                 >
+                                    {generateTimeSlots().map((slot) => (
+                                       <option key={slot.time} value={slot.time}>
+                                          {slot.display}
+                                       </option>
+                                    ))}
+                                 </select>
+                              </div>
+                              <div>
+                                 <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Hora de fin
+                                 </label>
+                                 <select 
+                                    value={eventForm.end_time}
+                                    onChange={(e) => setEventForm(prev => ({ ...prev, end_time: parseInt(e.target.value) }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                 >
+                                    {generateTimeSlots().map((slot) => (
+                                       <option key={slot.time} value={slot.time}>
+                                          {slot.display}
+                                       </option>
+                                    ))}
+                                 </select>
+                              </div>
+                           </div>
+
+                           <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                 Descripción (opcional)
+                              </label>
+                              <textarea
+                                 rows={3}
+                                 value={eventForm.description}
+                                 onChange={(e) => setEventForm(prev => ({ ...prev, description: e.target.value }))}
+                                 placeholder="Detalles adicionales del evento..."
+                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                              />
+                           </div>
+
+                           <div className="flex gap-3">
+                              <button
+                                 onClick={handleSaveEvent}
+                                 disabled={savingEvent}
+                                 className="px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md shadow-sm hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                              >
+                                 {savingEvent ? "Guardando..." : editingEvent ? "Actualizar evento" : "Crear evento"}
+                              </button>
+                              {editingEvent && (
+                                 <button
+                                    onClick={resetEventForm}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                                 >
+                                    Cancelar
+                                 </button>
+                              )}
+                           </div>
+                        </div>
+
+                        {/* Lista de eventos del día */}
+                        <div className="space-y-4">
+                           <h4 className="text-lg font-medium text-gray-900">Eventos programados</h4>
+                           
+                           {loadingEvents ? (
+                              <div className="text-center py-8 text-gray-500">
+                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2"></div>
+                                 <p className="text-sm">Cargando eventos...</p>
+                              </div>
+                           ) : workEvents.length === 0 ? (
+                              <div className="text-center py-8 text-gray-500">
+                                 <div className="text-4xl mb-2">📅</div>
+                                 <p className="text-sm">No tienes eventos programados para hoy</p>
+                                 <p className="text-xs text-gray-400 mt-1">Crea tu primer evento usando el formulario</p>
+                              </div>
+                           ) : (
+                              <div className="space-y-2">
+                                 {workEvents.map((event) => (
+                                    <div key={event.id} className="p-3 border border-gray-200 rounded-lg bg-gray-50 hover:bg-gray-100">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1">
+                                             <div className="flex items-center mb-1">
+                                                <span className="text-lg mr-2">
+                                                   {event.event_type === 'meeting' ? '🤝' :
+                                                    event.event_type === 'daily' ? '🗣️' :
+                                                    event.event_type === 'review' ? '📋' :
+                                                    event.event_type === 'planning' ? '📅' :
+                                                    event.event_type === 'training' ? '📚' :
+                                                    event.event_type === 'break' ? '☕' : '📌'}
+                                                </span>
+                                                <h5 className="font-medium text-gray-900">{event.title}</h5>
+                                             </div>
+                                             <p className="text-sm text-gray-600 mb-1">
+                                                {(() => {
+                                                   const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                                   const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                                   return `${minutesToTimeAMPM(startMinutes)} - ${minutesToTimeAMPM(endMinutes)}`;
+                                                })()}
+                                             </p>
+                                             {event.description && (
+                                                <p className="text-xs text-gray-500">{event.description}</p>
+                                             )}
+                                          </div>
+                                          <div className="ml-3 flex gap-1">
+                                             <button
+                                                onClick={() => handleEditEvent(event)}
+                                                className="p-1 text-gray-400 hover:text-purple-600"
+                                                title="Editar evento"
+                                             >
+                                                ✏️
+                                             </button>
+                                             <button
+                                                onClick={() => handleDeleteEvent(event.id)}
+                                                className="p-1 text-gray-400 hover:text-red-600"
+                                                title="Eliminar evento"
+                                             >
+                                                🗑️
+                                             </button>
+                                          </div>
+                                       </div>
+                                    </div>
+                                 ))}
+                              </div>
+                           )}
+                        </div>
+                     </div>
+                  </div>
+
+                  <div className="px-6 py-3 bg-gray-50 flex justify-end border-t border-gray-200">
+                     <button 
+                        onClick={() => {
+                           setShowEventsModal(false);
+                           resetEventForm();
+                        }}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                     >
+                        Cerrar
                      </button>
                   </div>
                </div>
