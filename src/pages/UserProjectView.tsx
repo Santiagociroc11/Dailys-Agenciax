@@ -4671,7 +4671,7 @@ export default function UserProjectView() {
                                  type="text"
                                  value={eventForm.title}
                                  onChange={(e) => setEventForm(prev => ({ ...prev, title: e.target.value }))}
-                                 placeholder="ej: Daily standup, Reunión con cliente..."
+                                 placeholder="ej: Daily, Reunión con cliente..."
                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                               />
                            </div>
@@ -4686,9 +4686,7 @@ export default function UserProjectView() {
                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                               >
                                  <option value="meeting">🤝 Reunión</option>
-                                 <option value="daily">🗣️ Daily standup</option>
-                                 <option value="review">📋 Revisión</option>
-                                 <option value="planning">📅 Planificación</option>
+                                 <option value="daily">🗣️ Daily</option>
                                  <option value="training">📚 Capacitación</option>
                                  <option value="break">☕ Descanso</option>
                                  <option value="other">📌 Otro</option>
