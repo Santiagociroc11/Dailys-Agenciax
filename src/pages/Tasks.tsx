@@ -383,6 +383,98 @@ function Tasks() {
 
         await fetchTasks();
         await fetchSubtasks();
+        
+        // 🔔 Notificar a usuarios sobre tareas/subtareas disponibles inmediatamente
+        try {
+          const createdTask = data[0];
+          
+          // Obtener nombre del proyecto
+          let projectName = "Proyecto sin nombre";
+          if (createdTask.project_id) {
+            const { data: projectData } = await supabase
+              .from('projects')
+              .select('name')
+              .eq('id', createdTask.project_id)
+              .single();
+              
+            if (projectData) {
+              projectName = projectData.name;
+            }
+          }
+          
+          if (newTask.subtasks.length > 0) {
+            // Para tareas con subtareas, notificar usuarios de subtareas disponibles
+            const { data: createdSubtasks } = await supabase
+              .from('subtasks')
+              .select('id, title, assigned_to, sequence_order')
+              .eq('task_id', taskId)
+              .order('sequence_order');
+              
+            if (createdSubtasks) {
+              // Determinar qué subtareas están disponibles inmediatamente
+              let availableSubtasks = [];
+              
+              if (createdTask.is_sequential) {
+                // Para tareas secuenciales, solo la primera (sequence_order = 1)
+                availableSubtasks = createdSubtasks.filter(st => st.sequence_order === 1);
+              } else {
+                // Para tareas paralelas, todas las subtareas están disponibles
+                availableSubtasks = createdSubtasks;
+              }
+              
+              // Notificar a cada usuario de subtareas disponibles
+              for (const subtask of availableSubtasks) {
+                if (subtask.assigned_to) {
+                  fetch('/api/telegram/task-available', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      userIds: [subtask.assigned_to],
+                      taskTitle: subtask.title,
+                      projectName: projectName,
+                      reason: 'created_available',
+                      isSubtask: true,
+                      parentTaskTitle: createdTask.title
+                    })
+                  }).then(response => {
+                    if (response.ok) {
+                      console.log(`✅ [NOTIFICATION] Notificación de subtarea creada enviada`);
+                    } else {
+                      console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de subtarea creada: ${response.status}`);
+                    }
+                  }).catch(error => {
+                    console.error('🚨 [NOTIFICATION] Error al enviar notificación de subtarea creada:', error);
+                  });
+                }
+              }
+            }
+          } else {
+            // Para tareas sin subtareas, notificar usuarios asignados
+            if (finalAssignedUsers && finalAssignedUsers.length > 0) {
+              fetch('/api/telegram/task-available', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userIds: finalAssignedUsers,
+                  taskTitle: createdTask.title,
+                  projectName: projectName,
+                  reason: 'created_available',
+                  isSubtask: false
+                })
+              }).then(response => {
+                if (response.ok) {
+                  console.log(`✅ [NOTIFICATION] Notificación de tarea creada enviada`);
+                } else {
+                  console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de tarea creada: ${response.status}`);
+                }
+              }).catch(error => {
+                console.error('🚨 [NOTIFICATION] Error al enviar notificación de tarea creada:', error);
+              });
+            }
+          }
+        } catch (notificationError) {
+          console.error('🚨 [NOTIFICATION] Error preparando notificaciones de tarea creada:', notificationError);
+        }
 
       setTasks([...(data || []), ...tasks]);
       setShowModal(false);

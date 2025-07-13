@@ -420,6 +420,129 @@ ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.
 🔧 La ${taskType} ha sido devuelta por ${escapeHtml(adminName)} al usuario para correcciones.`;
 }
 
+// Función para crear mensaje de notificación de tarea disponible
+export function createTaskAvailableMessage(
+  taskTitle: string, 
+  projectName: string,
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
+  
+  let reasonText = '';
+  let icon = '🔔';
+  
+  switch (reason) {
+    case 'unblocked':
+      reasonText = 'La tarea ha sido desbloqueada y está disponible para trabajar';
+      icon = '🔓';
+      break;
+    case 'returned':
+      reasonText = 'La tarea ha sido devuelta y está disponible para correcciones';
+      icon = '🔄';
+      break;
+    case 'sequential_dependency_completed':
+      reasonText = 'Las dependencias previas se han completado y ahora puedes trabajar en esta tarea';
+      icon = '⏭️';
+      break;
+    case 'created_available':
+      reasonText = 'Una nueva tarea está disponible para trabajar';
+      icon = '✨';
+      break;
+  }
+  
+  return `${icon} <b>TAREA DISPONIBLE</b>
+
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+
+💡 <b>Motivo:</b> ${reasonText}
+
+🚀 Puedes asignar esta ${taskType} en tu panel de trabajo.`;
+}
+
+// Función para notificar a un usuario específico sobre tarea disponible
+export async function notifyTaskAvailable(
+  userId: string,
+  taskTitle: string,
+  projectName: string,
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): Promise<boolean> {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Variables de entorno de Supabase no configuradas');
+      return false;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // Obtener telegram_chat_id del usuario
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('telegram_chat_id, name, email')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !userData) {
+      console.error('Error obteniendo datos del usuario:', userError);
+      return false;
+    }
+
+    if (!userData.telegram_chat_id) {
+      console.log(`Usuario ${userData.name || userData.email} no tiene telegram_chat_id configurado. Saltando notificación.`);
+      return false;
+    }
+
+    // Crear y enviar mensaje
+    const message = createTaskAvailableMessage(taskTitle, projectName, reason, isSubtask, parentTaskTitle);
+    const success = await sendTelegramMessage(userData.telegram_chat_id, message);
+
+    if (success) {
+      console.log(`✅ Notificación de tarea disponible enviada a ${userData.name || userData.email}`);
+    } else {
+      console.error(`❌ Error enviando notificación de tarea disponible a ${userData.name || userData.email}`);
+    }
+
+    return success;
+  } catch (error) {
+    console.error('Error en notifyTaskAvailable:', error);
+    return false;
+  }
+}
+
+// Función para notificar a múltiples usuarios sobre tarea disponible
+export async function notifyMultipleUsersTaskAvailable(
+  userIds: string[],
+  taskTitle: string,
+  projectName: string,
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): Promise<number> {
+  let successCount = 0;
+  
+  for (const userId of userIds) {
+    const success = await notifyTaskAvailable(userId, taskTitle, projectName, reason, isSubtask, parentTaskTitle);
+    if (success) {
+      successCount++;
+    }
+    // Pequeña pausa entre notificaciones para evitar rate limiting
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  console.log(`Notificaciones de tarea disponible enviadas: ${successCount}/${userIds.length}`);
+  return successCount;
+}
+
 export async function handleTestNotification(req: any, res: any) {
     const { chatId, message } = req.body;
   

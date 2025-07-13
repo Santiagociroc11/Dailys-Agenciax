@@ -9,7 +9,8 @@ import {
   createTaskInReviewMessage,
   createTaskApprovedMessage,
   createTaskReturnedMessage,
-  getTimeInfo
+  getTimeInfo,
+  notifyMultipleUsersTaskAvailable
 } from './api/telegram.js';
 
 const app = express();
@@ -174,6 +175,70 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
 
   } catch (error) {
     console.error('Error en admin-notification endpoint:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Error interno del servidor.' 
+    });
+  }
+});
+
+// Endpoint para notificaciones de tareas disponibles
+app.post('/api/telegram/task-available', async (req, res) => {
+  try {
+    const { 
+      userIds, 
+      taskTitle, 
+      projectName,
+      reason,
+      isSubtask = false,
+      parentTaskTitle
+    } = req.body;
+
+    // Validar parámetros requeridos
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'El parámetro userIds es requerido y debe ser un array no vacío' 
+      });
+    }
+
+    if (!taskTitle || !projectName || !reason) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Los parámetros taskTitle, projectName y reason son requeridos' 
+      });
+    }
+
+    // Validar que el reason sea válido
+    const validReasons = ['unblocked', 'returned', 'sequential_dependency_completed', 'created_available'];
+    if (!validReasons.includes(reason)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `El parámetro reason debe ser uno de: ${validReasons.join(', ')}` 
+      });
+    }
+
+    console.log(`[SERVER] Enviando notificaciones de tarea disponible. Reason: ${reason}, Users: ${userIds.length}, Task: ${taskTitle}`);
+
+    // Enviar las notificaciones
+    const successCount = await notifyMultipleUsersTaskAvailable(
+      userIds, 
+      taskTitle, 
+      projectName, 
+      reason, 
+      isSubtask, 
+      parentTaskTitle
+    );
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `Notificaciones enviadas correctamente.`,
+      sentCount: successCount,
+      totalUsers: userIds.length
+    });
+
+  } catch (error) {
+    console.error('Error en task-available endpoint:', error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 

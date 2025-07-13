@@ -583,6 +583,89 @@ function Management() {
       // 2. Si se desbloquea una tarea (cambio de 'blocked' a 'pending'), eliminar task_work_assignments
       if (previousStatus === 'blocked' && newStatus === 'pending') {
         await removeTaskWorkAssignments(itemId, isSubtask ? 'subtask' : 'task');
+        
+        // 🔔 Notificar a usuarios que la tarea está disponible (desbloqueada)
+        try {
+          const taskData = data as any;
+          let usersToNotify: string[] = [];
+          let taskTitle = taskData.title;
+          let projectName = "Proyecto sin nombre";
+          let parentTaskTitle = undefined;
+          
+          if (isSubtask) {
+            // Para subtareas, notificar al usuario asignado
+            if (taskData.assigned_to) {
+              usersToNotify = [taskData.assigned_to];
+            }
+            
+            // Obtener título de tarea padre y proyecto
+            const { data: parentTask } = await supabase
+              .from('tasks')
+              .select('title, project_id')
+              .eq('id', taskData.task_id)
+              .single();
+              
+            if (parentTask) {
+              parentTaskTitle = parentTask.title;
+              
+              if (parentTask.project_id) {
+                const { data: projectData } = await supabase
+                  .from('projects')
+                  .select('name')
+                  .eq('id', parentTask.project_id)
+                  .single();
+                  
+                if (projectData) {
+                  projectName = projectData.name;
+                }
+              }
+            }
+          } else {
+            // Para tareas principales, notificar a usuarios asignados
+            if (taskData.assigned_users && taskData.assigned_users.length > 0) {
+              usersToNotify = taskData.assigned_users;
+            }
+            
+            // Obtener nombre del proyecto
+            if (taskData.project_id) {
+              const { data: projectData } = await supabase
+                .from('projects')
+                .select('name')
+                .eq('id', taskData.project_id)
+                .single();
+                
+              if (projectData) {
+                projectName = projectData.name;
+              }
+            }
+          }
+          
+          // Enviar notificaciones de tarea disponible
+          if (usersToNotify.length > 0) {
+            fetch('/api/telegram/task-available', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userIds: usersToNotify,
+                taskTitle: taskTitle,
+                projectName: projectName,
+                reason: 'unblocked',
+                isSubtask: isSubtask,
+                parentTaskTitle: parentTaskTitle
+              })
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ [NOTIFICATION] Notificación de tarea desbloqueada enviada`);
+              } else {
+                console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de tarea desbloqueada: ${response.status}`);
+              }
+            }).catch(error => {
+              console.error('🚨 [NOTIFICATION] Error al enviar notificación de tarea desbloqueada:', error);
+            });
+          }
+        } catch (notificationError) {
+          console.error('🚨 [NOTIFICATION] Error preparando notificación de tarea desbloqueada:', notificationError);
+        }
       }
       
       // 3. Registrar el cambio de estado en la tabla de historial
@@ -773,11 +856,19 @@ function Management() {
         ));
       }
       
-      // Si se aprobó una subtarea, verificar si la tarea padre debe ser aprobada
+      // Si se aprobó una subtarea, verificar si la tarea padre debe ser aprobada y notificar dependencias
       if (isSubtask && newStatus === 'approved') {
         const parentTaskId = (data as Subtask)?.task_id;
         if (parentTaskId) {
           await checkAndApproveParentTask(parentTaskId);
+          
+          // 🔔 Verificar si hay dependencias secuenciales que ahora están disponibles
+          try {
+            const subtaskData = data as Subtask;
+            await checkAndNotifySequentialDependencies(parentTaskId, subtaskData.sequence_order);
+          } catch (error) {
+            console.error('🚨 [NOTIFICATION] Error verificando dependencias secuenciales:', error);
+          }
         }
       }
 
@@ -869,6 +960,110 @@ function Management() {
     }
   }
 
+  // Función para verificar y notificar sobre dependencias secuenciales disponibles
+  async function checkAndNotifySequentialDependencies(taskId: string, approvedSequenceOrder: number | null) {
+    try {
+      if (!approvedSequenceOrder) return;
+      
+      // Obtener información de la tarea para verificar si es secuencial
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .select('is_sequential, title, project_id')
+        .eq('id', taskId)
+        .single();
+        
+      if (taskError || !taskData || !taskData.is_sequential) {
+        return; // No es secuencial o error
+      }
+      
+      // Obtener todas las subtareas de esta tarea ordenadas por sequence_order
+      const { data: allSubtasks, error: subtasksError } = await supabase
+        .from('subtasks')
+        .select('id, title, assigned_to, sequence_order, status')
+        .eq('task_id', taskId)
+        .order('sequence_order');
+        
+      if (subtasksError || !allSubtasks) {
+        console.error('Error obteniendo subtareas:', subtasksError);
+        return;
+      }
+      
+      // Agrupar por sequence_order
+      const subtasksByLevel = allSubtasks.reduce((acc, subtask) => {
+        const level = subtask.sequence_order || 0;
+        if (!acc[level]) acc[level] = [];
+        acc[level].push(subtask);
+        return acc;
+      }, {} as Record<number, typeof allSubtasks>);
+      
+      // Verificar si el nivel que acabamos de aprobar está completamente aprobado
+      const currentLevel = subtasksByLevel[approvedSequenceOrder];
+      if (!currentLevel || !currentLevel.every(st => st.status === 'approved')) {
+        return; // El nivel actual no está completamente aprobado aún
+      }
+      
+      // Buscar el siguiente nivel que tenga subtareas pendientes
+      const nextLevel = approvedSequenceOrder + 1;
+      const nextLevelSubtasks = subtasksByLevel[nextLevel];
+      
+      if (!nextLevelSubtasks || nextLevelSubtasks.length === 0) {
+        return; // No hay más niveles
+      }
+      
+      // Verificar que todas las subtareas del siguiente nivel estén en estado 'pending'
+      const pendingSubtasks = nextLevelSubtasks.filter(st => st.status === 'pending');
+      
+      if (pendingSubtasks.length === 0) {
+        return; // No hay subtareas pendientes en el siguiente nivel
+      }
+      
+      // Obtener información del proyecto
+      let projectName = "Proyecto sin nombre";
+      if (taskData.project_id) {
+        const { data: projectData } = await supabase
+          .from('projects')
+          .select('name')
+          .eq('id', taskData.project_id)
+          .single();
+          
+        if (projectData) {
+          projectName = projectData.name;
+        }
+      }
+      
+      // Notificar a usuarios de subtareas que ahora están disponibles
+      for (const subtask of pendingSubtasks) {
+        if (subtask.assigned_to) {
+          fetch('/api/telegram/task-available', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userIds: [subtask.assigned_to],
+              taskTitle: subtask.title,
+              projectName: projectName,
+              reason: 'sequential_dependency_completed',
+              isSubtask: true,
+              parentTaskTitle: taskData.title
+            })
+          }).then(response => {
+            if (response.ok) {
+              console.log(`✅ [NOTIFICATION] Notificación de dependencia secuencial completada enviada para: ${subtask.title}`);
+            } else {
+              console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de dependencia secuencial: ${response.status}`);
+            }
+          }).catch(error => {
+            console.error('🚨 [NOTIFICATION] Error al enviar notificación de dependencia secuencial:', error);
+          });
+        }
+      }
+      
+      console.log(`🔓 [SEQUENTIAL] Nivel ${nextLevel} desbloqueado. Notificadas ${pendingSubtasks.length} subtareas.`);
+      
+    } catch (error) {
+      console.error('Error en checkAndNotifySequentialDependencies:', error);
+    }
+  }
+
   // Función para manejar el envío del formulario de retroalimentación
   function handleFeedbackSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -899,6 +1094,109 @@ function Management() {
       
       // Actualizar también el task_work_assignment para que aparezca como pendiente de nuevo
       updateTaskWorkAssignment(selectedItem.id, selectedItem.type === 'subtask' ? 'subtask' : 'task');
+      
+      // 🔔 Notificar al usuario que la tarea está disponible (devuelta)
+      setTimeout(async () => {
+        try {
+          let usersToNotify: string[] = [];
+          let taskTitle = '';
+          let projectName = "Proyecto sin nombre";
+          let parentTaskTitle = undefined;
+          const isSubtask = selectedItem.type === 'subtask';
+          
+          if (isSubtask) {
+            // Para subtareas, obtener datos y notificar al usuario asignado
+            const { data: subtaskData } = await supabase
+              .from('subtasks')
+              .select('title, assigned_to, task_id')
+              .eq('id', selectedItem.id)
+              .single();
+              
+            if (subtaskData) {
+              taskTitle = subtaskData.title;
+              if (subtaskData.assigned_to) {
+                usersToNotify = [subtaskData.assigned_to];
+              }
+              
+              // Obtener título de tarea padre y proyecto
+              const { data: parentTask } = await supabase
+                .from('tasks')
+                .select('title, project_id')
+                .eq('id', subtaskData.task_id)
+                .single();
+                
+              if (parentTask) {
+                parentTaskTitle = parentTask.title;
+                
+                if (parentTask.project_id) {
+                  const { data: projectData } = await supabase
+                    .from('projects')
+                    .select('name')
+                    .eq('id', parentTask.project_id)
+                    .single();
+                    
+                  if (projectData) {
+                    projectName = projectData.name;
+                  }
+                }
+              }
+            }
+          } else {
+            // Para tareas principales, obtener datos y notificar a usuarios asignados
+            const { data: taskData } = await supabase
+              .from('tasks')
+              .select('title, assigned_users, project_id')
+              .eq('id', selectedItem.id)
+              .single();
+              
+            if (taskData) {
+              taskTitle = taskData.title;
+              if (taskData.assigned_users && taskData.assigned_users.length > 0) {
+                usersToNotify = taskData.assigned_users;
+              }
+              
+              // Obtener nombre del proyecto
+              if (taskData.project_id) {
+                const { data: projectData } = await supabase
+                  .from('projects')
+                  .select('name')
+                  .eq('id', taskData.project_id)
+                  .single();
+                  
+                if (projectData) {
+                  projectName = projectData.name;
+                }
+              }
+            }
+          }
+          
+          // Enviar notificaciones de tarea disponible
+          if (usersToNotify.length > 0) {
+            fetch('/api/telegram/task-available', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userIds: usersToNotify,
+                taskTitle: taskTitle,
+                projectName: projectName,
+                reason: 'returned',
+                isSubtask: isSubtask,
+                parentTaskTitle: parentTaskTitle
+              })
+            }).then(response => {
+              if (response.ok) {
+                console.log(`✅ [NOTIFICATION] Notificación de tarea devuelta enviada`);
+              } else {
+                console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de tarea devuelta: ${response.status}`);
+              }
+            }).catch(error => {
+              console.error('🚨 [NOTIFICATION] Error al enviar notificación de tarea devuelta:', error);
+            });
+          }
+        } catch (notificationError) {
+          console.error('🚨 [NOTIFICATION] Error preparando notificación de tarea devuelta:', notificationError);
+        }
+      }, 1000); // Esperar 1 segundo para que se complete updateTaskWorkAssignment
     } else {
       updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData);
     }
