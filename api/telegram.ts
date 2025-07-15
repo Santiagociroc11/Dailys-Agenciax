@@ -7,9 +7,11 @@ interface TelegramMessage {
 }
 
 // Función para escapar caracteres HTML especiales
-function escapeHtml(text: string): string {
-  if (!text) return '';
-  return text
+function escapeHtml(text: string | null | undefined): string {
+  if (!text || text === null || text === undefined) return '';
+  
+  const stringText = String(text);
+  return stringText
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -157,6 +159,26 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
     return false;
   }
 
+  // Validate message content before sending
+  if (!message || message.trim().length === 0) {
+    console.error('❌ [TELEGRAM] Error: El mensaje está vacío');
+    return false;
+  }
+
+  // Check for potential HTML issues
+  const htmlTagRegex = /<[^>]*>/g;
+  const matches = message.match(htmlTagRegex);
+  if (matches) {
+    console.log(`[TELEGRAM] HTML tags encontrados en el mensaje:`, matches);
+    
+    // Check for empty tags that might cause parsing errors
+    const emptyTagRegex = /<[^>]*><\/[^>]*>|<[^>]*\/>/g;
+    const emptyMatches = message.match(emptyTagRegex);
+    if (emptyMatches) {
+      console.warn(`⚠️ [TELEGRAM] Tags HTML vacíos detectados que podrían causar errores:`, emptyMatches);
+    }
+  }
+
   const telegramMessage: TelegramMessage = {
     chat_id: chatId,
     text: message,
@@ -178,6 +200,19 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
       const error = await response.json();
       console.error('❌ [TELEGRAM] Error en la API de Telegram:', error);
       console.error('❌ [TELEGRAM] Mensaje que causó el error:', message.substring(0, 500) + '...');
+      
+      // Log the problematic area around byte offset if available
+      if (error.description && error.description.includes('byte offset')) {
+        const offsetMatch = error.description.match(/byte offset (\d+)/);
+        if (offsetMatch) {
+          const offset = parseInt(offsetMatch[1]);
+          const start = Math.max(0, offset - 50);
+          const end = Math.min(message.length, offset + 50);
+          console.error('❌ [TELEGRAM] Área problemática del mensaje:', 
+            `"${message.substring(start, end)}" (offset ${offset})`);
+        }
+      }
+      
       return false;
     }
     
@@ -258,6 +293,12 @@ export function createTaskCompletedMessage(
   parentTaskTitle?: string,
   timeInfo?: { assignedAt?: string; completedAt?: string }
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeUserName = userName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -275,10 +316,10 @@ export function createTaskCompletedMessage(
   
   return `🎉 <b>TAREA COMPLETADA</b>
 
-👤 <b>Usuario:</b> ${escapeHtml(userName)}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
-🏷️ <b>Área:</b> ${escapeHtml(areaName)}${timeWorked}
+👤 <b>Usuario:</b> ${escapeHtml(safeUserName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}${timeWorked}
 
 ✅ La ${taskType} ha sido marcada como completada y está lista para revisión.`;
 }
@@ -294,6 +335,13 @@ export function createTaskBlockedMessage(
   parentTaskTitle?: string,
   timeInfo?: { assignedAt?: string; blockedAt?: string }
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeUserName = userName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  const safeBlockReason = blockReason || 'No especificado';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -306,12 +354,12 @@ export function createTaskBlockedMessage(
   
   return `🚫 <b>TAREA BLOQUEADA</b>
 
-👤 <b>Usuario:</b> ${escapeHtml(userName)}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
-🏷️ <b>Área:</b> ${escapeHtml(areaName)}${timeWorked}
+👤 <b>Usuario:</b> ${escapeHtml(safeUserName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}${timeWorked}
 
-⚠️ <b>Motivo del bloqueo:</b> ${escapeHtml(blockReason)}
+⚠️ <b>Motivo del bloqueo:</b> ${escapeHtml(safeBlockReason)}
 
 🔧 Esta ${taskType} requiere atención administrativa para poder continuar.`;
 }
@@ -327,6 +375,13 @@ export function createTaskInReviewMessage(
   parentTaskTitle?: string,
   timeInfo?: { completedAt?: string; inReviewAt?: string }
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeUserName = userName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  const safeAdminName = adminName || 'Administrador';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -339,13 +394,13 @@ export function createTaskInReviewMessage(
   
   return `🔍 <b>TAREA EN REVISIÓN</b>
 
-👤 <b>Usuario:</b> ${escapeHtml(userName)}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
-🏷️ <b>Área:</b> ${escapeHtml(areaName)}
-👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${reviewTime}
+👤 <b>Usuario:</b> ${escapeHtml(safeUserName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(safeAdminName)}${reviewTime}
 
-📋 La ${taskType} ha sido puesta en revisión por ${escapeHtml(adminName)}.`;
+📋 La ${taskType} ha sido puesta en revisión por ${escapeHtml(safeAdminName)}.`;
 }
 
 // Función para crear mensaje de notificación de tarea aprobada
@@ -359,6 +414,13 @@ export function createTaskApprovedMessage(
   parentTaskTitle?: string,
   timeInfo?: { inReviewAt?: string; approvedAt?: string; assignedAt?: string }
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeUserName = userName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  const safeAdminName = adminName || 'Administrador';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -376,13 +438,13 @@ export function createTaskApprovedMessage(
   
   return `✅ <b>TAREA APROBADA</b>
 
-👤 <b>Usuario:</b> ${escapeHtml(userName)}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
-🏷️ <b>Área:</b> ${escapeHtml(areaName)}
-👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${timeDetails}
+👤 <b>Usuario:</b> ${escapeHtml(safeUserName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(safeAdminName)}${timeDetails}
 
-🎉 La ${taskType} ha sido aprobada por ${escapeHtml(adminName)} y está finalizada.`;
+🎉 La ${taskType} ha sido aprobada por ${escapeHtml(safeAdminName)} y está finalizada.`;
 }
 
 // Función para crear mensaje de notificación de tarea devuelta
@@ -397,6 +459,14 @@ export function createTaskReturnedMessage(
   parentTaskTitle?: string,
   timeInfo?: { inReviewAt?: string; returnedAt?: string }
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeUserName = userName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  const safeReturnFeedback = returnFeedback || 'Sin feedback especificado';
+  const safeAdminName = adminName || 'Administrador';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -409,15 +479,15 @@ export function createTaskReturnedMessage(
   
   return `🔄 <b>TAREA DEVUELTA</b>
 
-👤 <b>Usuario:</b> ${escapeHtml(userName)}
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
-🏷️ <b>Área:</b> ${escapeHtml(areaName)}
-👩‍💼 <b>Admin:</b> ${escapeHtml(adminName)}${reviewTime}
+👤 <b>Usuario:</b> ${escapeHtml(safeUserName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}
+👩‍💼 <b>Admin:</b> ${escapeHtml(safeAdminName)}${reviewTime}
 
-📝 <b>Feedback:</b> ${escapeHtml(returnFeedback)}
+📝 <b>Feedback:</b> ${escapeHtml(safeReturnFeedback)}
 
-🔧 La ${taskType} ha sido devuelta por ${escapeHtml(adminName)} al usuario para correcciones.`;
+🔧 La ${taskType} ha sido devuelta por ${escapeHtml(safeAdminName)} al usuario para correcciones.`;
 }
 
 // Función para crear mensaje de notificación de tarea disponible
@@ -428,6 +498,10 @@ export function createTaskAvailableMessage(
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
+  // Ensure all required parameters have safe values
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  
   const taskType = isSubtask ? 'subtarea' : 'tarea';
   const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
   
@@ -455,8 +529,8 @@ export function createTaskAvailableMessage(
   
   return `${icon} <b>TAREA DISPONIBLE</b>
 
-${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(taskTitle)}${parentInfo}
-🏢 <b>Proyecto:</b> ${escapeHtml(projectName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
 
 💡 <b>Motivo:</b> ${reasonText}
 
