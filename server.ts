@@ -10,7 +10,8 @@ import {
   createTaskApprovedMessage,
   createTaskReturnedMessage,
   getTimeInfo,
-  notifyMultipleUsersTaskAvailable
+  notifyMultipleUsersTaskAvailable,
+  notifyUsersTaskInReview
 } from './api/telegram.js';
 
 const app = express();
@@ -175,6 +176,63 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
 
   } catch (error) {
     console.error('Error en admin-notification endpoint:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Error interno del servidor.' 
+    });
+  }
+});
+
+// Endpoint para notificaciones de usuarios cuando sus tareas van a revisión
+app.post('/api/telegram/user-task-in-review', async (req, res) => {
+  try {
+    const { 
+      userIds, 
+      taskTitle, 
+      projectName,
+      adminName,
+      isSubtask = false,
+      parentTaskTitle,
+      timeInfo
+    } = req.body;
+
+    // Validar parámetros requeridos
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'El parámetro userIds es requerido y debe ser un array no vacío' 
+      });
+    }
+
+    if (!taskTitle || !projectName || !adminName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Los parámetros taskTitle, projectName y adminName son requeridos' 
+      });
+    }
+
+    console.log(`[SERVER] Enviando notificaciones de tarea en revisión. Admin: ${adminName}, Users: ${userIds.length}, Task: ${taskTitle}`);
+
+    // Enviar las notificaciones
+    const successCount = await notifyUsersTaskInReview(
+      userIds, 
+      taskTitle, 
+      projectName, 
+      adminName,
+      isSubtask, 
+      parentTaskTitle,
+      timeInfo
+    );
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `Notificaciones de revisión enviadas correctamente.`,
+      sentCount: successCount,
+      totalUsers: userIds.length
+    });
+
+  } catch (error) {
+    console.error('Error en user-task-in-review endpoint:', error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 

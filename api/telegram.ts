@@ -602,6 +602,109 @@ ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.
 🚀 Puedes asignar esta ${taskType} en tu panel de trabajo.`;
 }
 
+// Función para crear mensaje de notificación cuando una tarea del usuario va a revisión
+export function createUserTaskInReviewMessage(
+  taskTitle: string,
+  projectName: string,
+  adminName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string,
+  timeInfo?: { completedAt?: string; inReviewAt?: string }
+): string {
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAdminName = adminName || 'Administrador';
+  
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
+  
+  // Calcular tiempo desde completada hasta puesta en revisión
+  let reviewTime = '';
+  if (timeInfo?.completedAt && timeInfo?.inReviewAt) {
+    const duration = formatDuration(timeInfo.completedAt, timeInfo.inReviewAt);
+    reviewTime = `\n⏱️ <b>Tiempo hasta revisión:</b> ${escapeDurationText(duration)}`;
+  }
+  
+  return `🔍 <b>TU TAREA ESTÁ EN REVISIÓN</b>
+
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+👩‍💼 <b>Revisada por:</b> ${escapeHtml(safeAdminName)}${reviewTime}
+
+✨ Tu ${taskType} ha sido puesta en revisión por ${escapeHtml(safeAdminName)}. Te notificaremos cuando sea aprobada o si necesita correcciones.`;
+}
+
+// Función para notificar a usuarios específicos cuando sus tareas van a revisión
+export async function notifyUsersTaskInReview(
+  userIds: string[],
+  taskTitle: string,
+  projectName: string,
+  adminName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string,
+  timeInfo?: { completedAt?: string; inReviewAt?: string }
+): Promise<number> {
+  if (!userIds || userIds.length === 0) {
+    return 0;
+  }
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Variables de entorno de Supabase no configuradas');
+      return 0;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    // Obtener usuarios con telegram_chat_id
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('id, telegram_chat_id, name, email')
+      .in('id', userIds)
+      .not('telegram_chat_id', 'is', null);
+
+    if (usersError || !users) {
+      console.error('Error obteniendo usuarios para notificación de revisión:', usersError);
+      return 0;
+    }
+
+    // Crear mensaje
+    const message = createUserTaskInReviewMessage(
+      taskTitle, 
+      projectName, 
+      adminName, 
+      isSubtask, 
+      parentTaskTitle, 
+      timeInfo
+    );
+
+    let successCount = 0;
+
+    // Enviar a cada usuario
+    for (const user of users) {
+      if (user.telegram_chat_id) {
+        const success = await sendTelegramMessage(user.telegram_chat_id, message);
+        if (success) {
+          console.log(`✅ Notificación de revisión enviada a ${user.name || user.email}`);
+          successCount++;
+        } else {
+          console.error(`❌ Error enviando notificación de revisión a ${user.name || user.email}`);
+        }
+      }
+    }
+
+    return successCount;
+  } catch (error) {
+    console.error('Error en notifyUsersTaskInReview:', error);
+    return 0;
+  }
+}
+
 // Función para notificar a un usuario específico sobre tarea disponible
 export async function notifyTaskAvailable(
   userId: string,

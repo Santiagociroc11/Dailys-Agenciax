@@ -845,7 +845,7 @@ function Management() {
             ...(newStatus === 'returned' && feedbackData?.feedback ? { returnFeedback: feedbackData.feedback } : {})
           };
 
-          // Enviar notificación asíncrona (no bloquear el flujo del usuario)
+          // Enviar notificación asíncrona a admin (no bloquear el flujo del usuario)
           fetch('/api/telegram/admin-notification', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -859,6 +859,64 @@ function Management() {
           }).catch(error => {
             console.error('🚨 [NOTIFICATION] Error al enviar notificación administrativa:', error);
           });
+
+          // 🔔 NUEVA FUNCIONALIDAD: Notificar al usuario cuando su tarea va a revisión
+          if (newStatus === 'in_review') {
+            try {
+              let usersToNotifyReview: string[] = [];
+              
+              if (isSubtask) {
+                // Para subtareas, notificar al usuario asignado
+                const { data: subtaskData } = await supabase
+                  .from('subtasks')
+                  .select('assigned_to')
+                  .eq('id', itemId)
+                  .single();
+                  
+                if (subtaskData?.assigned_to) {
+                  usersToNotifyReview = [subtaskData.assigned_to];
+                }
+              } else {
+                // Para tareas principales, notificar a todos los usuarios asignados
+                const { data: taskData } = await supabase
+                  .from('tasks')
+                  .select('assigned_users')
+                  .eq('id', itemId)
+                  .single();
+                  
+                if (taskData?.assigned_users && taskData.assigned_users.length > 0) {
+                  usersToNotifyReview = taskData.assigned_users;
+                }
+              }
+
+              // Enviar notificaciones a usuarios afectados
+              if (usersToNotifyReview.length > 0) {
+                fetch('/api/telegram/user-task-in-review', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userIds: usersToNotifyReview,
+                    taskTitle: taskTitle,
+                    projectName: projectName,
+                    adminName: user?.name || user?.email || 'Administrador',
+                    isSubtask: isSubtask,
+                    parentTaskTitle: parentTaskTitle,
+                    timeInfo: timeInfo // Incluir información de tiempo para mostrar duración
+                  })
+                }).then(response => {
+                  if (response.ok) {
+                    console.log(`✅ [USER-NOTIFICATION] Notificación de revisión enviada a ${usersToNotifyReview.length} usuario(s)`);
+                  } else {
+                    console.warn(`⚠️ [USER-NOTIFICATION] Error al enviar notificación de revisión a usuarios: ${response.status}`);
+                  }
+                }).catch(error => {
+                  console.error('🚨 [USER-NOTIFICATION] Error al enviar notificación de revisión a usuarios:', error);
+                });
+              }
+            } catch (userNotificationError) {
+              console.error('🚨 [USER-NOTIFICATION] Error preparando notificación de revisión para usuarios:', userNotificationError);
+            }
+          }
 
         } catch (notificationError) {
           // No bloquear el flujo por errores de notificación
