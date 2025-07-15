@@ -9,6 +9,7 @@ interface User {
   email: string;
   role: string;
   phone?: string;
+  telegram_chat_id?: string;
 }
 
 export default function Users() {
@@ -41,7 +42,8 @@ export default function Users() {
     email: '',
     countryCode: '+57',
     phone: '',
-    role: 'user'
+    role: 'user',
+    telegram_chat_id: ''
   });
   const [editSuccess, setEditSuccess] = useState('');
   const [editError, setEditError] = useState('');
@@ -57,7 +59,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone, password');
+        .select('id, name, email, role, phone, password, telegram_chat_id');
 
       if (error) throw error;
 
@@ -185,7 +187,8 @@ export default function Users() {
           name: editUser.name,
           email: editUser.email,
           phone: fullPhone,
-          role: editUser.role
+          role: editUser.role,
+          telegram_chat_id: editUser.telegram_chat_id || null
         })
         .eq('id', editUser.id);
 
@@ -245,7 +248,8 @@ export default function Users() {
       email: user.email,
       countryCode,
       phone: phoneNumber,
-      role: user.role
+      role: user.role,
+      telegram_chat_id: user.telegram_chat_id || ''
     });
     
     setShowEditUserModal(true);
@@ -407,7 +411,9 @@ export default function Users() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Teléfono
               </th>
-             
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Telegram
+              </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Rol
               </th>
@@ -431,7 +437,25 @@ export default function Users() {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {user.phone || '-'}
                 </td>
-                
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="flex items-center">
+                    {user.telegram_chat_id ? (
+                      <div className="flex items-center text-green-700">
+                        <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="m20.665 3.717-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.789l3.01-14.2c.309-1.239-.473-1.8-1.282-1.434z"/>
+                        </svg>
+                        <span className="text-xs font-medium">Conectado</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center text-gray-400">
+                        <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="m20.665 3.717-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.789l3.01-14.2c.309-1.239-.473-1.8-1.282-1.434z"/>
+                        </svg>
+                        <span className="text-xs">No conectado</span>
+                      </div>
+                    )}
+                  </div>
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
                     user.role === 'admin' 
@@ -811,6 +835,21 @@ export default function Users() {
                     <option value="user">Usuario</option>
                     <option value="admin">Administrador</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ID de Telegram
+                  </label>
+                  <input
+                    type="text"
+                    value={editUser.telegram_chat_id}
+                    onChange={(e) => setEditUser({ ...editUser, telegram_chat_id: e.target.value })}
+                    className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Ej: 123456789"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    ID de chat de Telegram para recibir notificaciones. Dejar vacío para desactivar.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
