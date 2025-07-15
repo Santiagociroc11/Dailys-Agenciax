@@ -19,6 +19,16 @@ function escapeHtml(text: string | null | undefined): string {
     .replace(/'/g, '&#39;');
 }
 
+// Función adicional para escapar duraciones y otros textos que pueden contener símbolos especiales
+function escapeDurationText(text: string): string {
+  if (!text) return '';
+  
+  return text
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/&/g, '&amp;');
+}
+
 // Función para formatear duración en formato legible
 export function formatDuration(startDate: string, endDate: string): string {
   const start = new Date(startDate);
@@ -44,7 +54,7 @@ export function formatDuration(startDate: string, endDate: string): string {
   }
   
   if (parts.length === 0) {
-    return "< 1m";
+    return "&lt; 1m"; // Escape the < symbol for HTML
   }
   
   return parts.join(' ');
@@ -308,7 +318,7 @@ export function createTaskCompletedMessage(
   
   if (timeInfo?.assignedAt && timeInfo?.completedAt) {
     const duration = formatDuration(timeInfo.assignedAt, timeInfo.completedAt);
-    timeWorked = `\n⏱️ <b>Tiempo de trabajo:</b> ${duration}`;
+    timeWorked = `\n⏱️ <b>Tiempo de trabajo:</b> ${escapeDurationText(duration)}`;
     console.log(`[MESSAGE] Tiempo calculado: ${duration} (de ${timeInfo.assignedAt} a ${timeInfo.completedAt})`);
   } else {
     console.log(`[MESSAGE] No se pudo calcular tiempo. AssignedAt: ${timeInfo?.assignedAt}, CompletedAt: ${timeInfo?.completedAt}`);
@@ -349,7 +359,7 @@ export function createTaskBlockedMessage(
   let timeWorked = '';
   if (timeInfo?.assignedAt && timeInfo?.blockedAt) {
     const duration = formatDuration(timeInfo.assignedAt, timeInfo.blockedAt);
-    timeWorked = `\n⏱️ <b>Tiempo trabajado antes del bloqueo:</b> ${duration}`;
+    timeWorked = `\n⏱️ <b>Tiempo trabajado antes del bloqueo:</b> ${escapeDurationText(duration)}`;
   }
   
   return `🚫 <b>TAREA BLOQUEADA</b>
@@ -389,7 +399,7 @@ export function createTaskInReviewMessage(
   let reviewTime = '';
   if (timeInfo?.completedAt && timeInfo?.inReviewAt) {
     const duration = formatDuration(timeInfo.completedAt, timeInfo.inReviewAt);
-    reviewTime = `\n⏱️ <b>Tiempo hasta revisión:</b> ${duration}`;
+    reviewTime = `\n⏱️ <b>Tiempo hasta revisión:</b> ${escapeDurationText(duration)}`;
   }
   
   return `🔍 <b>TAREA EN REVISIÓN</b>
@@ -428,12 +438,12 @@ export function createTaskApprovedMessage(
   let timeDetails = '';
   if (timeInfo?.inReviewAt && timeInfo?.approvedAt) {
     const reviewDuration = formatDuration(timeInfo.inReviewAt, timeInfo.approvedAt);
-    timeDetails += `\n⏱️ <b>Tiempo de revisión:</b> ${reviewDuration}`;
+    timeDetails += `\n⏱️ <b>Tiempo de revisión:</b> ${escapeDurationText(reviewDuration)}`;
   }
   
   if (timeInfo?.assignedAt && timeInfo?.approvedAt) {
     const totalDuration = formatDuration(timeInfo.assignedAt, timeInfo.approvedAt);
-    timeDetails += `\n🏁 <b>Tiempo total del ciclo:</b> ${totalDuration}`;
+    timeDetails += `\n🏁 <b>Tiempo total del ciclo:</b> ${escapeDurationText(totalDuration)}`;
   }
   
   return `✅ <b>TAREA APROBADA</b>
@@ -474,7 +484,7 @@ export function createTaskReturnedMessage(
   let reviewTime = '';
   if (timeInfo?.inReviewAt && timeInfo?.returnedAt) {
     const duration = formatDuration(timeInfo.inReviewAt, timeInfo.returnedAt);
-    reviewTime = `\n⏱️ <b>Tiempo en revisión:</b> ${duration}`;
+    reviewTime = `\n⏱️ <b>Tiempo en revisión:</b> ${escapeDurationText(duration)}`;
   }
   
   return `🔄 <b>TAREA DEVUELTA</b>
