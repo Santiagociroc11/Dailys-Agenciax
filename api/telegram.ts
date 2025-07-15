@@ -103,20 +103,28 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       blockedAt?: string;
     } = {};
 
-    // Buscar fechas específicas en el historial
+    // Buscar fechas específicas en el historial - tomar solo la PRIMERA ocurrencia de cada estado
     history?.forEach((record: any) => {
-      if (record.new_status === 'assigned' || record.new_status === 'in_progress') {
+      if ((record.new_status === 'assigned' || record.new_status === 'in_progress') && !timeInfo.assignedAt) {
         timeInfo.assignedAt = record.changed_at;
-      } else if (record.new_status === 'completed') {
+        console.log(`[TIME INFO] Primera asignación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'completed' && !timeInfo.completedAt) {
         timeInfo.completedAt = record.changed_at;
-      } else if (record.new_status === 'in_review') {
+        console.log(`[TIME INFO] Primera completación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'in_review' && !timeInfo.inReviewAt) {
         timeInfo.inReviewAt = record.changed_at;
-      } else if (record.new_status === 'approved') {
+        console.log(`[TIME INFO] Primera puesta en revisión encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'approved' && !timeInfo.approvedAt) {
         timeInfo.approvedAt = record.changed_at;
-      } else if (record.new_status === 'returned') {
+        console.log(`[TIME INFO] Primera aprobación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'returned' && !timeInfo.returnedAt) {
         timeInfo.returnedAt = record.changed_at;
-      } else if (record.new_status === 'blocked') {
+        console.log(`[TIME INFO] Primera devolución encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'blocked' && !timeInfo.blockedAt) {
         timeInfo.blockedAt = record.changed_at;
+        console.log(`[TIME INFO] Primer bloqueo encontrado: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'in_review' && timeInfo.inReviewAt) {
+        console.log(`[TIME INFO] Revisión duplicada ignorada: ${record.changed_at} por ${record.changed_by || 'sistema'} (ya tenemos ${timeInfo.inReviewAt})`);
       }
     });
 
