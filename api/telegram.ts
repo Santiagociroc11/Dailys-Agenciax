@@ -103,17 +103,32 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       blockedAt?: string;
     } = {};
 
+    console.log(`[TIME INFO] Historial completo encontrado:`, history?.map(h => `${h.new_status} - ${h.changed_at} - ${h.changed_by || 'sistema'}`));
+
     // Buscar fechas específicas en el historial - tomar solo la PRIMERA ocurrencia de cada estado
+    // PERO: Si hay devoluciones, el tiempo de revisión debe calcularse desde la última completación
+    let lastCompletedAt: string | undefined;
+    let firstInReviewAt: string | undefined;
+    
     history?.forEach((record: any) => {
       if ((record.new_status === 'assigned' || record.new_status === 'in_progress') && !timeInfo.assignedAt) {
         timeInfo.assignedAt = record.changed_at;
         console.log(`[TIME INFO] Primera asignación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
-      } else if (record.new_status === 'completed' && !timeInfo.completedAt) {
-        timeInfo.completedAt = record.changed_at;
-        console.log(`[TIME INFO] Primera completación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
-      } else if (record.new_status === 'in_review' && !timeInfo.inReviewAt) {
-        timeInfo.inReviewAt = record.changed_at;
-        console.log(`[TIME INFO] Primera puesta en revisión encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'completed') {
+        if (!timeInfo.completedAt) {
+          timeInfo.completedAt = record.changed_at;
+          console.log(`[TIME INFO] Primera completación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+        }
+        // Siempre actualizar la última completación para manejar re-completaciones después de devoluciones
+        lastCompletedAt = record.changed_at;
+        console.log(`[TIME INFO] Última completación actualizada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+      } else if (record.new_status === 'in_review') {
+        if (!firstInReviewAt) {
+          firstInReviewAt = record.changed_at;
+          console.log(`[TIME INFO] Primera puesta en revisión encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
+        } else {
+          console.log(`[TIME INFO] Revisión duplicada ignorada: ${record.changed_at} por ${record.changed_by || 'sistema'} (ya tenemos ${firstInReviewAt})`);
+        }
       } else if (record.new_status === 'approved' && !timeInfo.approvedAt) {
         timeInfo.approvedAt = record.changed_at;
         console.log(`[TIME INFO] Primera aprobación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
@@ -123,10 +138,20 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       } else if (record.new_status === 'blocked' && !timeInfo.blockedAt) {
         timeInfo.blockedAt = record.changed_at;
         console.log(`[TIME INFO] Primer bloqueo encontrado: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
-      } else if (record.new_status === 'in_review' && timeInfo.inReviewAt) {
-        console.log(`[TIME INFO] Revisión duplicada ignorada: ${record.changed_at} por ${record.changed_by || 'sistema'} (ya tenemos ${timeInfo.inReviewAt})`);
       }
     });
+
+    // Para el tiempo de revisión, usar la lógica correcta:
+    // Si hay devoluciones y re-completaciones, usar la última completación
+    // Si no hay devoluciones, usar la primera completación
+    if (lastCompletedAt && firstInReviewAt) {
+      timeInfo.inReviewAt = firstInReviewAt;
+      timeInfo.completedAt = lastCompletedAt;
+      console.log(`[TIME INFO] Usando para cálculo de revisión - Completado: ${lastCompletedAt}, En revisión: ${firstInReviewAt}`);
+    } else if (timeInfo.completedAt && firstInReviewAt) {
+      timeInfo.inReviewAt = firstInReviewAt;
+      console.log(`[TIME INFO] Usando primera completación y primera revisión - Completado: ${timeInfo.completedAt}, En revisión: ${firstInReviewAt}`);
+    }
 
     // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
     if (!timeInfo.assignedAt || !timeInfo.completedAt) {
