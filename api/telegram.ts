@@ -105,29 +105,26 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
 
     console.log(`[TIME INFO] Historial completo encontrado:`, history?.map(h => `${h.new_status} - ${h.changed_at} - ${h.changed_by || 'sistema'}`));
 
-    // Buscar fechas específicas en el historial - tomar solo la PRIMERA ocurrencia de cada estado
-    // PERO: Si hay devoluciones, el tiempo de revisión debe calcularse desde la última completación
-    let lastCompletedAt: string | undefined;
-    let firstInReviewAt: string | undefined;
+    // Buscar fechas específicas en el historial
+    // Para calcular tiempo de revisión correctamente cuando hay múltiples ciclos de completed -> in_review
+    let completions: Array<{date: string, changedBy: string}> = [];
+    let reviews: Array<{date: string, changedBy: string}> = [];
     
     history?.forEach((record: any) => {
       if ((record.new_status === 'assigned' || record.new_status === 'in_progress') && !timeInfo.assignedAt) {
         timeInfo.assignedAt = record.changed_at;
         console.log(`[TIME INFO] Primera asignación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
       } else if (record.new_status === 'completed') {
+        completions.push({date: record.changed_at, changedBy: record.changed_by || 'sistema'});
         if (!timeInfo.completedAt) {
           timeInfo.completedAt = record.changed_at;
           console.log(`[TIME INFO] Primera completación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
         }
-        // Siempre actualizar la última completación para manejar re-completaciones después de devoluciones
-        lastCompletedAt = record.changed_at;
-        console.log(`[TIME INFO] Última completación actualizada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
       } else if (record.new_status === 'in_review') {
-        if (!firstInReviewAt) {
-          firstInReviewAt = record.changed_at;
+        reviews.push({date: record.changed_at, changedBy: record.changed_by || 'sistema'});
+        if (!timeInfo.inReviewAt) {
+          timeInfo.inReviewAt = record.changed_at;
           console.log(`[TIME INFO] Primera puesta en revisión encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
-        } else {
-          console.log(`[TIME INFO] Revisión duplicada ignorada: ${record.changed_at} por ${record.changed_by || 'sistema'} (ya tenemos ${firstInReviewAt})`);
         }
       } else if (record.new_status === 'approved' && !timeInfo.approvedAt) {
         timeInfo.approvedAt = record.changed_at;
@@ -141,17 +138,29 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       }
     });
 
-    // Para el tiempo de revisión, usar la lógica correcta:
-    // Si hay devoluciones y re-completaciones, usar la última completación
-    // Si no hay devoluciones, usar la primera completación
-    if (lastCompletedAt && firstInReviewAt) {
-      timeInfo.inReviewAt = firstInReviewAt;
-      timeInfo.completedAt = lastCompletedAt;
-      console.log(`[TIME INFO] Usando para cálculo de revisión - Completado: ${lastCompletedAt}, En revisión: ${firstInReviewAt}`);
-    } else if (timeInfo.completedAt && firstInReviewAt) {
-      timeInfo.inReviewAt = firstInReviewAt;
-      console.log(`[TIME INFO] Usando primera completación y primera revisión - Completado: ${timeInfo.completedAt}, En revisión: ${firstInReviewAt}`);
+    // Para el cálculo del tiempo de revisión, necesitamos encontrar la completación correcta
+    // que corresponde al ciclo actual de revisión
+    if (currentStatus === 'in_review' && timeInfo.inReviewAt && completions.length > 0) {
+      // Encontrar la última completación que ocurrió ANTES de la primera puesta en revisión
+      const reviewTime = new Date(timeInfo.inReviewAt).getTime();
+      const validCompletions = completions.filter(comp => 
+        new Date(comp.date).getTime() < reviewTime
+      ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      if (validCompletions.length > 0) {
+        const relevantCompletion = validCompletions[0];
+        timeInfo.completedAt = relevantCompletion.date;
+        console.log(`[TIME INFO] Usando última completación antes de revisión: ${relevantCompletion.date} por ${relevantCompletion.changedBy}`);
+      } else {
+        console.log(`[TIME INFO] No se encontró completación válida antes de la revisión. Revisión: ${timeInfo.inReviewAt}`);
+        // Si no hay completación antes de la revisión, puede ser que la tarea se puso directamente en revisión
+        // En este caso, no tenemos un tiempo válido para calcular
+        timeInfo.completedAt = undefined;
+      }
     }
+    
+    console.log(`[TIME INFO] Completaciones encontradas:`, completions.map(c => `${c.date} por ${c.changedBy}`));
+    console.log(`[TIME INFO] Revisiones encontradas:`, reviews.map(r => `${r.date} por ${r.changedBy}`));
 
     // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
     if (!timeInfo.assignedAt || !timeInfo.completedAt) {

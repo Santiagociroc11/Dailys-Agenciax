@@ -665,25 +665,65 @@ function Management() {
         }
       }
       
-      // 3. Registrar el cambio de estado en la tabla de historial
+      // 3. Manejar el historial de estados
       if (previousStatus !== 'unknown' && user) {
-        const historyRecord = {
-            task_id: isSubtask ? (data as Subtask).task_id : itemId,
-            subtask_id: isSubtask ? itemId : null,
-            changed_by: user.id,
-            previous_status: previousStatus,
-            new_status: newStatus,
-            metadata: feedbackData, // El feedback es una buena metadata para este evento
-        };
-
-        const { error: historyError } = await supabase
+        // CASOS ESPECIALES: Cuando un admin "cancela" un estado erróneo
+        // debemos ELIMINAR el registro problemático en lugar de crear nuevos registros
+        
+        if (previousStatus === 'in_review' && newStatus === 'completed') {
+          // Cancelar revisión: eliminar el registro de in_review
+          console.log(`[HISTORY] Cancelando revisión: eliminando registro 'in_review' para ${table}#${itemId}`);
+          
+          const { error: deleteError } = await supabase
             .from('status_history')
-            .insert([historyRecord]);
+            .delete()
+            .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
+            .eq('new_status', 'in_review')
+            .order('changed_at', { ascending: false })
+            .limit(1);
 
-        if (historyError) {
-            console.error('⚠️ [HISTORY] No se pudo registrar el cambio de estado en Management:', historyError);
+          if (deleteError) {
+            console.error('⚠️ [HISTORY] No se pudo eliminar el registro de in_review:', deleteError);
+          } else {
+            console.log('✅ [HISTORY] Registro de in_review eliminado correctamente. Revisión cancelada.');
+          }
+        } else if (previousStatus === 'blocked' && newStatus === 'pending') {
+          // Cancelar bloqueo: eliminar el registro de blocked
+          console.log(`[HISTORY] Cancelando bloqueo: eliminando registro 'blocked' para ${table}#${itemId}`);
+          
+          const { error: deleteError } = await supabase
+            .from('status_history')
+            .delete()
+            .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
+            .eq('new_status', 'blocked')
+            .order('changed_at', { ascending: false })
+            .limit(1);
+
+          if (deleteError) {
+            console.error('⚠️ [HISTORY] No se pudo eliminar el registro de blocked:', deleteError);
+          } else {
+            console.log('✅ [HISTORY] Registro de blocked eliminado correctamente. Bloqueo cancelado.');
+          }
         } else {
-            console.log('✅ [HISTORY] Cambio de estado registrado con éxito desde Management.');
+          // CASO NORMAL: Registrar el cambio de estado normalmente
+          const historyRecord = {
+              task_id: isSubtask ? (data as Subtask).task_id : itemId,
+              subtask_id: isSubtask ? itemId : null,
+              changed_by: user.id,
+              previous_status: previousStatus,
+              new_status: newStatus,
+              metadata: feedbackData, // El feedback es una buena metadata para este evento
+          };
+
+          const { error: historyError } = await supabase
+              .from('status_history')
+              .insert([historyRecord]);
+
+          if (historyError) {
+              console.error('⚠️ [HISTORY] No se pudo registrar el cambio de estado en Management:', historyError);
+          } else {
+              console.log('✅ [HISTORY] Cambio de estado registrado con éxito desde Management.');
+          }
         }
       }
 
