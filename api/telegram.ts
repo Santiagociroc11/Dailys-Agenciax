@@ -139,24 +139,37 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
     });
 
     // Para el cálculo del tiempo de revisión, necesitamos encontrar la completación correcta
-    // que corresponde al ciclo actual de revisión
-    if (currentStatus === 'in_review' && timeInfo.inReviewAt && completions.length > 0) {
-      // Encontrar la última completación que ocurrió ANTES de la primera puesta en revisión
-      const reviewTime = new Date(timeInfo.inReviewAt).getTime();
+    // que corresponde al ciclo ACTUAL de revisión (considerando devoluciones)
+    if (currentStatus === 'in_review' && reviews.length > 0 && completions.length > 0) {
+      // Encontrar la ÚLTIMA revisión (ciclo actual, no la primera histórica)
+      const sortedReviews = reviews.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const currentReviewTime = new Date(sortedReviews[0].date).getTime();
+      
+      console.log(`[TIME INFO] Revisión actual (última): ${sortedReviews[0].date} por ${sortedReviews[0].changedBy}`);
+      
+      // Encontrar la última completación que ocurrió ANTES de esta revisión actual
       const validCompletions = completions.filter(comp => 
-        new Date(comp.date).getTime() < reviewTime
+        new Date(comp.date).getTime() < currentReviewTime
       ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
       if (validCompletions.length > 0) {
         const relevantCompletion = validCompletions[0];
+        
+        // Actualizar timeInfo con los valores correctos para el ciclo actual
+        timeInfo.inReviewAt = sortedReviews[0].date;
         timeInfo.completedAt = relevantCompletion.date;
-        console.log(`[TIME INFO] Usando última completación antes de revisión: ${relevantCompletion.date} por ${relevantCompletion.changedBy}`);
+        
+        console.log(`[TIME INFO] Ciclo actual - Completado: ${relevantCompletion.date} por ${relevantCompletion.changedBy}`);
+        console.log(`[TIME INFO] Ciclo actual - En revisión: ${sortedReviews[0].date} por ${sortedReviews[0].changedBy}`);
       } else {
-        console.log(`[TIME INFO] No se encontró completación válida antes de la revisión. Revisión: ${timeInfo.inReviewAt}`);
-        // Si no hay completación antes de la revisión, puede ser que la tarea se puso directamente en revisión
-        // En este caso, no tenemos un tiempo válido para calcular
+        console.log(`[TIME INFO] No se encontró completación válida antes de la revisión actual: ${sortedReviews[0].date}`);
+        // Si no hay completación antes de la revisión actual, podría ser un error en el flujo
         timeInfo.completedAt = undefined;
+        timeInfo.inReviewAt = sortedReviews[0].date;
       }
+    } else if (currentStatus === 'in_review' && timeInfo.inReviewAt) {
+      // Fallback: usar la lógica original si no tenemos arrays completos
+      console.log(`[TIME INFO] Usando lógica de fallback con primera revisión: ${timeInfo.inReviewAt}`);
     }
     
     console.log(`[TIME INFO] Completaciones encontradas:`, completions.map(c => `${c.date} por ${c.changedBy}`));
