@@ -305,6 +305,10 @@ export default function UserProjectView() {
    const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ start: number; end: number } | null>(null);
    const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
 
+   // Estados para duraciones personalizadas
+   const [customDurations, setCustomDurations] = useState<Record<string, { value: number; unit: "minutes" | "hours" }>>({});
+   const [showDurationInputs, setShowDurationInputs] = useState(false);
+
    // Estados para eventos de trabajo
    const [showEventsModal, setShowEventsModal] = useState(false);
    const [workEvents, setWorkEvents] = useState<WorkEvent[]>([]);
@@ -962,10 +966,49 @@ export default function UserProjectView() {
          toast.error("Por favor, selecciona al menos una tarea para asignar");
          return;
       }
+      // Inicializar duraciones personalizadas para cada tarea seleccionada (vacías)
+      const initialDurations: Record<string, { value: number; unit: "minutes" | "hours" }> = {};
+      selectedTasks.forEach(taskId => {
+         initialDurations[taskId] = { value: 0, unit: "minutes" }; // Sin valor predeterminado
+      });
+      setCustomDurations(initialDurations);
+      setShowDurationInputs(true);
       setShowConfirmModal(true);
    }
 
+   function calculateTotalCustomDuration(): number {
+      return selectedTasks.reduce((total, taskId) => {
+         const customDuration = customDurations[taskId];
+         if (customDuration) {
+            const durationInHours = customDuration.unit === "hours" 
+               ? customDuration.value 
+               : customDuration.value / 60;
+            return total + durationInHours;
+         }
+         return total;
+      }, 0);
+   }
+
+   function areAllCustomDurationsValid(): boolean {
+      return selectedTasks.every(taskId => {
+         const customDuration = customDurations[taskId];
+         return customDuration && customDuration.value > 0;
+      });
+   }
+
+   function areAllTasksScheduled(): boolean {
+      return selectedTasks.every(taskId => {
+         const schedule = taskSchedules[taskId];
+         return schedule && schedule.startTime && schedule.endTime;
+      });
+   }
+
    function handleConfirmSave() {
+      // Validar que todas las tareas tengan duración antes de proceder
+      if (!areAllCustomDurationsValid()) {
+         toast.error("Por favor, completa la duración para todas las tareas");
+         return;
+      }
       setShowTimeScheduling(true);
       // Cargar eventos del día para mostrar en el timeline
       if (user) {
@@ -973,21 +1016,30 @@ export default function UserProjectView() {
       }
    }
 
-   function handleSaveWithoutSchedule() {
-      handleSaveSelectedTasks();
-      setShowConfirmModal(false);
-   }
+
 
    function handleSaveWithSchedule() {
+      // Validar que todas las tareas tengan horario asignado
+      if (!areAllTasksScheduled()) {
+         toast.error("Debes asignar horario a TODAS las tareas antes de guardar");
+         return;
+      }
       handleSaveSelectedTasks();
       setShowConfirmModal(false);
       setShowTimeScheduling(false);
+      setCustomDurations({});
+      setShowDurationInputs(false);
    }
 
-   // Función para generar horarios del día (8:00 AM - 6:00 PM)
+   // Función para generar horarios del día (8:00 AM - 6:00 PM, excluyendo 12:00 PM - 2:00 PM)
    function generateTimeSlots() {
       const slots = [];
       for (let hour = 8; hour <= 18; hour++) {
+         // Excluir horario de almuerzo: 12:00 PM - 2:00 PM (horas 12 y 13)
+         if (hour >= 12 && hour < 14) {
+            continue; // Saltar las horas de almuerzo
+         }
+         
          for (let minutes = 0; minutes < 60; minutes += 30) {
             const time = hour * 60 + minutes; // minutos desde medianoche
             const displayTime = minutesToTimeAMPM(time);
@@ -1295,6 +1347,12 @@ export default function UserProjectView() {
                endTime = `${todayStr}T${schedule.endTime}:00`;
             }
 
+            // Obtener duración personalizada o usar la original como fallback
+            const customDuration = customDurations[taskId];
+            const finalDuration = customDuration 
+               ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
+               : task.estimated_duration;
+
             return {
                user_id: user.id,
                date: today,
@@ -1302,7 +1360,7 @@ export default function UserProjectView() {
                task_id: isSubtask ? null : originalId,
                subtask_id: isSubtask ? originalId : null,
                project_id: task.project_id,
-               estimated_duration: task.estimated_duration,
+               estimated_duration: finalDuration,
                status: "assigned",
                start_time: startTime,
                end_time: endTime,
@@ -1335,12 +1393,39 @@ export default function UserProjectView() {
             onConflict: "user_id,date,task_type,subtask_id",
          });
 
-         // 5. Actualizar estado de subtareas a "assigned" y registrar en historial
+         // 5. Actualizar estado y duración de subtareas a "assigned" y registrar en historial
          if (subtaskIdsToUpdate.length > 0) {
-            const { data: updatedSubtasks, error: updateSubtaskError } = await supabase.from("subtasks").update({ status: "assigned" }).in("id", subtaskIdsToUpdate).select("id, title, status, task_id");
+            // Actualizar cada subtarea individualmente para poder usar duraciones personalizadas
+            for (const subtaskId of subtaskIdsToUpdate) {
+               const taskId = `subtask-${subtaskId}`;
+               const customDuration = customDurations[taskId];
+               const finalDuration = customDuration 
+                  ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
+                  : undefined;
 
-            if (updateSubtaskError) {
-               console.error("Error al actualizar estado de subtareas:", updateSubtaskError);
+               const updateData: any = { status: "assigned" };
+               if (finalDuration !== undefined) {
+                  updateData.estimated_duration = finalDuration;
+               }
+
+               const { error: updateSubtaskError } = await supabase
+                  .from("subtasks")
+                  .update(updateData)
+                  .eq("id", subtaskId);
+
+               if (updateSubtaskError) {
+                  console.error(`Error al actualizar subtarea ${subtaskId}:`, updateSubtaskError);
+               }
+            }
+
+            // Obtener datos actualizados para historial
+            const { data: updatedSubtasks, error: selectError } = await supabase
+               .from("subtasks")
+               .select("id, title, status, task_id")
+               .in("id", subtaskIdsToUpdate);
+
+            if (selectError) {
+               console.error("Error al obtener subtareas actualizadas:", selectError);
             } else {
                console.log("[SAVE] Subtareas actualizadas a 'assigned':", updatedSubtasks);
                
@@ -1369,12 +1454,38 @@ export default function UserProjectView() {
             }
          }
 
-         // 6. Actualizar estado de tareas principales sin subtareas a "assigned" y registrar en historial
+         // 6. Actualizar estado y duración de tareas principales sin subtareas a "assigned" y registrar en historial
          if (taskIdsToUpdate.length > 0) {
-            const { data: updatedTasks, error: updateTaskError } = await supabase.from("tasks").update({ status: "assigned" }).in("id", taskIdsToUpdate).select("id, title, status");
+            // Actualizar cada tarea individualmente para poder usar duraciones personalizadas
+            for (const taskId of taskIdsToUpdate) {
+               const customDuration = customDurations[taskId];
+               const finalDuration = customDuration 
+                  ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
+                  : undefined;
 
-            if (updateTaskError) {
-               console.error("Error al actualizar estado de tareas:", updateTaskError);
+               const updateData: any = { status: "assigned" };
+               if (finalDuration !== undefined) {
+                  updateData.estimated_duration = finalDuration;
+               }
+
+               const { error: updateTaskError } = await supabase
+                  .from("tasks")
+                  .update(updateData)
+                  .eq("id", taskId);
+
+               if (updateTaskError) {
+                  console.error(`Error al actualizar tarea ${taskId}:`, updateTaskError);
+               }
+            }
+
+            // Obtener datos actualizados para historial
+            const { data: updatedTasks, error: selectTaskError } = await supabase
+               .from("tasks")
+               .select("id, title, status")
+               .in("id", taskIdsToUpdate);
+
+            if (selectTaskError) {
+               console.error("Error al obtener tareas actualizadas:", selectTaskError);
             } else {
                console.log("[SAVE] Tareas actualizadas a 'assigned':", updatedTasks);
                
@@ -2762,14 +2873,13 @@ export default function UserProjectView() {
                {/* Task list container */}
                <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
                   {/* Task list header */}
-                  <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
+                  <div className="grid grid-cols-6 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
                      <div className="text-center">#</div>
                      <div>PROYECTO</div>
                      <div>ACTIVIDAD</div>
                      <div>DESCRIPCION</div>
                      <div>INICIO</div>
                      <div>FIN</div>
-                     <div>DURACIÓN</div>
                   </div>
 
                   {/* Task list */}
@@ -2781,7 +2891,7 @@ export default function UserProjectView() {
                         </div>
                      ) : isDataInitialized && taskItems.length > 0 ? (
                         taskItems.map((task) => (
-                           <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                           <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
                               <div className="text-center">
                                  <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
                               </div>
@@ -2840,9 +2950,6 @@ export default function UserProjectView() {
                                     <span className="text-gray-400">-</span>
                                  )}
                               </div>
-                              <div className="text-sm font-medium">
-                                 {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
-                              </div>
                            </div>
                         ))
                      ) : (
@@ -2864,9 +2971,12 @@ export default function UserProjectView() {
                <div className="mt-6 p-4 bg-white rounded-md shadow-sm border border-gray-200 flex justify-between items-center">
                   <div className="text-sm">
                      <p className="text-gray-600">DURACIÓN TOTAL DEL DÍA</p>
-                     <p className="text-xs text-gray-500">Tareas + Eventos</p>
+                     <p className="text-xs text-gray-500">Tareas seleccionadas</p>
                      <p className="font-bold text-lg mt-1">
-                        {totalEstimatedDuration} HORA{totalEstimatedDuration !== 1 ? "S" : ""}
+                        {selectedTasks.length > 0 && showDurationInputs 
+                           ? `${calculateTotalCustomDuration().toFixed(1)} HORA${calculateTotalCustomDuration() !== 1 ? "S" : ""}`
+                           : `${totalEstimatedDuration} HORA${totalEstimatedDuration !== 1 ? "S" : ""}`
+                        }
                      </p>
                   </div>
                   <div className="flex gap-3">
@@ -3645,7 +3755,7 @@ export default function UserProjectView() {
                <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                      <h3 className="text-lg font-medium">
-                        {showTimeScheduling ? "Programar horarios de trabajo" : "Confirmar asignación de tareas"}
+                        {showTimeScheduling ? "Programar horarios (OBLIGATORIO)" : "Confirmar asignación de tareas"}
                      </h3>
                      <button onClick={() => {
                         setShowConfirmModal(false);
@@ -3662,33 +3772,73 @@ export default function UserProjectView() {
                      <>
                         <div className="px-6 py-4">
                            <p className="mb-4 text-gray-700">
-                              Estás a punto de asignar estas {selectedTasks.length} tareas para el día de hoy ({format(new Date(), "dd/MM/yyyy")}). ¿Deseas continuar?
+                              Estás a punto de asignar estas {selectedTasks.length} tareas para el día de hoy ({format(new Date(), "dd/MM/yyyy")}). 
+                              <strong> Establece TU PROPIO tiempo estimado para cada tarea y luego deberás programar horarios específicos (obligatorio):</strong>
                            </p>
 
-                           <div className="mb-4 p-3 bg-gray-50 rounded-md max-h-60 overflow-y-auto">
-                              <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de tareas seleccionadas:</h4>
-                              <ul className="divide-y divide-gray-200">
+                           <div className="mb-4 p-3 bg-gray-50 rounded-md max-h-80 overflow-y-auto">
+                              <h4 className="text-sm font-medium text-gray-700 mb-3">Configurar duración para las tareas seleccionadas:</h4>
+                              <div className="space-y-3">
                                  {selectedTasks.map((taskId) => {
                                     const task = taskItems.find((t) => t.id === taskId);
+                                    const customDuration = customDurations[taskId];
                                     if (!task) return null;
 
                                     return (
-                                       <li key={taskId} className="py-1.5">
-                                          <div className="flex items-center">
-                                             <div className="flex-shrink-0">{task.type === "subtask" ? <span className="inline-block w-5 h-5 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">S</span> : <span className="inline-block w-5 h-5 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center">T</span>}</div>
-                                             <div className="ml-2 flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-gray-900">{task.title}</p>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                       <div key={taskId} className="p-3 border border-gray-200 rounded-lg bg-white">
+                                          <div className="flex items-start gap-3">
+                                             <div className="flex-shrink-0 mt-1">
+                                                {task.type === "subtask" ? 
+                                                   <span className="inline-block w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">S</span> : 
+                                                   <span className="inline-block w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center">T</span>
+                                                }
+                                             </div>
+                                             <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 mb-1">{task.title}</p>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
                                                    {task.type === "subtask" && task.subtask_title && <span>T.P: {task.subtask_title}</span>}
                                                    {task.deadline && <span className="flex-shrink-0">📅 {format(new Date(task.deadline), "dd/MM")}</span>}
-                                                   <span className="flex-shrink-0">⏱️ {Math.round((task.estimated_duration / 60) * 100) / 100} h</span>
+                                                </div>
+                                                
+                                                {/* Inputs para duración personalizada */}
+                                                <div className="flex items-center gap-2">
+                                                   <label className="text-xs font-medium text-gray-700">¿Cuánto tiempo necesitas? <span className="text-red-500">*</span></label>
+                                                   <input
+                                                      type="number"
+                                                      min="1"
+                                                      step="1"
+                                                      value={customDuration?.value === 0 ? '' : customDuration?.value || ''}
+                                                      onChange={(e) => {
+                                                         const value = parseInt(e.target.value) || 0;
+                                                         setCustomDurations(prev => ({
+                                                            ...prev,
+                                                            [taskId]: { ...prev[taskId], value }
+                                                         }));
+                                                      }}
+                                                      placeholder="Ingresa tu tiempo"
+                                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500"
+                                                   />
+                                                   <select
+                                                      value={customDuration?.unit || 'minutes'}
+                                                      onChange={(e) => {
+                                                         const unit = e.target.value as "minutes" | "hours";
+                                                         setCustomDurations(prev => ({
+                                                            ...prev,
+                                                            [taskId]: { ...prev[taskId], unit }
+                                                         }));
+                                                      }}
+                                                      className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500"
+                                                   >
+                                                      <option value="minutes">minutos</option>
+                                                      <option value="hours">horas</option>
+                                                   </select>
                                                 </div>
                                              </div>
                                           </div>
-                                       </li>
+                                       </div>
                                     );
                                  })}
-                              </ul>
+                              </div>
                            </div>
 
                            <div className="bg-yellow-50 p-3 rounded-md mb-4">
@@ -3697,21 +3847,39 @@ export default function UserProjectView() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                  </svg>
                                  <p className="text-sm font-medium text-yellow-800">
-                                    Tiempo total del día: {totalEstimatedDuration} hora{totalEstimatedDuration !== 1 ? "s" : ""} (tareas + eventos)
+                                    Tiempo total con tus estimaciones: {calculateTotalCustomDuration().toFixed(1)} hora{calculateTotalCustomDuration() !== 1 ? "s" : ""}
                                  </p>
                               </div>
                            </div>
+                           
+                           {!areAllCustomDurationsValid() && (
+                              <div className="bg-red-50 p-3 rounded-md mb-4">
+                                 <div className="flex items-center">
+                                    <svg className="h-5 w-5 text-red-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <p className="text-sm font-medium text-red-800">
+                                       Por favor, completa la duración estimada para todas las tareas.
+                                    </p>
+                                 </div>
+                              </div>
+                           )}
                         </div>
 
                         <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
-                           <button onClick={() => setShowConfirmModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                           <button onClick={() => {
+                              setShowConfirmModal(false);
+                              setCustomDurations({});
+                              setShowDurationInputs(false);
+                           }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500">
                               Cancelar
                            </button>
-                           <button onClick={handleSaveWithoutSchedule} disabled={saving} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                              Asignar sin horarios
-                           </button>
-                           <button onClick={handleConfirmSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                              Programar horarios
+                           <button 
+                              onClick={handleConfirmSave} 
+                              disabled={saving || !areAllCustomDurationsValid()} 
+                              className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                           >
+                              Continuar → Programar Horarios
                            </button>
                         </div>
                      </>
@@ -3719,8 +3887,32 @@ export default function UserProjectView() {
                      <>
                         <div className="px-6 py-4">
                            <p className="mb-4 text-gray-700">
-                              Asigna horarios específicos para cada tarea. Las tareas sin horario asignado se guardarán sin programación.
+                              <strong>OBLIGATORIO:</strong> Debes asignar horarios específicos a TODAS las tareas. No se puede guardar hasta que todas tengan horario asignado.
                            </p>
+                           
+                                                       {!areAllTasksScheduled() ? (
+                               <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
+                                  <div className="flex items-center">
+                                     <svg className="h-5 w-5 text-orange-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                     </svg>
+                                     <p className="text-sm font-medium text-orange-800">
+                                        Faltan {selectedTasks.filter(taskId => !taskSchedules[taskId]?.startTime).length} tareas por programar
+                                     </p>
+                                  </div>
+                               </div>
+                            ) : (
+                               <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                                  <div className="flex items-center">
+                                     <svg className="h-5 w-5 text-green-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                     </svg>
+                                     <p className="text-sm font-medium text-green-800">
+                                        ¡Perfecto! Todas las tareas tienen horario asignado. Ya puedes guardar.
+                                     </p>
+                                  </div>
+                               </div>
+                            )}
 
                            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                               {/* Lista de tareas para programar */}
@@ -3731,7 +3923,10 @@ export default function UserProjectView() {
                                     if (!task) return null;
 
                                     const schedule = taskSchedules[taskId];
-                                    const durationHours = Math.round((task.estimated_duration / 60) * 100) / 100;
+                                    const customDuration = customDurations[taskId];
+                                    const durationHours = customDuration 
+                                       ? (customDuration.unit === "hours" ? customDuration.value : customDuration.value / 60)
+                                       : Math.round((task.estimated_duration / 60) * 100) / 100;
 
                                     return (
                                        <div key={taskId} className="p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
@@ -3810,8 +4005,12 @@ export default function UserProjectView() {
                                           onChange={(e) => {
                                              const startMinutes = parseInt(e.target.value);
                                              const task = taskItems.find(t => t.id === schedulingTaskId);
-                                             if (task) {
-                                                const durationMinutes = task.estimated_duration;
+                                             if (task && schedulingTaskId) {
+                                                // Usar duración personalizada en lugar de la original
+                                                const customDuration = customDurations[schedulingTaskId];
+                                                const durationMinutes = customDuration 
+                                                   ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
+                                                   : task.estimated_duration;
                                                 const endMinutes = startMinutes + durationMinutes;
                                                 setSelectedTimeSlot({ start: startMinutes, end: endMinutes });
                                              }
@@ -3821,7 +4020,11 @@ export default function UserProjectView() {
                                           <option value="">Seleccionar hora</option>
                                           {generateTimeSlots().map((slot) => {
                                              const task = taskItems.find(t => t.id === schedulingTaskId);
-                                             const durationMinutes = task?.estimated_duration || 0;
+                                             // Usar duración personalizada en lugar de la original
+                                             const customDuration = schedulingTaskId ? customDurations[schedulingTaskId] : null;
+                                             const durationMinutes = customDuration 
+                                                ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
+                                                : task?.estimated_duration || 0;
                                              const hasConflict = wouldStartTimeConflict(slot.time, durationMinutes, schedulingTaskId);
                                              
                                              return (
@@ -4048,12 +4251,7 @@ export default function UserProjectView() {
                                     </div>
                                  </div>
 
-                                 {Object.keys(taskSchedules).length === 0 && (
-                                    <div className="text-center py-8 text-gray-500">
-                                       <div className="text-4xl mb-2">📅</div>
-                                       <p className="text-sm">Programa horarios para ver tu día</p>
-                                    </div>
-                                 )}
+                                
 
                                  {Object.keys(taskSchedules).length > 0 && (
                                     <div className="mt-4 p-3 bg-white rounded border">
@@ -4169,8 +4367,8 @@ export default function UserProjectView() {
                            </button>
                            
                            <div className="flex space-x-3">
-                              <button onClick={handleSaveWithSchedule} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                                 {saving ? "Guardando..." : "Guardar con horarios"}
+                              <button onClick={handleSaveWithSchedule} disabled={saving || !areAllTasksScheduled()} className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                 {saving ? "Guardando..." : areAllTasksScheduled() ? "Guardar con horarios" : "Asigna horarios a todas las tareas"}
                               </button>
                            </div>
                         </div>
