@@ -2662,6 +2662,31 @@ export default function UserProjectView() {
             updatedNotes = { ...task.notes };
          }
 
+         // 🔍 Buscar en status_history la entrega original (status = completed)
+         const isSubtask = task.type === "subtask";
+         const originalId = task.original_id || task.id;
+         
+         try {
+            const { data: historyData, error: historyError } = await supabase
+               .from("status_history")
+               .select("*")
+               .eq(isSubtask ? "subtask_id" : "task_id", originalId)
+               .eq("new_status", "completed")
+               .order("changed_at", { ascending: false })
+               .limit(1);
+
+            if (!historyError && historyData && historyData.length > 0) {
+               const completedEntry = historyData[0];
+               if (completedEntry.metadata) {
+                  // Agregar la información de la entrega original
+                  updatedNotes.entrega_original = completedEntry.metadata;
+                  console.log("[FEEDBACK] Entrega original encontrada:", completedEntry.metadata);
+               }
+            }
+         } catch (error) {
+            console.error("Error buscando entrega original en historial:", error);
+         }
+
          if (task.type === "subtask" && task.original_id) {
             // Si es una subtarea, obtener datos adicionales de la tabla subtasks
             const { data, error } = await supabase.from("subtasks").select("*").eq("id", task.original_id).single();
@@ -3455,7 +3480,7 @@ export default function UserProjectView() {
                {/* Vista En Proceso (Kanban) */}
                {activeGestionSubTab === "en_proceso" && (
                   <div className="space-y-6">
-                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                         {/* Columna Asignada para trabajo */}
                         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
                            <div className="p-4 border-b border-gray-200 bg-purple-50">
@@ -3533,6 +3558,13 @@ export default function UserProjectView() {
                                                    >
                                                       🚫 Bloquear
                                                    </button>
+                                                   <div className="border-t border-gray-200 my-1"></div>
+                                                   <button
+                                                      onClick={() => handleShowUnassignConfirmModal(task.id)}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 hover:text-gray-600 flex items-center gap-2"
+                                                   >
+                                                      🗑️ Desasignar
+                                                   </button>
                                                 </div>
                                              )}
                                           </div>
@@ -3606,6 +3638,13 @@ export default function UserProjectView() {
                                                    >
                                                       🚫 Bloquear
                                                    </button>
+                                                   <div className="border-t border-gray-200 my-1"></div>
+                                                   <button
+                                                      onClick={() => handleShowUnassignConfirmModal(task.id)}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 hover:text-gray-600 flex items-center gap-2"
+                                                   >
+                                                      🗑️ Desasignar
+                                                   </button>
                                                 </div>
                                              )}
                                           </div>
@@ -3677,40 +3716,48 @@ export default function UserProjectView() {
                                                 )}
                                              </div>
                                           </div>
-                                                                                 <div className="relative ml-2">
-                                          <button
-                                             onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
-                                             className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 transition-colors flex items-center gap-1"
-                                          >
-                                             Actualizar
-                                             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                                             </svg>
-                                          </button>
-                                          
-                                          {showActionsDropdown[task.id] && (
-                                             <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                          <div className="ml-2 flex flex-col space-y-1">
+                                             <button
+                                                onClick={() => handleViewReturnedFeedback(task)}
+                                                className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 transition-colors"
+                                             >
+                                                Ver Feedback
+                                             </button>
+                                             <div className="relative">
                                                 <button
-                                                   onClick={() => handleOpenStatusModal(task.id, "progress")}
-                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                   onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                   className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
                                                 >
-                                                   📝 Reportar Avance
+                                                   Actualizar
+                                                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                   </svg>
                                                 </button>
-                                                <button
-                                                   onClick={() => handleOpenStatusModal(task.id, "complete")}
-                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
-                                                >
-                                                   ✅ Completar
-                                                </button>
-                                                <button
-                                                   onClick={() => handleOpenStatusModal(task.id, "block")}
-                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
-                                                >
-                                                   🚫 Bloquear
-                                                </button>
+                                                
+                                                {showActionsDropdown[task.id] && (
+                                                   <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                      >
+                                                         📝 Reportar Avance
+                                                      </button>
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                      >
+                                                         ✅ Completar
+                                                      </button>
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                      >
+                                                         🚫 Bloquear
+                                                      </button>
+                                                   </div>
+                                                )}
                                              </div>
-                                          )}
-                                       </div>
+                                          </div>
                                        </div>
                                     </div>
                                  );
@@ -4032,118 +4079,9 @@ export default function UserProjectView() {
                                              )}
                                           </div>
                                           </div>
-
-                        {/* Columna Devueltas */}
-                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-                           <div className="p-4 border-b border-gray-200 bg-orange-50">
-                              <h3 className="font-semibold text-orange-700 flex items-center">
-                                 <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
-                                 Devueltas
-                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-600">
-                                    {returnedTaskItems.length}
-                                 </span>
-                              </h3>
-                                          </div>
-                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
-                              {returnedTaskItems.map((task) => {
-                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                 return (
-                                    <div key={`returned-only-${task.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
-                                       <div className="flex items-start justify-between">
-                                          <div className="flex-1 min-w-0">
-                                             {/* Proyecto */}
-                                             <div className="mb-2">
-                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
-                                                   {task.projectName || "Sin proyecto"}
-                                                </span>
-                                          </div>
-                                             
-                                             {/* Tarea principal si es subtarea */}
-                                             {task.type === "subtask" && (
-                                                <div className="text-xs text-gray-600 mb-1">
-                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
-                                          </div>
-                                             )}
-                                             
-                                             {/* Título clickeable */}
-                                             <h4 
-                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-orange-600 transition-colors" 
-                                                onClick={() => handleViewTaskDetails(task)}
-                                             >
-                                                {task.title}
-                                             </h4>
-                                             
-                                                                                          <div className="flex items-center gap-2 mt-1">
-                                                <p className="text-xs text-orange-600 font-medium">↩️ Requiere corrección</p>
-                                                <p className="text-xs text-gray-600">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
-                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
-                                                   <button
-                                                      onClick={() => handleShowProgress(task.id)}
-                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
-                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
-                                                   >
-                                                      📊 {taskProgress[task.id].length}
-                                                   </button>
-                                                )}
-                                             </div>
-                                          </div>
-                                          <div className="ml-2 flex flex-col space-y-1">
-                                             <button
-                                                onClick={() => handleViewReturnedFeedback(task)}
-                                                className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 transition-colors"
-                                             >
-                                                Ver Feedback
-                                             </button>
-                                             <div className="relative">
-                                                <button
-                                                   onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
-                                                   className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
-                                                >
-                                                   Actualizar
-                                                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                                                   </svg>
-                                                </button>
-                                                
-                                                {showActionsDropdown[task.id] && (
-                                                   <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
-                                                      <button
-                                                         onClick={() => handleOpenStatusModal(task.id, "progress")}
-                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
-                                                      >
-                                                         📝 Reportar Avance
-                                                      </button>
-                                                      <button
-                                                         onClick={() => handleOpenStatusModal(task.id, "complete")}
-                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
-                                                      >
-                                                         ✅ Completar
-                                                      </button>
-                                                      <button
-                                                         onClick={() => handleOpenStatusModal(task.id, "block")}
-                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
-                                                      >
-                                                         🚫 Bloquear
-                                                      </button>
-                                                   </div>
-                                                )}
-                                             </div>
-                                          </div>
-                                          </div>
-                                       </div>
-                                    );
-                                 })}
-                              
-                              {returnedTaskItems.length === 0 && (
-                                 <div className="text-center py-8 text-gray-500 text-sm">
-                                    No hay tareas devueltas
-                                 </div>
-                              )}
-                           </div>
-                              </div>
-                           </div>
                         </div>
-                     )}
+                     </div>
+                                    )}
 
                {/* Vista Gantt Semanal */}
                {activeGestionSubTab === "gantt_semanal" && (
@@ -5722,9 +5660,9 @@ export default function UserProjectView() {
          {/* Modal para ver retroalimentación de tareas devueltas */}
          {showReturnedFeedbackModal && selectedReturnedTask && (
             <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
-               <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+               <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                     <h3 className="text-lg font-medium text-orange-700">Retroalimentación de Tarea Devuelta</h3>
+                     <h3 className="text-lg font-medium text-orange-700">📋 Tarea Devuelta - Entrega y Feedback</h3>
                      <button onClick={() => setShowReturnedFeedbackModal(false)} className="text-gray-400 hover:text-gray-500 focus:outline-none">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -5732,7 +5670,7 @@ export default function UserProjectView() {
                      </button>
                   </div>
 
-                  <div className="px-6 py-4">
+                  <div className="px-6 py-4 max-h-96 overflow-y-auto">
                      <div className="mb-4">
                         <h4 className="text-md font-medium text-gray-800 mb-1">
                            {selectedReturnedTask?.title}
@@ -5744,8 +5682,116 @@ export default function UserProjectView() {
                         </div>
                      </div>
 
+                     {/* Tu entrega original */}
+                     <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <h4 className="text-sm font-medium text-blue-800 mb-1">📝 Tu entrega original:</h4>
+                        <div className="text-sm text-gray-700">
+                           {(() => {
+                              try {
+                                 const notes = selectedReturnedTask?.notes;
+                                 
+                                 if (notes && typeof notes === "object") {
+                                    // Priorizar entrega_original si existe (desde status_history)
+                                    const originalDelivery = notes.entrega_original;
+                                    
+                                    if (originalDelivery && typeof originalDelivery === "object") {
+                                       return (
+                                          <div className="space-y-3">
+                                             {/* Entregables de la entrega original */}
+                                             {(originalDelivery.entregables || originalDelivery.notes) && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">📋 Entregables/Resultados:</div>
+                                                   <div className="bg-white p-2 rounded border text-sm">
+                                                      <RichTextDisplay text={originalDelivery.entregables || originalDelivery.notes || ""} />
+                                                   </div>
+                                                </div>
+                                             )}
+                                             
+                                             {/* Tiempo trabajado */}
+                                             {originalDelivery.duracion_real && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">⏱️ Tiempo real trabajado:</div>
+                                                   <div className="text-sm bg-white p-2 rounded border">
+                                                      {originalDelivery.unidad_original === "hours" 
+                                                         ? `${Math.round((originalDelivery.duracion_real / 60) * 100) / 100} horas`
+                                                         : `${originalDelivery.duracion_real} minutos`
+                                                      }
+                                                   </div>
+                                                </div>
+                                             )}
+                                             
+                                             {/* Comentarios sobre el tiempo */}
+                                             {originalDelivery.razon_duracion && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">💭 Comentarios sobre el tiempo:</div>
+                                                   <div className="bg-white p-2 rounded border text-sm">
+                                                      <RichTextDisplay text={originalDelivery.razon_duracion} />
+                                                   </div>
+                                                </div>
+                                             )}
+                                          </div>
+                                       );
+                                    } else {
+                                       // Fallback: usar estructura antigua de las notas
+                                       return (
+                                          <div className="space-y-3">
+                                             {/* Entregables/Notas */}
+                                             {(notes.entregables || notes.notes || notes.descripcion_avance) && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">📋 Entregables/Resultados:</div>
+                                                   <div className="bg-white p-2 rounded border text-sm">
+                                                      <RichTextDisplay text={notes.entregables || notes.notes || notes.descripcion_avance || ""} />
+                                                   </div>
+                                                </div>
+                                             )}
+                                             
+                                             {/* Tiempo trabajado */}
+                                             {(notes.duracion_real || notes.tiempo_sesion) && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">⏱️ Tiempo trabajado:</div>
+                                                   <div className="text-sm bg-white p-2 rounded border">
+                                                      {notes.duracion_real ? (
+                                                         notes.unidad_original === "hours" 
+                                                            ? `${Math.round((notes.duracion_real / 60) * 100) / 100} horas (tiempo total)`
+                                                            : `${notes.duracion_real} minutos (tiempo total)`
+                                                      ) : (
+                                                         notes.unidad_original === "hours" 
+                                                            ? `${Math.round((notes.tiempo_sesion / 60) * 100) / 100} horas (última sesión)`
+                                                            : `${notes.tiempo_sesion} minutos (última sesión)`
+                                                      )}
+                                                   </div>
+                                                </div>
+                                             )}
+                                             
+                                             {/* Comentarios sobre el tiempo o notas adicionales */}
+                                             {(notes.razon_duracion || notes.notas_avance) && (
+                                                <div>
+                                                   <div className="font-medium text-blue-700 mb-1">💭 Comentarios adicionales:</div>
+                                                   <div className="bg-white p-2 rounded border text-sm">
+                                                      <RichTextDisplay text={notes.razon_duracion || notes.notas_avance || ""} />
+                                                   </div>
+                                                </div>
+                                             )}
+                                          </div>
+                                       );
+                                    }
+                                 } else {
+                                    return (
+                                       <div className="text-gray-500 italic">
+                                          No se encontró información de tu entrega original
+                                       </div>
+                                    );
+                                 }
+                              } catch (error) {
+                                 console.error("Error al procesar la entrega original:", error);
+                                 return <p>Error al cargar tu entrega original.</p>;
+                              }
+                           })()}
+                        </div>
+                     </div>
+
                      <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
-                        <h4 className="text-sm font-medium text-orange-800 mb-1">Motivo de la devolución:</h4>
+                        <h4 className="text-sm font-medium text-orange-800 mb-1">⚠️ Motivo de la devolución:</h4>
                         <div className="whitespace-pre-wrap text-sm text-gray-700 max-h-48 overflow-y-auto">
                            {(() => {
                               try {
@@ -5808,21 +5854,33 @@ export default function UserProjectView() {
                         )}
                      </div>
 
-                     <div className="mt-5 border-t border-gray-200 pt-4">
-                        <p className="text-sm text-gray-700 mb-3">Para marcar esta tarea como completada, actualiza su estado desde la opción "Actualizar Estado".</p>
+                  </div>
+                  
+                  <div className="px-6 py-3 bg-gray-50 flex justify-between items-center border-t border-gray-200">
+                     <p className="text-sm text-gray-600">Para corregir esta tarea, actualiza su estado desde "Actualizar"</p>
+                     <div className="flex gap-2">
+                        <button
+                           onClick={() => setShowReturnedFeedbackModal(false)}
+                           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                           Cerrar
+                        </button>
                         <button
                            onClick={() => {
                               setShowReturnedFeedbackModal(false);
                               handleOpenStatusModal(selectedReturnedTask?.id);
                            }}
-                           className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
-                           Actualizar Estado Ahora
-                        </button>
-                     </div>
+                           className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                        >
+                           Actualizar Estado
+                                                 </button>
+                      </div>
                   </div>
                </div>
             </div>
          )}
+
+         {/* Otros modales continúan... */}
 
          {/* Modal de confirmación para desasignar tarea */}
          {showUnassignConfirmModal && taskToUnassign && (
