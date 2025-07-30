@@ -276,7 +276,7 @@ export default function UserProjectView() {
 
    // Estados para UI
    const [activeTab, setActiveTab] = useState("asignacion");
-   const [activeGestionSubTab, setActiveGestionSubTab] = useState("pendientes");
+   const [activeGestionSubTab, setActiveGestionSubTab] = useState("en_proceso");
    const [sortBy, setSortBy] = useState<"deadline" | "priority" | "duration">("deadline");
    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
@@ -292,6 +292,10 @@ export default function UserProjectView() {
    const [totalAssignedTime, setTotalAssignedTime] = useState(0);
    const [totalDelayedTime, setTotalDelayedTime] = useState(0);
    const [totalDelayedDays, setTotalDelayedDays] = useState(0);
+
+   // Estados para Gantt semanal
+   const [ganttData, setGanttData] = useState<any[]>([]);
+   const [executedTimeData, setExecutedTimeData] = useState<Record<string, Record<string, number>>>({});
 
    // Estados para modales
    const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -344,6 +348,21 @@ export default function UserProjectView() {
    const [durationReason, setDurationReason] = useState("");
    const [statusError, setStatusError] = useState<string | null>(null);
 
+   // Estados para menú dropdown de acciones
+   const [showActionsDropdown, setShowActionsDropdown] = useState<Record<string, boolean>>({});
+   const [actionType, setActionType] = useState<"complete" | "progress" | "block" | null>(null);
+
+   // Estados para avances de tareas
+   const [taskProgress, setTaskProgress] = useState<Record<string, any[]>>({});
+   const [showProgressModal, setShowProgressModal] = useState(false);
+   const [selectedTaskProgress, setSelectedTaskProgress] = useState<any[]>([]);
+
+   // Estados para programación de próximo trabajo
+   const [nextWorkDate, setNextWorkDate] = useState("");
+   const [nextWorkStartTime, setNextWorkStartTime] = useState("");
+   const [nextWorkEndTime, setNextWorkEndTime] = useState("");
+   const [nextWorkDuration, setNextWorkDuration] = useState<number>(0);
+
    // Estado para guardar
    const [saving, setSaving] = useState(false);
    const [error, setError] = useState<string | null>(null);
@@ -378,7 +397,7 @@ export default function UserProjectView() {
    }, [projectId]);
 
    useEffect(() => {
-      if (activeTab === "gestion" && activeGestionSubTab === "pendientes") {
+      if (activeTab === "gestion" && activeGestionSubTab === "en_proceso") {
          // Solo cargar si no hay datos o si el loading no está activo
          if (!loadingAssigned && assignedTaskItems.length === 0 && delayedTaskItems.length === 0 && returnedTaskItems.length === 0) {
             setLoadingAssigned(true);
@@ -503,13 +522,13 @@ export default function UserProjectView() {
    }, [taskItems, isFiltering, isDataInitialized, dailyTasksIds]);
 
    useEffect(() => {
-      if (activeTab === "gestion" && activeGestionSubTab === "pendientes") {
-         // Verificar si hay tareas que aparecen en ambas listas (pendientes y completadas)
+      if (activeTab === "gestion" && activeGestionSubTab === "en_proceso") {
+         // Verificar si hay tareas que aparecen en ambas listas (en proceso y completadas)
          const pendingTasks = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems];
          const duplicates = pendingTasks.filter((pendingTask) => completedTaskItems.some((completedTask) => completedTask.id === pendingTask.id));
 
          if (duplicates.length > 0) {
-            console.warn("Tareas duplicadas encontradas en pendientes y completadas:", duplicates);
+            console.warn("Tareas duplicadas encontradas en proceso y completadas:", duplicates);
          }
       }
    }, [activeTab, activeGestionSubTab, assignedTaskItems, delayedTaskItems, returnedTaskItems, completedTaskItems]);
@@ -1989,7 +2008,7 @@ export default function UserProjectView() {
 
    // Añadir función para manejar el modal de estado antes de la función fetchAssignedTasks()
    // Función para abrir el modal de actualización de estado
-   function handleOpenStatusModal(taskId: string) {
+   function handleOpenStatusModal(taskId: string, action: "complete" | "progress" | "block" = "complete") {
       // Encontrar la tarea seleccionada para obtener la duración estimada y estado actual
       let selectedTask;
       let isEditing = false;
@@ -2004,31 +2023,47 @@ export default function UserProjectView() {
       }
 
       setTaskForStatusUpdate(selectedTask || null);
-
-      const estimatedDuration = selectedTask ? selectedTask.estimated_duration : 0;
+      setActionType(action);
 
       // Si estamos editando una tarea completada, extraer los datos de las notas
-      let actualDuration = estimatedDuration;
-      let durUnit: "minutes" | "hours" = "minutes";
       let details = "";
       let durReason = "";
 
       if (isEditing && selectedTask?.notes) {
          const metadata = typeof selectedTask.notes === "object" ? selectedTask.notes : {};
          details = metadata.entregables || metadata.notes || "";
-         actualDuration = metadata.duracion_real || estimatedDuration;
-         durUnit = metadata.unidad_original || "minutes";
          durReason = metadata.razon_duracion || "";
       }
 
       setSelectedTaskId(taskId);
-      setSelectedStatus(isEditing ? "completed" : "completed");
+      
+      // Configurar estado según la acción
+      if (action === "complete") {
+         setSelectedStatus("completed");
+      } else if (action === "progress") {
+         setSelectedStatus("in_progress");
+      } else if (action === "block") {
+         setSelectedStatus("blocked");
+      }
+
       setStatusDetails(details);
-      setActualDuration(actualDuration);
-      setDurationUnit(durUnit);
+      
+      // SIEMPRE empezar con duración en blanco (0) para que tengan que escribir lo real
+      setActualDuration(0);
+      setDurationUnit("minutes");
       setDurationReason(durReason);
       setStatusError(null);
+      
+      // Resetear campos de programación de próximo trabajo
+      setNextWorkDate("");
+      setNextWorkStartTime("");
+      setNextWorkEndTime("");
+      setNextWorkDuration(0);
+      
       setShowStatusModal(true);
+      
+      // Cerrar el dropdown
+      setShowActionsDropdown({});
    }
 
    // Función para manejar el envío del formulario de estado
@@ -2089,8 +2124,32 @@ export default function UserProjectView() {
       // 1️⃣ Validaciones tempranas
       if (!selectedTaskId) return setStatusError("Por favor, selecciona la tarea");
       if (!selectedStatus) return setStatusError("Por favor, selecciona un estado válido");
-      if (["completed", "blocked"].includes(selectedStatus) && !statusDetails.trim()) return setStatusError(selectedStatus === "completed" ? "Por favor, detalla los entregables o resultados" : "Por favor, explica el motivo del bloqueo");
-      if (selectedStatus === "completed" && actualDuration <= 0) return setStatusError("Por favor, indica el tiempo real que te tomó completar la tarea");
+      
+      // Validaciones específicas según el tipo de acción
+      if (actionType === "complete" || selectedStatus === "completed") {
+         if (!statusDetails.trim()) return setStatusError("Por favor, detalla los entregables o resultados");
+         if (actualDuration <= 0) return setStatusError("Por favor, indica el tiempo real que trabajaste");
+             } else if (actionType === "progress" || selectedStatus === "in_progress") {
+          if (!statusDetails.trim()) return setStatusError("Por favor, describe el avance realizado");
+          if (actualDuration <= 0) return setStatusError("Por favor, indica el tiempo trabajado en esta sesión");
+          
+          // Validaciones para programación de próximo trabajo
+          if (!nextWorkDate) return setStatusError("Por favor, selecciona la fecha para continuar trabajando");
+          if (!nextWorkStartTime) return setStatusError("Por favor, selecciona la hora de inicio");
+          if (!nextWorkEndTime) return setStatusError("Por favor, selecciona la hora de fin");
+          
+          // Validar que la hora de fin sea después de la hora de inicio
+          if (nextWorkStartTime >= nextWorkEndTime) return setStatusError("La hora de fin debe ser posterior a la hora de inicio");
+          
+          // Validar que la fecha no sea en el pasado
+          const selectedDate = new Date(nextWorkDate);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (selectedDate < today) return setStatusError("No puedes programar trabajo en fechas pasadas");
+          
+       } else if (actionType === "block" || selectedStatus === "blocked") {
+         if (!statusDetails.trim()) return setStatusError("Por favor, explica el motivo del bloqueo");
+      }
 
       // 2️⃣ Preparar IDs y tipos
       const isSubtask = selectedTaskId.startsWith("subtask-");
@@ -2103,8 +2162,21 @@ export default function UserProjectView() {
       // 3️⃣ Construir objeto de metadata
       const metadata: any = {
          notes: statusDetails,
-         ...(selectedStatus === "completed" ? { entregables: statusDetails, duracion_real: durationMin, unidad_original: durationUnit, razon_duracion: durationReason } : { razon_bloqueo: statusDetails }),
       };
+
+      if (selectedStatus === "completed") {
+         metadata.entregables = statusDetails;
+         metadata.duracion_real = durationMin;
+         metadata.unidad_original = durationUnit;
+         metadata.razon_duracion = durationReason;
+      } else if (selectedStatus === "in_progress") {
+         metadata.tiempo_sesion = durationMin; // Tiempo trabajado en esta sesión
+         metadata.unidad_original = durationUnit;
+         metadata.notas_avance = durationReason; // Notas adicionales del avance
+         metadata.descripcion_avance = statusDetails; // Descripción del avance
+      } else if (selectedStatus === "blocked") {
+         metadata.razon_bloqueo = statusDetails;
+      }
 
       try {
          // 4️⃣ Actualizar tanto la tabla de tasks/subtasks como task_work_assignments
@@ -2126,7 +2198,11 @@ export default function UserProjectView() {
                   status: selectedStatus,
                   updated_at: new Date().toISOString(),
                   notes: metadata, // SIN JSON.stringify
-                  ...(selectedStatus === "completed" ? { end_time: new Date().toISOString(), actual_duration: durationMin } : {}),
+                  ...(selectedStatus === "completed" 
+                     ? { end_time: new Date().toISOString(), actual_duration: durationMin } 
+                     : selectedStatus === "in_progress" 
+                        ? { actual_duration: durationMin } // Solo actualizar duración, no end_time para progreso
+                        : {}),
                })
                .eq("user_id", user!.id)
                .eq("task_type", taskType)
@@ -2138,6 +2214,50 @@ export default function UserProjectView() {
 
          if (taskRes.error || assignRes.error) {
             throw taskRes.error || assignRes.error;
+         }
+
+         // 🕒 Si es un avance, programar la próxima sesión de trabajo
+         if (selectedStatus === "in_progress" && nextWorkDate && nextWorkStartTime && nextWorkEndTime) {
+            try {
+               // Convertir horas a minutos para calcular duración
+               const [startHour, startMin] = nextWorkStartTime.split(':').map(Number);
+               const [endHour, endMin] = nextWorkEndTime.split(':').map(Number);
+               const startMinutes = startHour * 60 + startMin;
+               const endMinutes = endHour * 60 + endMin;
+               const scheduledDuration = endMinutes - startMinutes;
+
+               const nextWorkAssignment = {
+                  user_id: user!.id,
+                  task_id: isSubtask ? null : originalId,
+                  subtask_id: isSubtask ? originalId : null,
+                  task_type: taskType,
+                  date: nextWorkDate,
+                  start_time: nextWorkStartTime,
+                  end_time: nextWorkEndTime,
+                  duration: scheduledDuration,
+                  status: "scheduled", // Estado para trabajos programados
+                  created_at: new Date().toISOString(),
+                  notes: {
+                     scheduled_from_progress: true,
+                     previous_session_notes: statusDetails,
+                     session_type: "continuation"
+                  }
+               };
+
+               const { error: scheduleError } = await supabase
+                  .from("task_work_assignments")
+                  .insert([nextWorkAssignment]);
+
+               if (scheduleError) {
+                  console.error("Error programando próxima sesión:", scheduleError);
+                  // No fallar todo el proceso, solo mostrar warning
+                  console.warn("⚠️ No se pudo programar la próxima sesión, pero el avance se guardó correctamente");
+               } else {
+                  console.log("✅ Próxima sesión programada exitosamente:", nextWorkAssignment);
+               }
+            } catch (error) {
+               console.error("Error en programación de próxima sesión:", error);
+            }
          }
 
          // 5️⃣ Registrar el cambio de estado en la nueva tabla de historial
@@ -2269,9 +2389,28 @@ export default function UserProjectView() {
 
          setShowStatusModal(false);
          setTaskForStatusUpdate(null);
+         setActionType(null);
+         
+         // Resetear campos de programación
+         setNextWorkDate("");
+         setNextWorkStartTime("");
+         setNextWorkEndTime("");
+         setNextWorkDuration(0);
+
+         // Recargar avances después de guardar progreso
+         if (selectedStatus === "in_progress") {
+            loadTaskProgressForKanban();
+         }
 
          // Toast de éxito
-         toast.success(`Tarea ${selectedStatus === "completed" ? "completada" : "actualizada"} con éxito!`);
+         const actionText = actionType === "complete" ? "completada" : actionType === "progress" ? "actualizada con avance reportado" : actionType === "block" ? "bloqueada" : selectedStatus === "completed" ? "completada" : "actualizada";
+         let successMessage = `Tarea ${actionText} con éxito!`;
+         
+         if (actionType === "progress" && nextWorkDate && nextWorkStartTime) {
+            successMessage += ` ⏰ Próxima sesión programada para ${format(new Date(nextWorkDate), "dd/MM/yyyy")} a las ${nextWorkStartTime}`;
+         }
+         
+         toast.success(successMessage);
       } catch (error) {
          setStatusError("Error al actualizar el estado. Inténtalo de nuevo.");
       }
@@ -2801,6 +2940,291 @@ export default function UserProjectView() {
       }
    }
 
+   // =====================
+   // FUNCIONES PARA AVANCES Y PROGRESO
+   // =====================
+
+   // Función para obtener el historial de avances de una tarea
+   async function fetchTaskProgress(taskId: string) {
+      if (!user) return [];
+
+      try {
+         const isSubtask = taskId.startsWith("subtask-");
+         const originalId = isSubtask ? taskId.replace("subtask-", "") : taskId;
+
+         // Buscar en status_history los avances (estado in_progress)
+         const { data: progressHistory, error } = await supabase
+            .from("status_history")
+            .select("*")
+            .eq(isSubtask ? "subtask_id" : "task_id", originalId)
+            .eq("new_status", "in_progress")
+            .order("changed_at", { ascending: false });
+
+         if (error) {
+            console.error("Error fetching task progress:", error);
+            return [];
+         }
+
+         return progressHistory || [];
+      } catch (error) {
+         console.error("Error fetching task progress:", error);
+         return [];
+      }
+   }
+
+   // Función para cargar avances de todas las tareas visibles
+   async function loadTaskProgressForKanban() {
+      const allTasks = [
+         ...assignedTaskItems,
+         ...delayedTaskItems,
+         ...returnedTaskItems,
+         ...completedTaskItems,
+         ...inReviewTaskItems
+      ];
+
+      const progressData: Record<string, any[]> = {};
+
+      for (const task of allTasks) {
+         const progress = await fetchTaskProgress(task.id);
+         progressData[task.id] = progress;
+      }
+
+      setTaskProgress(progressData);
+   }
+
+   // Función para mostrar el modal de avances
+   function handleShowProgress(taskId: string) {
+      const progress = taskProgress[taskId] || [];
+      setSelectedTaskProgress(progress);
+      setShowProgressModal(true);
+   }
+
+   // =====================
+   // FUNCIONES PARA GANTT SEMANAL
+   // =====================
+
+   function getWeekDays() {
+      const today = new Date();
+      const currentDay = today.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+      const mondayOffset = currentDay === 0 ? -6 : -(currentDay - 1); // Ajustar para que Lunes sea el primer día
+      
+      const monday = new Date(today);
+      monday.setDate(today.getDate() + mondayOffset);
+      
+      const weekDays = [];
+      for (let i = 0; i < 6; i++) { // Lunes a Sábado (6 días)
+         const day = new Date(monday);
+         day.setDate(monday.getDate() + i);
+         weekDays.push({
+            date: day,
+            dateStr: format(day, "yyyy-MM-dd"),
+            dayName: format(day, "EEEE", { locale: es }),
+            dayShort: format(day, "EEE", { locale: es }),
+            dayNumber: format(day, "dd"),
+            isToday: format(day, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
+         });
+      }
+      return weekDays;
+   }
+
+   // Función para obtener datos del Gantt semanal
+   async function getWeeklyGanttData() {
+      if (!user) return [];
+
+      try {
+         const weekDays = getWeekDays();
+         const startDate = weekDays[0].dateStr;
+         const endDate = weekDays[weekDays.length - 1].dateStr;
+
+         // Obtener todas las asignaciones de la semana con información completa
+         const { data: assignments, error } = await supabase
+            .from("task_work_assignments")
+            .select(`
+               *,
+               tasks(id, title, description, project_id, estimated_duration, priority, start_date, deadline, status, is_sequential, projects(name)),
+               subtasks(id, title, description, task_id, estimated_duration, start_date, deadline, status, tasks(id, title, projects(name)))
+            `)
+            .eq("user_id", user.id)
+            .gte("date", startDate)
+            .lte("date", endDate);
+
+         if (error) throw error;
+
+         // Agrupar por tarea
+         const taskGroups: { [key: string]: any } = {};
+         
+         assignments?.forEach(assignment => {
+            const taskData = assignment.task_type === "subtask" ? assignment.subtasks : assignment.tasks;
+            if (!taskData) return;
+
+            const taskKey = `${assignment.task_type}-${assignment.task_type === "subtask" ? assignment.subtask_id : assignment.task_id}`;
+            
+            if (!taskGroups[taskKey]) {
+               // Para subtareas, obtener información de la tarea principal y proyecto
+               let projectName = "";
+               let parentTaskTitle = "";
+               
+               if (assignment.task_type === "subtask" && taskData.tasks) {
+                  parentTaskTitle = taskData.tasks.title;
+                  projectName = taskData.tasks.projects?.name || "";
+               } else if (assignment.task_type === "task" && taskData.projects) {
+                  projectName = taskData.projects.name || "";
+               }
+
+               taskGroups[taskKey] = {
+                  id: taskKey,
+                  title: taskData.title,
+                  description: taskData.description,
+                  priority: taskData.priority || "medium",
+                  start_date: taskData.start_date || "",
+                  deadline: taskData.deadline || "",
+                  status: taskData.status || "assigned",
+                  is_sequential: taskData.is_sequential || false,
+                  type: assignment.task_type,
+                  project_id: assignment.project_id,
+                  project_name: projectName,
+                  parent_task_title: parentTaskTitle,
+                  estimated_duration: taskData.estimated_duration,
+                  sessions: {}
+               };
+            }
+
+            // Agregar sesión al día correspondiente
+            const dateStr = assignment.date;
+            if (!taskGroups[taskKey].sessions[dateStr]) {
+               taskGroups[taskKey].sessions[dateStr] = [];
+            }
+
+            taskGroups[taskKey].sessions[dateStr].push({
+               id: assignment.id,
+               status: assignment.status,
+               estimated_duration: assignment.estimated_duration,
+               actual_duration: assignment.actual_duration,
+               start_time: assignment.start_time,
+               end_time: assignment.end_time,
+               notes: assignment.notes
+            });
+         });
+
+         return Object.values(taskGroups);
+      } catch (error) {
+         console.error("Error fetching weekly gantt data:", error);
+         return [];
+      }
+   }
+
+   // Función para cargar datos del Gantt
+   async function fetchGanttData() {
+      const data = await getWeeklyGanttData();
+      setGanttData(data);
+      
+      // Precalcular tiempos ejecutados
+      await calculateExecutedTimes(data);
+   }
+
+   // Función para precalcular tiempos ejecutados
+   async function calculateExecutedTimes(ganttData: any[]) {
+      const weekDays = getWeekDays();
+      const executedTimes: Record<string, Record<string, number>> = {};
+
+      for (const taskGroup of ganttData) {
+         executedTimes[taskGroup.id] = {};
+         
+         for (const day of weekDays) {
+            const sessions = taskGroup.sessions[day.dateStr] || [];
+            if (sessions.length > 0) {
+               // Obtener ID real de la tarea/subtarea
+               const realTaskId = taskGroup.type === "subtask" 
+                  ? taskGroup.id.replace("subtask-", "")
+                  : taskGroup.id.replace("task-", "");
+               
+               const realTime = await getRealExecutedTime(realTaskId, taskGroup.type, day.dateStr);
+               executedTimes[taskGroup.id][day.dateStr] = realTime;
+            } else {
+               executedTimes[taskGroup.id][day.dateStr] = 0;
+            }
+         }
+      }
+
+      setExecutedTimeData(executedTimes);
+   }
+
+   // Función para obtener tiempo real ejecutado de las sesiones de trabajo
+   async function getRealExecutedTime(taskId: string, taskType: "task" | "subtask", dateStr: string): Promise<number> {
+      try {
+         const { data, error } = await supabase
+            .from("status_history")
+            .select("metadata, changed_at")
+            .eq(taskType === "subtask" ? "subtask_id" : "task_id", taskId)
+            .eq("new_status", "in_progress")
+            .gte("changed_at", `${dateStr} 00:00:00`)
+            .lt("changed_at", `${dateStr} 23:59:59`);
+
+         if (error) {
+            console.error("Error fetching executed time:", error);
+            return 0;
+         }
+
+         // Sumar tiempo de todas las sesiones de avance del día
+         let totalMinutes = 0;
+         data?.forEach(record => {
+            const metadata = record.metadata || {};
+            const timeWorked = metadata.tiempo_sesion || 0;
+            totalMinutes += timeWorked;
+         });
+
+         // También verificar si se completó la tarea ese día
+         const { data: completedData, error: completedError } = await supabase
+            .from("status_history")
+            .select("metadata")
+            .eq(taskType === "subtask" ? "subtask_id" : "task_id", taskId)
+            .eq("new_status", "completed")
+            .gte("changed_at", `${dateStr} 00:00:00`)
+            .lt("changed_at", `${dateStr} 23:59:59`);
+
+         if (!completedError && completedData?.length > 0) {
+            const completedMetadata = completedData[0].metadata || {};
+            const completedTime = completedMetadata.duracion_real || 0;
+            totalMinutes = Math.max(totalMinutes, completedTime);
+         }
+
+         return totalMinutes;
+      } catch (error) {
+         console.error("Error getting real executed time:", error);
+         return 0;
+      }
+   }
+
+   // useEffect para cargar datos del Gantt cuando se activa la vista
+   useEffect(() => {
+      if (activeTab === "gestion" && activeGestionSubTab === "gantt_semanal") {
+         fetchGanttData();
+      }
+   }, [activeTab, activeGestionSubTab]);
+
+   // useEffect para cargar avances cuando se activa la vista kanban
+   useEffect(() => {
+      if (activeTab === "gestion" && activeGestionSubTab === "en_proceso") {
+         loadTaskProgressForKanban();
+      }
+   }, [activeTab, activeGestionSubTab, assignedTaskItems, delayedTaskItems, returnedTaskItems, completedTaskItems, inReviewTaskItems]);
+
+   // useEffect para cerrar dropdowns al hacer clic fuera
+   useEffect(() => {
+      function handleClickOutside(event: MouseEvent) {
+         // Cerrar todos los dropdowns si se hace clic fuera
+         const target = event.target as HTMLElement;
+         if (!target.closest('.relative')) {
+            setShowActionsDropdown({});
+         }
+      }
+
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+         document.removeEventListener('mousedown', handleClickOutside);
+      };
+   }, []);
+
    return (
       <div className="bg-white rounded-lg shadow-md p-6">
          <div className="mb-6">
@@ -3010,21 +3434,16 @@ export default function UserProjectView() {
                {/* Sub pestañas para gestión */}
                <div className="mb-6 bg-white rounded-md shadow-sm border border-gray-200 p-4">
                   <div className="flex border-b border-gray-200 mb-4">
-                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "pendientes" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("pendientes")}>
-                        Pendientes
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length).toString()}</span>
+                  <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "en_proceso" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_proceso")}>
+                     📋 En Proceso
+                     <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length + completedTaskItems.length + inReviewTaskItems.length).toString()}</span>
+                  </button>
+                  <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "gantt_semanal" ? "border-b-2 border-purple-500 text-purple-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("gantt_semanal")}>
+                     📈 Gantt Semanal
                      </button>
                      <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
                         Bloqueadas
                         <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600">{blockedTaskItems.length}</span>
-                     </button>
-                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "entregadas" ? "border-b-2 border-gray-500 text-gray-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("entregadas")}>
-                        Entregadas
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{completedTaskItems.length}</span>
-                     </button>
-                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "en_revision" ? "border-b-2 border-yellow-500 text-yellow-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_revision")}>
-                        En Revisión
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-600">{inReviewTaskItems.length}</span>
                      </button>
                      <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
                         Aprobadas
@@ -3033,367 +3452,988 @@ export default function UserProjectView() {
                   </div>
                </div>
 
-               {activeGestionSubTab === "pendientes" && (
-                  <>
-                     {/* Sección de tareas devueltas (ATENCIÓN INMEDIATA) */}
-                     {returnedTaskItems.length > 0 && (
-                        <div className="mb-6">
-                           <div className="flex items-center mb-2">
-                              <div className="w-4 h-4 bg-orange-500 rounded-full mr-2"></div>
-                              <h3 className="text-lg font-semibold text-orange-700">ATENCIÓN INMEDIATA: Tareas Devueltas</h3>
+               {/* Vista En Proceso (Kanban) */}
+               {activeGestionSubTab === "en_proceso" && (
+                  <div className="space-y-6">
+                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                        {/* Columna Asignada para trabajo */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                           <div className="p-4 border-b border-gray-200 bg-purple-50">
+                              <h3 className="font-semibold text-purple-700 flex items-center">
+                                 <div className="w-3 h-3 bg-purple-500 rounded-full mr-2"></div>
+                                 Asignada para trabajo
+                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-600">
+                                    {(assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length)}
+                                 </span>
+                              </h3>
                            </div>
-
-                           <div className="bg-orange-50 rounded-md shadow-sm border border-orange-200 overflow-hidden mb-6">
-                              {/* Task list header */}
-                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-orange-300 font-medium text-orange-800 bg-orange-100">
-                                 <div>ACTIVIDAD</div>
-                                 <div>DESCRIPCION</div>
-                                 <div>INICIO</div>
-                                 <div>FIN</div>
-                                 <div>DURACIÓN</div>
-                                 <div>ESTADO</div>
-                                 <div>DEVOLUCIÓN</div>
-                                 <div>ACCIONES</div>
-                              </div>
-
-                              {/* Task list for returned tasks */}
-                              <div className="divide-y divide-orange-200">
-                                 {returnedTaskItems.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-orange-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
-                                       </div>
-                                       <div className="font-medium">
-                                          {task.type === "subtask" ? (
-                                             <div>
-                                                <div className="text-sm text-gray-700 font-medium mb-1">
-                                                   <span className="inline-block mr-2">T.P:</span>
-                                                   {task.subtask_title || "Sin tarea principal"}
-                                                </div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                   <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                      </svg>
-                                                      Devuelta
-                                                   </span>
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                   <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                                   {getPriorityBadge(task.priority)}
-                                                </div>
+                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                              {/* Tareas retrasadas sin avances */}
+                              {delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`delayed-assigned-${task.id}`} className="bg-red-50 border border-red-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
                                              </div>
-                                          ) : (
-                                             <div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                   <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                      </svg>
-                                                      Devuelta
-                                                   </span>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
                                                 </div>
-                                                <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-red-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-red-600 font-medium">🔥 URGENTE</p>
+                                                <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
                                              </div>
-                                          )}
-                                       </div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">
-                                          {task.start_date ? (
-                                             <>
-                                                <div>{format(new Date(task.start_date), "dd/MM/yyyy")}</div>
-                                                {getTimeIndicator(task.start_date, true).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>{getTimeIndicator(task.start_date, true).text}</div>}
-                                             </>
-                                          ) : (
-                                             <span className="text-gray-400">-</span>
-                                          )}
-                                       </div>
-                                       <div className="text-sm text-gray-700">
-                                          {task.deadline ? (
-                                             <>
-                                                <div>{format(new Date(task.deadline), "dd/MM/yyyy")}</div>
-                                                {getTimeIndicator(task.deadline, false).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>{getTimeIndicator(task.deadline, false).text}</div>}
-                                             </>
-                                          ) : (
-                                             <span className="text-gray-400">-</span>
-                                          )}
-                                       </div>
-                                       <div className="text-sm font-medium">
-                                          {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
-                                       </div>
-                                       <div>
-                                          <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800">Devuelta</span>
-                                       </div>
-                                       <div className="flex flex-wrap gap-2 items-center">
-                                          <button onClick={() => handleViewReturnedFeedback(task)} className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors">
-                                             Ver Feedback
-                                          </button>
-                                          <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
-                                             Actualizar Estado
-                                          </button>
-                                          <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
-                                             Desasignar
-                                          </button>
+                                          </div>
+                                          <div className="relative ml-2">
+                                             <button
+                                                onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                className="text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 transition-colors flex items-center gap-1"
+                                             >
+                                                Actualizar
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                </svg>
+                                             </button>
+                                             
+                                             {showActionsDropdown[task.id] && (
+                                                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                   >
+                                                      📝 Reportar Avance
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                   >
+                                                      ✅ Completar
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                   >
+                                                      🚫 Bloquear
+                                                   </button>
+                                                </div>
+                                             )}
+                                          </div>
                                        </div>
                                     </div>
-                                 ))}
-                              </div>
+                                 );
+                              })}
+                              
+                              {/* Tareas asignadas normales sin avances */}
+                              {assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`assigned-normal-${task.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
+                                             </div>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                                                </div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-purple-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-purple-600">📋 Lista para trabajar</p>
+                                                <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                             </div>
+                                          </div>
+                                          <div className="relative ml-2">
+                                             <button
+                                                onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
+                                             >
+                                                Actualizar
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                </svg>
+                                             </button>
+                                             
+                                             {showActionsDropdown[task.id] && (
+                                                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                   >
+                                                      📝 Reportar Avance
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                   >
+                                                      ✅ Completar
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                   >
+                                                      🚫 Bloquear
+                                                   </button>
+                                                </div>
+                                             )}
+                                          </div>
+                                       </div>
+                                    </div>
+                                 );
+                              })}
+                              
+                              {(assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length) === 0 && (
+                                 <div className="text-center py-8 text-gray-500 text-sm">
+                                    No hay tareas asignadas para trabajo
+                                 </div>
+                              )}
                            </div>
                         </div>
-                     )}
 
-                     {/* Sección de tareas retrasadas (Urgentes) */}
-                     {delayedTaskItems.length > 0 && (
-                        <div className="mb-6">
-                           <div className="flex items-center mb-2">
-                              <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
-                              <h3 className="text-lg font-semibold text-red-700">URGENTE: Tareas Retrasadas</h3>
+                        {/* Columna En Proceso */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                           <div className="p-4 border-b border-gray-200 bg-blue-50">
+                              <h3 className="font-semibold text-blue-700 flex items-center">
+                                 <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                                 En Proceso
+                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">
+                                    {(returnedTaskItems.length + delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length)}
+                                 </span>
+                              </h3>
+                           </div>
+                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                              {/* Tareas devueltas (prioridad) */}
+                              {returnedTaskItems.map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`returned-${task.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
                            </div>
 
-                           <div className="bg-red-50 rounded-md shadow-sm border border-red-200 overflow-hidden mb-6">
-                              {/* Task list header */}
-                              <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-red-300 font-medium text-red-800 bg-red-100">
-                                 <div>PROYECTO</div>
-                                 <div>ACTIVIDAD</div>
-                                 <div>DESCRIPCION</div>
-                                 <div>INICIO</div>
-                                 <div>FIN</div>
-                                 <div>DURACIÓN</div>
-                                 <div>ESTADO</div>
-                                 <div>RETRASO</div>
-                                 <div>ACCIONES</div>
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                              </div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-orange-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-orange-600 font-medium">⚠️ DEVUELTA</p>
+                                                <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
+                                          </div>
+                                                                                 <div className="relative ml-2">
+                                          <button
+                                             onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                             className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 transition-colors flex items-center gap-1"
+                                          >
+                                             Actualizar
+                                             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                             </svg>
+                                          </button>
+                                          
+                                          {showActionsDropdown[task.id] && (
+                                             <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                <button
+                                                   onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                >
+                                                   📝 Reportar Avance
+                                                </button>
+                                                <button
+                                                   onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                >
+                                                   ✅ Completar
+                                                </button>
+                                                <button
+                                                   onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                   className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                >
+                                                   🚫 Bloquear
+                                                </button>
+                                             </div>
+                                          )}
+                                       </div>
+                                       </div>
+                                    </div>
+                                 );
+                              })}
+                              
+                              {/* Tareas retrasadas con avances */}
+                              {delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`delayed-progress-${task.id}`} className="bg-red-50 border border-red-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
+                                             </div>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                                                </div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-red-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-red-600 font-medium">🔥 URGENTE</p>
+                                                <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
+                                          </div>
+                                          <div className="relative ml-2">
+                                             <button
+                                                onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                className="text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 transition-colors flex items-center gap-1"
+                                             >
+                                                Actualizar
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                </svg>
+                                             </button>
+                                             
+                                             {showActionsDropdown[task.id] && (
+                                                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                   >
+                                                      📝 Reportar Avance
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                   >
+                                                      ✅ Completar
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                   >
+                                                      🚫 Bloquear
+                                                   </button>
+                                                </div>
+                                             )}
+                                          </div>
+                                       </div>
+                                    </div>
+                                 );
+                              })}
+                              
+                              {/* Tareas asignadas normales con avances */}
+                              {assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`assigned-progress-${task.id}`} className="bg-blue-50 border border-blue-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
+                                             </div>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                                                </div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-blue-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-blue-600">⚡ Con avances</p>
+                                                <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
+                                          </div>
+                                          <div className="relative ml-2">
+                                             <button
+                                                onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                                             >
+                                                Actualizar
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                </svg>
+                                             </button>
+                                             
+                                             {showActionsDropdown[task.id] && (
+                                                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                   >
+                                                      📝 Reportar Avance
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                   >
+                                                      ✅ Completar
+                                                   </button>
+                                                   <button
+                                                      onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                      className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                   >
+                                                      🚫 Bloquear
+                                                   </button>
+                                                </div>
+                                             )}
+                                          </div>
+                                       </div>
+                                    </div>
+                                 );
+                              })}
+                              
+                              {(returnedTaskItems.length + delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length) === 0 && (
+                                 <div className="text-center py-8 text-gray-500 text-sm">
+                                    No hay tareas con avances reportados
+                                 </div>
+                              )}
+                                       </div>
+                                       </div>
+
+                        {/* Columna Entregadas */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                           <div className="p-4 border-b border-gray-200 bg-gray-50">
+                              <h3 className="font-semibold text-gray-700 flex items-center">
+                                 <div className="w-3 h-3 bg-gray-500 rounded-full mr-2"></div>
+                                 Entregadas
+                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
+                                    {completedTaskItems.length}
+                                 </span>
+                              </h3>
+                                       </div>
+                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                              {completedTaskItems.map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`completed-${task.id}`} className="bg-gray-50 border border-gray-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
+                                       </div>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                                    </div>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-gray-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                             <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-gray-600">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
+                              </div>
+                                          <button
+                                             onClick={() => handleViewTaskDetails(task)}
+                                             className="ml-2 text-xs bg-gray-600 text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+                                          >
+                                             Ver
+                                          </button>
+                           </div>
+                        </div>
+                                 );
+                              })}
+                              
+                              {completedTaskItems.length === 0 && (
+                                 <div className="text-center py-8 text-gray-500 text-sm">
+                                    No hay tareas entregadas
+                           </div>
+                              )}
+                           </div>
                               </div>
 
-                              {/* Task list for delayed tasks */}
-                              <div className="divide-y divide-red-200">
-                                 {delayedTaskItems.map((task) => {
-                                    // Calcular días de retraso
-                                    const assignmentDate = task.assignment_date ? parseISO(task.assignment_date) : new Date();
-                                    const daysSinceAssignment = differenceInDays(new Date(), assignmentDate);
-
-                                    return (
-                                       <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-red-50 px-3">
-                                          <div className="text-sm text-gray-700 py-1">
-                                             {(() => {
+                        {/* Columna En Revisión */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                           <div className="p-4 border-b border-gray-200 bg-yellow-50">
+                              <h3 className="font-semibold text-yellow-700 flex items-center">
+                                 <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
+                                 En Revisión
+                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-600">
+                                    {inReviewTaskItems.length}
+                                 </span>
+                              </h3>
+                           </div>
+                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                              {inReviewTaskItems.map((task) => {
                                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                                return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                             })()}
+                                 return (
+                                    <div key={`review-${task.id}`} className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
                                           </div>
 
-                                          <div className="font-medium">
-                                             {task.type === "subtask" ? (
-                                                <div>
-                                                   <div className="text-sm text-gray-700 font-medium mb-1">
-                                                      <span className="inline-block mr-2">T.P:</span>
-                                                      {task.subtask_title || "Sin tarea principal"}
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
                                                    </div>
-                                                   <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
+                                             )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-yellow-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
                                                       {task.title}
+                                             </h4>
+                                             
+                                                                                          <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-yellow-600">🔍 En revisión</p>
+                                                <p className="text-xs text-gray-600">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
                                                    </div>
-                                                   <div className="flex flex-wrap items-center gap-1">
-                                                      <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                                      {getPriorityBadge(task.priority)}
-                                                   </div>
+                                          <button
+                                             onClick={() => handleViewTaskDetails(task)}
+                                             className="ml-2 text-xs bg-yellow-600 text-white px-2 py-1 rounded hover:bg-yellow-700 transition-colors"
+                                          >
+                                             Ver
+                                          </button>
                                                 </div>
-                                             ) : (
-                                                <div>
-                                                   <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
-                                                      {task.title}
                                                    </div>
-                                                   <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
+                                 );
+                              })}
+                              
+                              {inReviewTaskItems.length === 0 && (
+                                 <div className="text-center py-8 text-gray-500 text-sm">
+                                    No hay tareas en revisión
                                                 </div>
                                              )}
                                           </div>
-                                          <div className="text-sm text-gray-600">
-                                             <RichTextSummary text={task.description || "-"} maxLength={80} />
                                           </div>
-                                          <div className="text-sm text-gray-700">
-                                             {task.start_date ? (
-                                                <>
-                                                   <div>{format(new Date(task.start_date), "dd/MM/yyyy")}</div>
-                                                   {getTimeIndicator(task.start_date, true).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>{getTimeIndicator(task.start_date, true).text}</div>}
-                                                </>
-                                             ) : (
-                                                <span className="text-gray-400">-</span>
+
+                        {/* Columna Devueltas */}
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                           <div className="p-4 border-b border-gray-200 bg-orange-50">
+                              <h3 className="font-semibold text-orange-700 flex items-center">
+                                 <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
+                                 Devueltas
+                                 <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-orange-100 text-orange-600">
+                                    {returnedTaskItems.length}
+                                 </span>
+                              </h3>
+                                          </div>
+                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                              {returnedTaskItems.map((task) => {
+                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                 return (
+                                    <div key={`returned-only-${task.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                                       <div className="flex items-start justify-between">
+                                          <div className="flex-1 min-w-0">
+                                             {/* Proyecto */}
+                                             <div className="mb-2">
+                                                <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
+                                                   {task.projectName || "Sin proyecto"}
+                                                </span>
+                                          </div>
+                                             
+                                             {/* Tarea principal si es subtarea */}
+                                             {task.type === "subtask" && (
+                                                <div className="text-xs text-gray-600 mb-1">
+                                                   <span className="font-medium">T.P:</span> {task.subtask_title || "Sin tarea principal"}
+                                          </div>
                                              )}
+                                             
+                                             {/* Título clickeable */}
+                                             <h4 
+                                                className="text-sm font-medium text-gray-900  cursor-pointer hover:text-orange-600 transition-colors" 
+                                                onClick={() => handleViewTaskDetails(task)}
+                                             >
+                                                {task.title}
+                                             </h4>
+                                             
+                                                                                          <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs text-orange-600 font-medium">↩️ Requiere corrección</p>
+                                                <p className="text-xs text-gray-600">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
+                                                {taskProgress[task.id] && taskProgress[task.id].length > 0 && (
+                                                   <button
+                                                      onClick={() => handleShowProgress(task.id)}
+                                                      className="text-xs bg-blue-100 text-blue-600 px-1 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                      title={`${taskProgress[task.id].length} avance(s) registrado(s)`}
+                                                   >
+                                                      📊 {taskProgress[task.id].length}
+                                                   </button>
+                                                )}
+                                             </div>
                                           </div>
-                                          <div className="text-sm text-gray-700">
-                                             {task.deadline ? (
-                                                <>
-                                                   <div>{format(new Date(task.deadline), "dd/MM/yyyy")}</div>
-                                                   {getTimeIndicator(task.deadline, false).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>{getTimeIndicator(task.deadline, false).text}</div>}
-                                                </>
-                                             ) : (
-                                                <span className="text-gray-400">-</span>
-                                             )}
-                                          </div>
-                                          <div className="text-sm font-medium">
-                                             {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
-                                          </div>
-                                          <div>
-                                             <span className={`px-2 py-1 text-xs rounded-full ${task.status === "pending" ? "bg-gray-100 text-gray-800" : task.status === "in_progress" ? "bg-yellow-100 text-yellow-800" : task.status === "completed" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>{task.status === "pending" ? "Pendiente" : task.status === "in_progress" ? "En progreso" : task.status === "completed" ? "Completada" : task.status}</span>
-                                          </div>
-                                          <div className="text-sm font-medium text-red-600">
-                                             {daysSinceAssignment <= 0 ? "Hoy" : `${daysSinceAssignment} día${daysSinceAssignment !== 1 ? "s" : ""}`}
-                                             {task.assignment_date && <div className="text-xs text-gray-500">Asignada: {format(parseISO(task.assignment_date), "dd/MM/yyyy")}</div>}
-                                          </div>
-                                          <div className="flex flex-wrap gap-2 items-center">
-                                             <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
-                                                Actualizar Estado
+                                          <div className="ml-2 flex flex-col space-y-1">
+                                             <button
+                                                onClick={() => handleViewReturnedFeedback(task)}
+                                                className="text-xs bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700 transition-colors"
+                                             >
+                                                Ver Feedback
                                              </button>
-                                             <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
-                                                Desasignar
-                                             </button>
+                                             <div className="relative">
+                                                <button
+                                                   onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
+                                                   className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                                                >
+                                                   Actualizar
+                                                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                                   </svg>
+                                                </button>
+                                                
+                                                {showActionsDropdown[task.id] && (
+                                                   <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "progress")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-600 flex items-center gap-2"
+                                                      >
+                                                         📝 Reportar Avance
+                                                      </button>
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-green-50 hover:text-green-600 flex items-center gap-2"
+                                                      >
+                                                         ✅ Completar
+                                                      </button>
+                                                      <button
+                                                         onClick={() => handleOpenStatusModal(task.id, "block")}
+                                                         className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center gap-2"
+                                                      >
+                                                         🚫 Bloquear
+                                                      </button>
+                                                   </div>
+                                                )}
+                                             </div>
+                                          </div>
                                           </div>
                                        </div>
                                     );
                                  })}
+                              
+                              {returnedTaskItems.length === 0 && (
+                                 <div className="text-center py-8 text-gray-500 text-sm">
+                                    No hay tareas devueltas
+                                 </div>
+                              )}
+                           </div>
                               </div>
                            </div>
                         </div>
                      )}
 
-                     {/* Task list container para tareas asignadas de hoy */}
-                     <div className="mb-2">
-                        <div className="flex items-center mb-2">
-                           <div className="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
-                           <h3 className="text-lg font-semibold text-blue-700">Tareas Para Hoy</h3>
+               {/* Vista Gantt Semanal */}
+               {activeGestionSubTab === "gantt_semanal" && (
+                  <div className="mb-6">
+                     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                        <div className="flex justify-between items-center mb-6">
+                           <h4 className="font-medium text-gray-800">📈 Gantt Semanal</h4>
+                           <div className="flex items-center gap-4 text-sm">
+                              <div className="flex items-center gap-2">
+                                 <div className="w-4 h-4 bg-blue-200 border border-blue-400 rounded"></div>
+                                 <span>Planificado</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                 <div className="w-4 h-4 bg-green-200 border border-green-400 rounded"></div>
+                                 <span>Ejecutado</span>
+                              </div>
                         </div>
                      </div>
 
-                     <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
-                        {/* Task list header */}
-                        <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
-                           <div>PROYECTO</div>
-                           <div>ACTIVIDAD</div>
-                           <div>DESCRIPCION</div>
-                           <div>INICIO</div>
-                           <div>FIN</div>
-                           <div>DURACIÓN</div>
-                           <div>ESTADO</div>
-                           <div>ACCIONES</div>
+                        {ganttData.length > 0 ? (
+                           <div className="overflow-x-auto">
+                              <div className="min-w-[900px]">
+                                 {/* Header con días de la semana */}
+                                 <div className="grid grid-cols-8 gap-2 mb-4">
+                                    <div className="font-medium text-sm text-gray-700 p-1 min-h-[50px] flex items-center">Tareas</div>
+                                    {getWeekDays().map(day => (
+                                       <div key={day.dateStr} className={`text-center p-1 text-sm min-h-[50px] flex flex-col justify-center relative ${
+                                          day.isToday 
+                                             ? 'bg-blue-100 text-blue-800 font-medium border-2 border-blue-400 rounded-lg' 
+                                             : 'bg-gray-50 text-gray-700'
+                                       }`}>
+                                          {day.isToday && (
+                                             <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs px-1 rounded-full font-bold shadow-sm">
+                                                HOY
+                                             </div>
+                                          )}
+                                          <div className="font-medium">{day.dayShort}</div>
+                                          <div className="text-xs">{day.dayNumber}</div>
+                                       </div>
+                                    ))}
+                                    <div className="text-center p-1 text-xs bg-gray-100 text-gray-700 min-h-[50px] flex flex-col justify-center">
+                                       <div className="font-medium">TOTAL</div>
+                                       <div className="text-xs text-gray-500">P/E</div>
+                                    </div>
                         </div>
 
-                        {/* Task list */}
-                        <div className="divide-y divide-gray-200">
-                           {loadingAssigned ? (
-                              <div className="py-8 text-center text-gray-500 bg-white">
-                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                                 <p>Cargando tareas...</p>
+                                 {/* Filas de tareas */}
+                                 {ganttData.map(taskGroup => {
+                                    // Calcular total de horas para esta tarea
+                                    const totalTaskHours = getWeekDays().reduce((total, day) => {
+                                       const sessions = taskGroup.sessions[day.dateStr] || [];
+                                       const dayTotal = sessions.reduce((daySum: number, session: any) => {
+                                          return daySum + (session.estimated_duration || 0);
+                                       }, 0);
+                                       return total + dayTotal;
+                                    }, 0);
+
+                                    return (
+                                       <div key={taskGroup.id} className="grid grid-cols-8 gap-2 mb-3 border border-gray-200 rounded-lg">
+                                          {/* Nombre de la tarea */}
+                                          <div className="p-2 bg-gray-50 font-medium text-sm text-gray-800 border-r border-gray-200 min-h-[50px]">
+                                             <div 
+                                                className="font-medium text-gray-900 mb-1 cursor-pointer hover:text-blue-600 transition-colors"
+                                                onClick={() => {
+                                                   // Crear objeto Task para el modal con datos completos
+                                                   const taskForModal: Task = {
+                                                      id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : taskGroup.id.replace("task-", ""),
+                                                      title: taskGroup.title,
+                                                      description: taskGroup.description,
+                                                      priority: taskGroup.priority as "low" | "medium" | "high",
+                                                      estimated_duration: taskGroup.estimated_duration,
+                                                      start_date: taskGroup.start_date,
+                                                      deadline: taskGroup.deadline,
+                                                      status: taskGroup.status,
+                                                      is_sequential: taskGroup.is_sequential,
+                                                      project_id: taskGroup.project_id,
+                                                      projectName: taskGroup.project_name,
+                                                      type: taskGroup.type,
+                                                      original_id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : undefined,
+                                                      subtask_title: taskGroup.parent_task_title
+                                                   };
+                                                   handleViewTaskDetails(taskForModal);
+                                                }}
+                                                title="Click para ver detalles de la tarea"
+                                             >
+                                                {taskGroup.title}
                               </div>
-                           ) : assignedTaskItems.length > 0 ? (
-                              assignedTaskItems.map((task) => (
-                                 <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
-                                    <div className="text-sm text-gray-700 py-1">
-                                       {(() => {
-                                          const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                          return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                       })()}
+                                             
+                                             <div className="text-xs text-gray-500">
+                                                {taskGroup.type === "subtask" ? "Subtarea" : "Tarea"}
                                     </div>
 
-                                    <div className="font-medium">
-                                       {task.type === "subtask" ? (
-                                          <div>
-                                             <div className="text-sm text-gray-700 font-medium mb-1">
-                                                <span className="inline-block mr-2">T.P:</span>
-                                                {task.subtask_title || "Sin tarea principal"}
+                                             {taskGroup.type === "subtask" && taskGroup.parent_task_title && (
+                                                <div className="text-xs text-gray-500 mt-1">
+                                                   T.P: {taskGroup.parent_task_title}
                                              </div>
-                                             <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
-                                                {task.title}
-                                                {/* Indicador para tareas devueltas */}
-                                                {task.status === "returned" && (
-                                                   <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                      </svg>
-                                                      Devuelta
-                                                   </span>
                                                 )}
                                              </div>
-                                             <div className="flex flex-wrap items-center gap-1">
-                                                <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                                {getPriorityBadge(task.priority)}
+
+                                          {/* Celdas para cada día */}
+                                          {getWeekDays().map(day => {
+                                             const sessions = taskGroup.sessions[day.dateStr] || [];
+                                             const plannedSessions = sessions.filter((s: any) => s.start_time && s.end_time);
+                                             
+                                             return (
+                                                <div key={`${taskGroup.id}-${day.dateStr}`} className="p-1 min-h-[50px] border-r border-gray-200 last:border-r-0">
+                                                   {sessions.length > 0 ? (
+                                                      <div className="space-y-1">
+                                                         {/* Sesiones planificadas */}
+                                                         {plannedSessions.map((session: any, idx: number) => {
+                                                            const startTime = session.start_time ? new Date(session.start_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+                                                            const endTime = session.end_time ? new Date(session.end_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+                                                            
+                                                            // Calcular tiempo ejecutado real para esta sesión
+                                                            const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                            const plannedMinutes = session.estimated_duration || 0;
+                                                            const executedMinutes = realExecutedTime;
+
+                                                            // Calcular porcentajes para las barras
+                                                            const maxTime = Math.max(plannedMinutes, executedMinutes);
+                                                            const plannedPercent = maxTime > 0 ? (plannedMinutes / maxTime) * 100 : 0;
+                                                            const executedPercent = maxTime > 0 ? (executedMinutes / maxTime) * 100 : 0;
+                                                            
+                                                            return (
+                                                               <div 
+                                                                  key={idx}
+                                                                  className="text-xs p-1 rounded border bg-blue-50 border-blue-200 relative overflow-hidden"
+                                                                  title={`${startTime} - ${endTime}\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Planificado"}`}
+                                                               >
+                                                                  {/* Barra de fondo - Tiempo planificado */}
+                                                                  <div className="absolute inset-0 bg-blue-200 opacity-50"></div>
+                                                                  
+                                                                  {/* Barra de progreso - Tiempo ejecutado */}
+                                                                  {executedMinutes > 0 && (
+                                                                     <div 
+                                                                        className={`absolute inset-y-0 left-0 ${
+                                                                           executedMinutes >= plannedMinutes 
+                                                                              ? 'bg-green-400' 
+                                                                              : 'bg-green-300'
+                                                                        } opacity-70`}
+                                                                        style={{ width: `${Math.min(executedPercent, 100)}%` }}
+                                                                     ></div>
+                                                                  )}
+                                                                  
+                                                                  {/* Contenido de texto */}
+                                                                  <div className="relative z-10">
+                                                                     <div className="font-medium text-gray-800">
+                                                                        {startTime && endTime ? `${startTime}-${endTime}` : 'Sin horario'}
+                                             </div>
+                                                                     <div className="flex justify-between text-xs">
+                                                                        <span>P:{Math.round(plannedMinutes / 60 * 100) / 100}h</span>
+                                                                        <span>E:{Math.round(executedMinutes / 60 * 100) / 100}h</span>
+                                          </div>
                                              </div>
                                           </div>
-                                       ) : (
-                                          <div>
-                                             <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
-                                                {task.title}
-                                                {/* Indicador para tareas devueltas */}
-                                                {task.status === "returned" && (
-                                                   <span className="ml-2 px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full inline-flex items-center">
-                                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                                      </svg>
-                                                      Devuelta
-                                                   </span>
-                                                )}
-                                             </div>
-                                             <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
-                                          </div>
+                                                            );
+                                                         })}
+                                                         
+                                                         {/* Sesiones sin horario específico */}
+                                                         {sessions.filter((s: any) => !s.start_time || !s.end_time).map((session: any, idx: number) => {
+                                                            const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                            const plannedMinutes = session.estimated_duration || 0;
+                                                            const executedMinutes = realExecutedTime;
+
+                                                            return (
+                                                               <div 
+                                                                  key={`no-time-${idx}`}
+                                                                  className="text-xs p-1 rounded border bg-gray-100 border-gray-300 text-gray-700 relative overflow-hidden"
+                                                                  title={`Sin horario específico\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Asignado"}`}
+                                                               >
+                                                                  {/* Barra de progreso para sesiones sin horario */}
+                                                                  {executedMinutes > 0 && (
+                                                                     <div 
+                                                                        className="absolute inset-y-0 left-0 bg-green-300 opacity-50"
+                                                                        style={{ width: `${Math.min((executedMinutes / plannedMinutes) * 100, 100)}%` }}
+                                                                     ></div>
+                                                                  )}
+                                                                  
+                                                                  <div className="relative z-10">
+                                                                     <div>Sin horario</div>
+                                                                     <div className="flex justify-between">
+                                                                        <span>P:{Math.round(plannedMinutes / 60 * 100) / 100}h</span>
+                                                                        <span>E:{Math.round(executedMinutes / 60 * 100) / 100}h</span>
+                                    </div>
+                                    </div>
+                                    </div>
+                                                            );
+                                                         })}
+                                                      </div>
+                                                   ) : (
+                                                      <div className="text-xs text-gray-400 text-center pt-2">-</div>
                                        )}
                                     </div>
-                                    <div className="text-sm text-gray-600">
-                                       <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                             );
+                                          })}
+
+                                          {/* Columna de total para esta tarea */}
+                                          <div className="p-1 bg-gray-50 border-l border-gray-200 text-center text-xs min-h-[50px] flex flex-col justify-center">
+                                             <div className="text-gray-700 leading-tight">
+                                                P: {Math.round((totalTaskHours / 60) * 100) / 100}h
                                     </div>
-                                    <div className="text-sm text-gray-700">
-                                       {task.start_date ? (
-                                          <>
-                                             <div>{format(new Date(task.start_date), "dd/MM/yyyy")}</div>
-                                             {getTimeIndicator(task.start_date, true).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>{getTimeIndicator(task.start_date, true).text}</div>}
-                                          </>
-                                       ) : (
-                                          <span className="text-gray-400">-</span>
-                                       )}
+                                             <div className="text-gray-700 leading-tight">
+                                                E: {Math.round((getWeekDays().reduce((total, day) => {
+                                                   const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                   return total + realExecutedTime;
+                                                }, 0) / 60) * 100) / 100}h
                                     </div>
-                                    <div className="text-sm text-gray-700">
-                                       {task.deadline ? (
-                                          <>
-                                             <div>{format(new Date(task.deadline), "dd/MM/yyyy")}</div>
-                                             {getTimeIndicator(task.deadline, false).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>{getTimeIndicator(task.deadline, false).text}</div>}
-                                          </>
-                                       ) : (
-                                          <span className="text-gray-400">-</span>
-                                       )}
-                                    </div>
-                                    <div className="text-sm font-medium">
-                                       {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
-                                    </div>
-                                    <div>
-                                       <TaskStatusDisplay status={task.status} />
-                                    </div>
-                                    <div className="flex flex-wrap gap-2 items-center">
-                                       <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors">
-                                          Actualizar Estado
-                                       </button>
-                                       {/* Botón para ver retroalimentación si la tarea fue devuelta */}
-                                       {task.status === "returned" && task.notes && typeof task.notes === "object" && task.notes.returned_feedback && (
-                                          <button onClick={() => handleViewReturnedFeedback(task)} className="px-3 py-1 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700 transition-colors">
-                                             Ver Feedback
-                                          </button>
-                                       )}
-                                       <button onClick={() => handleShowUnassignConfirmModal(task.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
-                                          Desasignar
-                                       </button>
                                     </div>
                                  </div>
-                              ))
-                           ) : (
-                              <div className="py-8 text-center bg-white">
-                                 <p className="text-gray-500 mb-2">No hay tareas asignadas para hoy.</p>
-                                 {delayedTaskItems.length > 0 ? <p className="text-sm text-red-500 font-medium">Pero tienes {delayedTaskItems.length} tareas retrasadas arriba que requieren atención.</p> : <p className="text-sm text-gray-400">Selecciona tareas en la pestaña "ASIGNACION" para trabajar en ellas.</p>}
+                                    );
+                                 })}
+
+                                 {/* Filas de totales por día - simplificadas */}
+                                 <div className="mt-3 pt-2 border-t border-gray-300">
+                                    {/* Fila de horas planificadas */}
+                                    <div className="grid grid-cols-8 gap-2 mb-1">
+                                       <div className="p-1 bg-blue-50 text-xs text-blue-700 text-center">
+                                          📅 Plan
+                                       </div>
+                                       {getWeekDays().map(day => {
+                                          const plannedHours = ganttData.reduce((total, taskGroup) => {
+                                             const sessions = taskGroup.sessions[day.dateStr] || [];
+                                             const dayTotal = sessions.reduce((daySum: number, session: any) => {
+                                                return session.start_time && session.end_time ? daySum + (session.estimated_duration || 0) : daySum;
+                                             }, 0);
+                                             return total + dayTotal;
+                                          }, 0);
+
+                                          return (
+                                             <div key={`planned-${day.dateStr}`} className="p-1 bg-blue-50 text-center text-xs text-blue-700">
+                                                {Math.round((plannedHours / 60) * 100) / 100}h
+                                             </div>
+                                          );
+                                       })}
+                                       <div className="p-1 bg-blue-100 text-center text-xs text-blue-800">
+                                          {Math.round((ganttData.reduce((grandTotal, taskGroup) => {
+                                             return grandTotal + getWeekDays().reduce((total, day) => {
+                                                const sessions = taskGroup.sessions[day.dateStr] || [];
+                                                return total + sessions.reduce((daySum: number, session: any) => {
+                                                   return session.start_time && session.end_time ? daySum + (session.estimated_duration || 0) : daySum;
+                                                }, 0);
+                                             }, 0);
+                                          }, 0) / 60) * 100) / 100}h
+                                       </div>
+                                    </div>
+
+                                    {/* Fila de horas ejecutadas */}
+                                    <div className="grid grid-cols-8 gap-2">
+                                       <div className="p-1 bg-green-50 text-xs text-green-700 text-center">
+                                          ✅ Ejec
+                                       </div>
+                                       {getWeekDays().map(day => {
+                                          const executedHours = ganttData.reduce((total, taskGroup) => {
+                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                             return total + realExecutedTime;
+                                          }, 0);
+
+                                          return (
+                                             <div key={`executed-${day.dateStr}`} className="p-1 bg-green-50 text-center text-xs text-green-700">
+                                                {Math.round((executedHours / 60) * 100) / 100}h
+                                             </div>
+                                          );
+                                       })}
+                                       <div className="p-1 bg-green-100 text-center text-xs text-green-800">
+                                          {Math.round((ganttData.reduce((grandTotal, taskGroup) => {
+                                             return grandTotal + getWeekDays().reduce((total, day) => {
+                                                const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                return total + realExecutedTime;
+                                             }, 0);
+                                          }, 0) / 60) * 100) / 100}h
+                                       </div>
+                                    </div>
+                                 </div>
+                              </div>
+                           </div>
+                        ) : (
+                           <div className="py-12 text-center">
+                              <div className="text-6xl mb-4">📈</div>
+                              <h4 className="text-lg font-medium text-gray-600 mb-2">No hay datos para mostrar en el Gantt</h4>
+                              <p className="text-sm text-gray-500 mb-4">Programa algunas tareas para ver el diagrama semanal</p>
+                              <button
+                                 onClick={() => setActiveGestionSubTab("en_proceso")}
+                                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                              >
+                                 📋 Ver En Proceso
+                              </button>
                               </div>
                            )}
                         </div>
                      </div>
-                  </>
                )}
 
                {activeGestionSubTab === "bloqueadas" && (
@@ -3467,158 +4507,6 @@ export default function UserProjectView() {
                   </>
                )}
 
-               {activeGestionSubTab === "entregadas" && (
-                  <>
-                     <div className="mb-2">
-                        <div className="flex items-center mb-2">
-                           <div className="w-4 h-4 bg-gray-400 rounded-full mr-2"></div>
-                           <h3 className="text-lg font-semibold text-gray-700">Entregadas - Pendiente de Revisión ({completedTaskItems.length})</h3>
-                        </div>
-                     </div>
-                     <div className="bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden mb-6">
-                        <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-gray-300 font-medium text-gray-700 bg-gray-50">
-                           <div>PROYECTO</div>
-                           <div>ACTIVIDAD</div>
-                           <div>DESCRIPCION</div>
-                           <div>FECHA FIN</div>
-                           <div>DURACIÓN EST.</div>
-                           <div>DURACIÓN REAL</div>
-                           <div>RESULTADO</div>
-                           <div>FECHA</div>
-                           <div>ACCIONES</div>
-                        </div>
-                        <div className="divide-y divide-gray-200">
-                           {loadingCompleted ? (
-                              <div className="py-8 text-center text-gray-500 bg-white">
-                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                                 <p>Cargando tareas entregadas...</p>
-                              </div>
-                           ) : completedTaskItems.length > 0 ? (
-                              completedTaskItems.map((task) => {
-                                 const metadata = typeof task.notes === "object" ? task.notes : {};
-                                 const entregables = metadata.entregables || (typeof task.notes === "string" ? task.notes : "-");
-                                 const duracionReal = metadata.duracion_real || task.estimated_duration;
-                                 const completionDate = task.assignment_date || "-";
-
-                                 return (
-                                    <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
-                                       </div>
-                                       <div className="font-medium">
-                                          {task.type === "subtask" ? (
-                                             <div>
-                                                <div className="text-sm text-gray-700 font-medium mb-1">
-                                                   <span className="inline-block mr-2">T.P:</span>
-                                                   {task.subtask_title || "Sin tarea principal"}
-                                                </div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                   <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                                   {getPriorityBadge(task.priority)}
-                                                </div>
-                                             </div>
-                                          ) : (
-                                             <div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
-                                             </div>
-                                          )}
-                                       </div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
-                                       <div className="text-sm font-medium">
-                                          {Math.round((task.estimated_duration / 60) * 100) / 100} HORA{Math.round((task.estimated_duration / 60) * 100) / 100 !== 1 ? "S" : ""}
-                                       </div>
-                                       <div className="text-sm font-medium text-green-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
-                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
-                                       <div className="text-sm text-gray-700">{completionDate !== "-" ? format(new Date(completionDate), "dd/MM/yyyy") : "-"}</div>
-                                       <div className="flex space-x-2">
-                                          <button onClick={() => handleViewTaskDetails(task)} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
-                                             Ver Entrega
-                                          </button>
-                                          <button onClick={() => handleOpenStatusModal(task.id)} className="px-3 py-1 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors">
-                                             Editar
-                                          </button>
-                                       </div>
-                                    </div>
-                                 );
-                              })
-                           ) : (
-                              <div className="py-8 text-center bg-white">
-                                 <p className="text-gray-500 mb-2">No hay tareas entregadas pendientes de revisión.</p>
-                              </div>
-                           )}
-                        </div>
-                     </div>
-                  </>
-               )}
-
-               {activeGestionSubTab === "en_revision" && (
-                  <>
-                     {loadingCompleted ? (
-                        <div className="py-8 text-center text-gray-500 bg-white">
-                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                           <p>Cargando tareas en revisión...</p>
-                        </div>
-                     ) : inReviewTaskItems.length > 0 ? (
-                        <div className="mb-8">
-                           <div className="flex items-center mb-3">
-                              <div className="w-4 h-4 bg-yellow-400 rounded-full mr-3 flex-shrink-0"></div>
-                              <h3 className="text-lg font-semibold text-yellow-700">En Revisión ({inReviewTaskItems.length})</h3>
-                           </div>
-                           <div className="bg-yellow-50 rounded-md shadow-sm border border-yellow-200 overflow-hidden">
-                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-yellow-300 font-medium text-yellow-800 bg-yellow-100">
-                                 <div>PROYECTO</div>
-                                 <div>ACTIVIDAD</div>
-                                 <div>DESCRIPCION</div>
-                                 <div>FECHA FIN</div>
-                                 <div>DURACIÓN EST.</div>
-                                 <div>DURACIÓN REAL</div>
-                                 <div>RESULTADO</div>
-                                 <div>ESTADO</div>
-                              </div>
-                              <div className="divide-y divide-yellow-200">
-                                 {inReviewTaskItems.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-yellow-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
-                                       </div>
-                                       <div className="font-medium">{task.title}</div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">{task.deadline ? format(new Date(task.deadline), "dd/MM/yyyy") : "-"}</div>
-                                       <div className="text-sm font-medium">{Math.round((task.estimated_duration / 60) * 100) / 100} H</div>
-                                       <div className="text-sm font-medium text-yellow-600">{Math.round(((task.notes as TaskNotes)?.duracion_real ?? task.estimated_duration) / 60)} H</div>
-                                       <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
-                                       <div>
-                                          <TaskStatusDisplay status={task.status} />
-                                       </div>
-                                    </div>
-                                 ))}
-                              </div>
-                           </div>
-                        </div>
-                     ) : (
-                        <div className="py-8 text-center bg-white">
-                           <p className="text-gray-500 mb-2">No tienes tareas en revisión en este momento.</p>
-                        </div>
-                     )}
-                  </>
-               )}
 
                {activeGestionSubTab === "aprobadas" && (
                   <>
@@ -3677,75 +4565,6 @@ export default function UserProjectView() {
                   </>
                )}
 
-               {/* Resumen de tiempos - mostrar solo en la pestaña de pendientes */}
-               {activeGestionSubTab === "pendientes" && assignedTaskItems.length > 0 && (
-                  <div className="mt-6 p-4 bg-white rounded-md shadow-sm border border-gray-200">
-                     <h3 className="text-lg font-medium mb-3">Resumen de trabajo</h3>
-                     <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Tareas para hoy</p>
-                           <p className="text-xl font-bold">{assignedTaskItems.length}</p>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Tareas retrasadas</p>
-                           <p className="text-xl font-bold text-red-600">{delayedTaskItems.length}</p>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Completadas totales</p>
-                           <p className="text-xl font-bold text-green-600">{assignedTaskItems.filter((t) => t.status === "completed").length + delayedTaskItems.filter((t) => t.status === "completed").length}</p>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Tiempo total</p>
-                           <p className="text-xl font-bold">{totalAssignedTime.toFixed(1)} HORAS</p>
-                        </div>
-                     </div>
-
-                     {totalDelayedTime > 0 && (
-                        <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
-                           <p className="text-sm text-red-800 font-medium">
-                              ⚠️ Tienes {totalDelayedTime.toFixed(1)} horas de trabajo retrasado con un promedio de {totalDelayedDays} día(s) de retraso.
-                           </p>
-                        </div>
-                     )}
-                  </div>
-               )}
-
-               {/* Resumen de tareas completadas - mostrar solo en la pestaña de completadas */}
-               {activeGestionSubTab === "completadas" && completedTaskItems.length > 0 && (
-                  <div className="mt-6 p-4 bg-white rounded-md shadow-sm border border-gray-200">
-                     <h3 className="text-lg font-medium mb-3">Resumen de tareas completadas</h3>
-                     <div className="grid grid-cols-3 gap-4">
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Total completadas</p>
-                           <p className="text-xl font-bold text-green-600">{completedTaskItems.length}</p>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Tiempo estimado total</p>
-                           <p className="text-xl font-bold">
-                              {completedTaskItems
-                                 .reduce((sum, task) => {
-                                    return sum + Math.round((task.estimated_duration / 60) * 100) / 100;
-                                 }, 0)
-                                 .toFixed(1)}{" "}
-                              HORAS
-                           </p>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-md">
-                           <p className="text-sm text-gray-600">Tiempo real total</p>
-                           <p className="text-xl font-bold text-green-600">
-                              {completedTaskItems
-                                 .reduce((sum, task) => {
-                                    const metadata = typeof task.notes === "object" ? task.notes : {};
-                                    const duracionReal = metadata.duracion_real || task.estimated_duration;
-                                    return sum + Math.round((duracionReal / 60) * 100) / 100;
-                                 }, 0)
-                                 .toFixed(1)}{" "}
-                              HORAS
-                           </p>
-                        </div>
-                     </div>
-                  </div>
-               )}
             </div>
          )}
 
@@ -4190,10 +5009,10 @@ export default function UserProjectView() {
                                                                {task?.type === "subtask" ? "S" : "T"}
                                                             </span>
                                                             <div className="flex-1 min-w-0 overflow-hidden">
-                                                               <div className="font-semibold leading-tight text-blue-900 mb-1 truncate">
+                                                               <div className="font-semibold leading-tight text-blue-900 mb-1 ">
                                                                   {task?.title || 'Tarea sin título'}
                                                                </div>
-                                                               <div className="text-xs text-blue-600 font-medium truncate opacity-90">
+                                                               <div className="text-xs text-blue-600 font-medium  opacity-90">
                                                                   {minutesToTimeAMPM(startMinutes)} - {minutesToTimeAMPM(endMinutes)}
                                                                </div>
                                                             </div>
@@ -4234,10 +5053,10 @@ export default function UserProjectView() {
                                                                 event.event_type === 'break' ? '☕' : '📌'}
                                                             </span>
                                                             <div className="flex-1 min-w-0 overflow-hidden">
-                                                               <div className="font-semibold leading-tight text-purple-900 mb-1 truncate">
+                                                               <div className="font-semibold leading-tight text-purple-900 mb-1 ">
                                                                   {event.title}
                                                                </div>
-                                                               <div className="text-xs text-purple-600 font-medium truncate opacity-90">
+                                                               <div className="text-xs text-purple-600 font-medium  opacity-90">
                                                                   {minutesToTimeAMPM(startMinutes)} - {minutesToTimeAMPM(endMinutes)}
                                                                </div>
                                                             </div>
@@ -4546,7 +5365,10 @@ export default function UserProjectView() {
                <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                      <div>
-                        <h3 className="text-lg font-medium">{selectedStatus === "completed" && completedTaskItems.some((t) => t.id === selectedTaskId) ? "Editar tarea completada" : returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Actualizar tarea devuelta" : "Actualizar estado de tarea"}</h3>
+                        <h3 className="text-lg font-medium flex items-center gap-2">
+                           {selectedStatus === "completed" && completedTaskItems.some((t) => t.id === selectedTaskId) ? "Editar tarea completada" : returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Actualizar tarea devuelta" : "Actualizar estado de tarea"}
+                           {actionType === "progress" && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">Incluye programación</span>}
+                        </h3>
                         {taskForStatusUpdate && (
                            <p className="text-sm text-gray-600 mt-1">
                               {taskForStatusUpdate.title}
@@ -4558,6 +5380,12 @@ export default function UserProjectView() {
                         onClick={() => {
                            setShowStatusModal(false);
                            setTaskForStatusUpdate(null);
+                           setActionType(null);
+                           // Resetear campos de programación
+                           setNextWorkDate("");
+                           setNextWorkStartTime("");
+                           setNextWorkEndTime("");
+                           setNextWorkDuration(0);
                         }}
                         className="text-gray-400 hover:text-gray-500 focus:outline-none">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -4616,31 +5444,34 @@ export default function UserProjectView() {
                         </div>
                      )}
 
-                     {/* Sección de selección de estado - solo mostrar si no es edición de tarea completada */}
-                     {!completedTaskItems.some((t) => t.id === selectedTaskId) && (
-                        <div className="mb-4">
-                           <label className="block text-sm font-medium text-gray-700 mb-2">Estado de la tarea:</label>
-                           <div className="flex flex-wrap gap-3">
-                              <button
-                                 type="button"
-                                 className={`px-4 py-2 rounded-md text-sm font-medium 
-                              ${selectedStatus === "completed" ? "bg-green-100 text-green-800 border-2 border-green-500" : "bg-gray-100 text-gray-800 border border-gray-300"}`}
-                                 onClick={() => setSelectedStatus("completed")}>
-                                 Completada
-                              </button>
-                              <button
-                                 type="button"
-                                 className={`px-4 py-2 rounded-md text-sm font-medium 
-                              ${selectedStatus === "blocked" ? "bg-red-100 text-red-800 border-2 border-red-500" : "bg-gray-100 text-gray-800 border border-gray-300"}`}
-                                 onClick={() => setSelectedStatus("blocked")}>
-                                 Bloqueada
-                              </button>
+                     {/* Sección de información de acción seleccionada */}
+                     {!completedTaskItems.some((t) => t.id === selectedTaskId) && actionType && (
+                        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                           <div className="flex items-center gap-2">
+                              {actionType === "complete" && (
+                                 <>
+                                    <span className="text-green-600">✅</span>
+                                    <span className="text-sm font-medium text-green-700">Completar Tarea</span>
+                                 </>
+                              )}
+                              {actionType === "progress" && (
+                                 <>
+                                    <span className="text-blue-600">📝</span>
+                                    <span className="text-sm font-medium text-blue-700">Reportar Avance</span>
+                                 </>
+                              )}
+                              {actionType === "block" && (
+                                 <>
+                                    <span className="text-red-600">🚫</span>
+                                    <span className="text-sm font-medium text-red-700">Bloquear Tarea</span>
+                                 </>
+                              )}
                            </div>
                         </div>
                      )}
 
-                     {/* Detalles según el estado seleccionado */}
-                     {selectedStatus === "completed" ? (
+                     {/* Detalles según el estado/acción seleccionada */}
+                     {selectedStatus === "completed" || actionType === "complete" ? (
                         <div>
                            <div className="mb-4">
                               <label className="block text-sm font-medium text-gray-700 mb-2">{completedTaskItems.some((t) => t.id === selectedTaskId) ? "Editar entregables o resultados:" : "Detalla los entregables o resultados:"}</label>
@@ -4648,14 +5479,24 @@ export default function UserProjectView() {
                            </div>
 
                            <div className="mb-4">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Duración real de la tarea:</label>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Tiempo real trabajado en esta sesión: <span className="text-red-500">*</span></label>
                               <div className="flex items-center">
-                                 <input type="number" min="1" step="1" className="w-24 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 mr-2" value={actualDuration} onChange={(e) => setActualDuration(Number(e.target.value))} />
+                                 <input 
+                                    type="number" 
+                                    min="1" 
+                                    step="1" 
+                                    className="w-24 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 mr-2" 
+                                    value={actualDuration || ""} 
+                                    onChange={(e) => setActualDuration(Number(e.target.value))} 
+                                    placeholder="0"
+                                    required
+                                 />
                                  <select className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500" value={durationUnit} onChange={(e) => setDurationUnit(e.target.value as "minutes" | "hours")}>
                                     <option value="minutes">Minutos</option>
                                     <option value="hours">Horas</option>
                                  </select>
                               </div>
+                              <p className="text-xs text-gray-500 mt-1">Ingresa el tiempo que realmente trabajaste en esta tarea</p>
                            </div>
 
                            <div className="mb-4">
@@ -4663,10 +5504,90 @@ export default function UserProjectView() {
                               <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500" rows={2} value={durationReason} onChange={(e) => setDurationReason(e.target.value)} placeholder="Ejemplos: Fue más complejo de lo esperado, Hubo cambios en los requerimientos, etc." />
                            </div>
                         </div>
+                     ) : actionType === "progress" ? (
+                        <div>
+                           <div className="mb-4">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Describe el avance realizado:</label>
+                              <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" rows={3} value={statusDetails} onChange={(e) => setStatusDetails(e.target.value)} placeholder="Ejemplos: Avancé con la implementación del módulo X, Revisé y corregí errores en Y, etc." />
+                           </div>
+
+                           <div className="mb-4">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Tiempo trabajado en esta sesión: <span className="text-red-500">*</span></label>
+                              <div className="flex items-center">
+                                 <input 
+                                    type="number" 
+                                    min="1" 
+                                    step="1" 
+                                    className="w-24 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 mr-2" 
+                                    value={actualDuration || ""} 
+                                    onChange={(e) => setActualDuration(Number(e.target.value))} 
+                                    placeholder="0"
+                                    required
+                                 />
+                                 <select className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" value={durationUnit} onChange={(e) => setDurationUnit(e.target.value as "minutes" | "hours")}>
+                                    <option value="minutes">Minutos</option>
+                                    <option value="hours">Horas</option>
+                                 </select>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">Ingresa el tiempo que trabajaste en esta sesión</p>
+                           </div>
+
+                           <div className="mb-4">
+                              <label className="block text-sm font-medium text-gray-700 mb-2">Notas adicionales (opcional):</label>
+                              <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" rows={2} value={durationReason} onChange={(e) => setDurationReason(e.target.value)} placeholder="Ejemplos: Encontré dificultades con X, Necesito revisar Y, etc." />
+                           </div>
+
+                           {/* Sección obligatoria para programar próximo trabajo */}
+                           <div className="border-t border-gray-200 pt-4">
+                              <h4 className="text-sm font-medium text-gray-900 mb-3 flex items-center gap-2">
+                                 📅 Programar próxima sesión de trabajo <span className="text-red-500">*</span>
+                              </h4>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                 <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha: <span className="text-red-500">*</span></label>
+                                    <input
+                                       type="date"
+                                       min={format(new Date(), "yyyy-MM-dd")}
+                                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                       value={nextWorkDate}
+                                       onChange={(e) => setNextWorkDate(e.target.value)}
+                                       required
+                                    />
+                                 </div>
+                                 
+                                 <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Hora inicio: <span className="text-red-500">*</span></label>
+                                    <input
+                                       type="time"
+                                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                       value={nextWorkStartTime}
+                                       onChange={(e) => setNextWorkStartTime(e.target.value)}
+                                       required
+                                    />
+                                 </div>
+                                 
+                                 <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Hora fin: <span className="text-red-500">*</span></label>
+                                    <input
+                                       type="time"
+                                       className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                       value={nextWorkEndTime}
+                                       onChange={(e) => setNextWorkEndTime(e.target.value)}
+                                       required
+                                    />
+                                 </div>
+                              </div>
+                              
+                              <p className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                                 💡 Debes programar cuándo continuarás trabajando en esta tarea
+                              </p>
+                           </div>
+                        </div>
                      ) : (
                         <div className="mb-4">
                            <label className="block text-sm font-medium text-gray-700 mb-2">Detalla por qué está bloqueada:</label>
-                           <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500" rows={3} value={statusDetails} onChange={(e) => setStatusDetails(e.target.value)} placeholder="Ejemplos: Estoy esperando respuesta de X, Falta información sobre Y, etc." />
+                           <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" rows={3} value={statusDetails} onChange={(e) => setStatusDetails(e.target.value)} placeholder="Ejemplos: Estoy esperando respuesta de X, Falta información sobre Y, etc." />
                         </div>
                      )}
 
@@ -4678,6 +5599,12 @@ export default function UserProjectView() {
                         onClick={() => {
                            setShowStatusModal(false);
                            setTaskForStatusUpdate(null);
+                           setActionType(null);
+                           // Resetear campos de programación
+                           setNextWorkDate("");
+                           setNextWorkStartTime("");
+                           setNextWorkEndTime("");
+                           setNextWorkDuration(0);
                         }}
                         className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-yellow-500">
                         Cancelar
@@ -4685,8 +5612,107 @@ export default function UserProjectView() {
                      <button
                         onClick={handleSubmitStatus}
                         className={`px-4 py-2 text-sm font-medium text-white rounded-md shadow-sm hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 
-                       ${selectedStatus === "completed" ? "bg-green-600 focus:ring-green-500" : "bg-red-600 focus:ring-red-500"}`}>
-                        {returnedTaskItems.some((t) => t.id === selectedTaskId) ? (selectedStatus === "completed" ? "Marcar como Corregida" : "Marcar como Bloqueada") : completedTaskItems.some((t) => t.id === selectedTaskId) ? "Guardar Cambios" : selectedStatus === "completed" ? "Marcar como Completada" : "Marcar como Bloqueada"}
+                       ${actionType === "complete" || selectedStatus === "completed" ? "bg-green-600 focus:ring-green-500" : 
+                         actionType === "progress" ? "bg-blue-600 focus:ring-blue-500" : 
+                         "bg-red-600 focus:ring-red-500"}`}>
+                        {(() => {
+                           if (completedTaskItems.some((t) => t.id === selectedTaskId)) {
+                              return "Guardar Cambios";
+                           }
+                           
+                           if (returnedTaskItems.some((t) => t.id === selectedTaskId)) {
+                              if (actionType === "complete") return "Marcar como Corregida";
+                              if (actionType === "progress") return "Reportar Avance";
+                              if (actionType === "block") return "Marcar como Bloqueada";
+                           }
+                           
+                           // Para tareas normales
+                           if (actionType === "complete") return "Marcar como Completada";
+                           if (actionType === "progress") return "Reportar Avance";
+                           if (actionType === "block") return "Marcar como Bloqueada";
+                           
+                           // Fallback
+                           return selectedStatus === "completed" ? "Marcar como Completada" : "Marcar como Bloqueada";
+                        })()}
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* Modal para ver historial de avances */}
+         {showProgressModal && (
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+               <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                     <h3 className="text-lg font-medium text-blue-700 flex items-center gap-2">
+                        📊 Historial de Avances
+                     </h3>
+                     <button 
+                        onClick={() => setShowProgressModal(false)} 
+                        className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                     >
+                        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                     </button>
+                  </div>
+
+                  <div className="px-6 py-4 max-h-96 overflow-y-auto">
+                     {selectedTaskProgress.length === 0 ? (
+                        <div className="text-center py-8">
+                           <div className="text-gray-400 text-4xl mb-4">📝</div>
+                           <p className="text-gray-600">No hay avances registrados para esta tarea</p>
+                        </div>
+                     ) : (
+                        <div className="space-y-4">
+                           {selectedTaskProgress.map((progress, index) => (
+                              <div key={index} className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                                 <div className="flex justify-between items-start mb-2">
+                                    <div className="flex items-center gap-2">
+                                       <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded font-medium">
+                                          Avance #{selectedTaskProgress.length - index}
+                                       </span>
+                                       <span className="text-sm text-gray-600">
+                                          {format(new Date(progress.changed_at), "dd/MM/yyyy HH:mm")}
+                                       </span>
+                                    </div>
+                                    {progress.metadata?.tiempo_sesion && (
+                                       <span className="text-xs bg-white px-2 py-1 rounded border">
+                                          ⏱️ {Math.round((progress.metadata.tiempo_sesion / 60) * 100) / 100}h trabajadas
+                                       </span>
+                                    )}
+                                 </div>
+                                 
+                                 {progress.metadata?.descripcion_avance && (
+                                    <div className="mb-3">
+                                       <h5 className="text-sm font-medium text-blue-800 mb-1">Descripción del avance:</h5>
+                                       <div className="text-sm text-gray-700 bg-white p-2 rounded border">
+                                          <RichTextDisplay text={progress.metadata.descripcion_avance} />
+                                       </div>
+                                    </div>
+                                 )}
+                                 
+                                 {progress.metadata?.notas_avance && (
+                                    <div>
+                                       <h5 className="text-sm font-medium text-blue-800 mb-1">Notas adicionales:</h5>
+                                       <div className="text-sm text-gray-700 bg-white p-2 rounded border">
+                                          <RichTextDisplay text={progress.metadata.notas_avance} />
+                                       </div>
+                                    </div>
+                                 )}
+                              </div>
+                           ))}
+                        </div>
+                     )}
+                  </div>
+
+                  <div className="px-6 py-3 bg-gray-50 flex justify-end border-t border-gray-200">
+                     <button
+                        onClick={() => setShowProgressModal(false)}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                     >
+                        Cerrar
                      </button>
                   </div>
                </div>
