@@ -4476,8 +4476,8 @@ export default function UserProjectView() {
                                                       <div className="space-y-1">
                                                          {/* Sesiones planificadas */}
                                                          {plannedSessions.map((session: any, idx: number) => {
-                                                            const startTime = session.start_time ? new Date(session.start_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
-                                                            const endTime = session.end_time ? new Date(session.end_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+                                                            const startTime = session.start_time ? new Date(session.start_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+                                                            const endTime = session.end_time ? new Date(session.end_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
                                                             
                                                             // Calcular tiempo ejecutado real para esta sesión
                                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
