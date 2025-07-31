@@ -4924,7 +4924,7 @@ export default function UserProjectView() {
                                           </span>
                                        </div>
                                        <div className="text-sm text-gray-700">
-                                          {event.start_time} - {event.end_time}
+                                          {format(new Date(`1970-01-01T${event.start_time}`), "hh:mm a")} - {format(new Date(`1970-01-01T${event.end_time}`), "hh:mm a")}
                                        </div>
                                        <div className="text-sm font-medium text-purple-600">
                                           {durationHours}h
