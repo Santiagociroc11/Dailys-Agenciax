@@ -296,6 +296,7 @@ export default function UserProjectView() {
    // Estados para Gantt semanal
    const [ganttData, setGanttData] = useState<any[]>([]);
    const [executedTimeData, setExecutedTimeData] = useState<Record<string, Record<string, number>>>({});
+   const [offScheduleWorkData, setOffScheduleWorkData] = useState<Record<string, Record<string, number>>>({});
 
    // Estados para modales
    const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -3052,6 +3053,72 @@ export default function UserProjectView() {
       return weekDays;
    }
 
+   // Función para verificar si un día ya pasó
+   function isDayPassed(dateStr: string): boolean {
+      const dayDate = new Date(dateStr);
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // Fin del día actual
+      return dayDate < today;
+   }
+
+   // Función para detectar incumplimientos (días pasados sin trabajo reportado)
+   function checkNonCompliance(taskGroup: any, dateStr: string): boolean {
+      if (!isDayPassed(dateStr)) return false;
+      
+      const sessions = taskGroup.sessions[dateStr] || [];
+      if (sessions.length === 0) return false; // No estaba planeado para ese día
+      
+      // Verificar si hay tiempo real ejecutado ese día
+      const realExecutedTime = executedTimeData[taskGroup.id]?.[dateStr] || 0;
+      return realExecutedTime === 0; // Incumplimiento si no hay tiempo ejecutado
+   }
+
+   // Función para detectar trabajo realizado fuera del día planeado
+   async function getOffScheduleWork(taskGroup: any): Promise<Record<string, number>> {
+      if (!user) return {};
+      
+      try {
+         const weekDays = getWeekDays();
+         const startDate = weekDays[0].dateStr;
+         const endDate = weekDays[weekDays.length - 1].dateStr;
+
+         // Obtener trabajo real del historial de cambios de estado
+         const taskType = taskGroup.type;
+         const taskId = taskType === "subtask" 
+            ? taskGroup.id.replace("subtask-", "")
+            : taskGroup.id.replace("task-", "");
+
+         const { data: statusHistory, error } = await supabase
+            .from("status_history")
+            .select("changed_at, metadata")
+            .eq(taskType === "subtask" ? "subtask_id" : "task_id", taskId)
+            .eq("new_status", "completed")
+            .gte("changed_at", `${startDate} 00:00:00`)
+            .lte("changed_at", `${endDate} 23:59:59`);
+
+         if (error || !statusHistory) return {};
+
+         const offScheduleWork: Record<string, number> = {};
+         
+         statusHistory.forEach(record => {
+            const completedDate = format(new Date(record.changed_at), "yyyy-MM-dd");
+            const metadata = record.metadata || {};
+            const executedTime = metadata.duracion_real || 0;
+            
+            // Solo contar como fuera de cronograma si no estaba planeado para ese día
+            const plannedSessions = taskGroup.sessions[completedDate] || [];
+            if (plannedSessions.length === 0 && executedTime > 0) {
+               offScheduleWork[completedDate] = executedTime;
+            }
+         });
+
+         return offScheduleWork;
+      } catch (error) {
+         console.error("Error getting off-schedule work:", error);
+         return {};
+      }
+   }
+
    // Función para obtener datos del Gantt semanal
    async function getWeeklyGanttData() {
       if (!user) return [];
@@ -3143,8 +3210,9 @@ export default function UserProjectView() {
       const data = await getWeeklyGanttData();
       setGanttData(data);
       
-      // Precalcular tiempos ejecutados
+      // Precalcular tiempos ejecutados y trabajo fuera de cronograma
       await calculateExecutedTimes(data);
+      await calculateOffScheduleWork(data);
    }
 
    // Función para precalcular tiempos ejecutados
@@ -3172,6 +3240,18 @@ export default function UserProjectView() {
       }
 
       setExecutedTimeData(executedTimes);
+   }
+
+   // Función para precalcular trabajo fuera de cronograma
+   async function calculateOffScheduleWork(ganttData: any[]) {
+      const offScheduleWork: Record<string, Record<string, number>> = {};
+
+      for (const taskGroup of ganttData) {
+         const taskOffSchedule = await getOffScheduleWork(taskGroup);
+         offScheduleWork[taskGroup.id] = taskOffSchedule;
+      }
+
+      setOffScheduleWorkData(offScheduleWork);
    }
 
    // Función para obtener tiempo real ejecutado de las sesiones de trabajo
@@ -3449,6 +3529,22 @@ export default function UserProjectView() {
                   <div>
                      <h2 className="text-xl font-semibold">GESTIÓN DE TAREAS ASIGNADAS</h2>
                      <p className="text-sm text-gray-600 mt-1">Administra las tareas que has asignado para trabajar</p>
+                     
+                     {/* Disclaimer sobre incumplimientos */}
+                     <div className="mt-3 p-3 bg-amber-50 border-l-4 border-amber-400 rounded-r-md">
+                        <div className="flex items-start">
+                           <div className="flex-shrink-0">
+                              <svg className="h-5 w-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                           </div>
+                           <div className="ml-3">
+                              <p className="text-sm text-amber-800">
+                                 <strong>⚠️ Importante:</strong> Si antes de las 12:00 PM del día actual no se reporta el avance o completado de la tarea, el bloque asignado aparecerá como <strong>incumplido</strong>. Así la completes mañana, saldrá incumplido.
+                              </p>
+                           </div>
+                        </div>
+                     </div>
                   </div>
                   {/* Botón para crear actividad adicional */}
                   <div className="mt-4 md:mt-0 flex justify-end">
@@ -4104,6 +4200,14 @@ export default function UserProjectView() {
                                  <div className="w-4 h-4 bg-green-200 border border-green-400 rounded"></div>
                                  <span>Ejecutado</span>
                               </div>
+                              <div className="flex items-center gap-2">
+                                 <div className="w-4 h-4 bg-red-200 border border-red-400 rounded"></div>
+                                 <span>Incumplimiento</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                 <div className="w-4 h-4 bg-orange-200 border border-orange-400 rounded"></div>
+                                 <span>Fuera de cronograma</span>
+                              </div>
                         </div>
                      </div>
 
@@ -4191,9 +4295,28 @@ export default function UserProjectView() {
                                           {getWeekDays().map(day => {
                                              const sessions = taskGroup.sessions[day.dateStr] || [];
                                              const plannedSessions = sessions.filter((s: any) => s.start_time && s.end_time);
+                                             const isNonCompliant = checkNonCompliance(taskGroup, day.dateStr);
+                                             const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+                                             const hasOffScheduleWork = offScheduleTime > 0;
                                              
                                              return (
                                                 <div key={`${taskGroup.id}-${day.dateStr}`} className="p-1 min-h-[50px] border-r border-gray-200 last:border-r-0">
+                                                   {/* Mostrar trabajo fuera de cronograma si corresponde */}
+                                                   {hasOffScheduleWork && (
+                                                      <div className="space-y-1 mb-1">
+                                                         <div 
+                                                            className="text-xs p-1 rounded border bg-orange-100 border-orange-300 relative"
+                                                            title={`🕒 FUERA DE CRONOGRAMA: ${Math.round(offScheduleTime / 60 * 100) / 100}h trabajadas en día no planeado`}
+                                                         >
+                                                            <div className="absolute inset-0 bg-orange-200 opacity-60"></div>
+                                                            <div className="relative z-10 text-orange-800 font-medium">
+                                                               <div className="text-center">🕒 EXTRA</div>
+                                                               <div className="text-center">{Math.round(offScheduleTime / 60 * 100) / 100}h</div>
+                                                            </div>
+                                                         </div>
+                                                      </div>
+                                                   )}
+                                                   
                                                    {sessions.length > 0 ? (
                                                       <div className="space-y-1">
                                                          {/* Sesiones planificadas */}
@@ -4208,17 +4331,31 @@ export default function UserProjectView() {
 
                                                             // Calcular porcentajes para las barras
                                                             const maxTime = Math.max(plannedMinutes, executedMinutes);
-                                                            const plannedPercent = maxTime > 0 ? (plannedMinutes / maxTime) * 100 : 0;
                                                             const executedPercent = maxTime > 0 ? (executedMinutes / maxTime) * 100 : 0;
+                                                            
+                                                            // Determinar si esta sesión está incumplida
+                                                            const isSessionNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0;
+                                                            
+                                                            // Colores según estado
+                                                            const backgroundClass = isSessionNonCompliant 
+                                                               ? "bg-red-50 border-red-200" 
+                                                               : "bg-blue-50 border-blue-200";
+                                                            const barBackgroundClass = isSessionNonCompliant 
+                                                               ? "bg-red-200" 
+                                                               : "bg-blue-200";
+                                                            
+                                                            const statusText = isSessionNonCompliant 
+                                                               ? "⚠️ INCUMPLIDO" 
+                                                               : session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Planificado";
                                                             
                                                             return (
                                                                <div 
                                                                   key={idx}
-                                                                  className="text-xs p-1 rounded border bg-blue-50 border-blue-200 relative overflow-hidden"
-                                                                  title={`${startTime} - ${endTime}\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Planificado"}`}
+                                                                  className={`text-xs p-1 rounded border ${backgroundClass} relative overflow-hidden`}
+                                                                  title={`${startTime} - ${endTime}\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${statusText}`}
                                                                >
                                                                   {/* Barra de fondo - Tiempo planificado */}
-                                                                  <div className="absolute inset-0 bg-blue-200 opacity-50"></div>
+                                                                  <div className={`absolute inset-0 ${barBackgroundClass} opacity-50`}></div>
                                                                   
                                                                   {/* Barra de progreso - Tiempo ejecutado */}
                                                                   {executedMinutes > 0 && (
@@ -4252,22 +4389,37 @@ export default function UserProjectView() {
                                                             const plannedMinutes = session.estimated_duration || 0;
                                                             const executedMinutes = realExecutedTime;
 
+                                                            // Determinar si esta sesión está incumplida
+                                                            const isSessionNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0;
+                                                            
+                                                            // Colores según estado
+                                                            const backgroundClass = isSessionNonCompliant 
+                                                               ? "bg-red-100 border-red-300 text-red-700" 
+                                                               : "bg-gray-100 border-gray-300 text-gray-700";
+                                                            const barClass = isSessionNonCompliant 
+                                                               ? "bg-red-300" 
+                                                               : "bg-green-300";
+                                                            
+                                                            const statusText = isSessionNonCompliant 
+                                                               ? "⚠️ INCUMPLIDO" 
+                                                               : session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Asignado";
+
                                                             return (
                                                                <div 
                                                                   key={`no-time-${idx}`}
-                                                                  className="text-xs p-1 rounded border bg-gray-100 border-gray-300 text-gray-700 relative overflow-hidden"
-                                                                  title={`Sin horario específico\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Asignado"}`}
+                                                                  className={`text-xs p-1 rounded border ${backgroundClass} relative overflow-hidden`}
+                                                                  title={`Sin horario específico\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${statusText}`}
                                                                >
                                                                   {/* Barra de progreso para sesiones sin horario */}
                                                                   {executedMinutes > 0 && (
                                                                      <div 
-                                                                        className="absolute inset-y-0 left-0 bg-green-300 opacity-50"
+                                                                        className={`absolute inset-y-0 left-0 ${barClass} opacity-50`}
                                                                         style={{ width: `${Math.min((executedMinutes / plannedMinutes) * 100, 100)}%` }}
                                                                      ></div>
                                                                   )}
                                                                   
                                                                   <div className="relative z-10">
-                                                                     <div>Sin horario</div>
+                                                                     <div>{isSessionNonCompliant ? "⚠️ INCUMPLIDO" : "Sin horario"}</div>
                                                                      <div className="flex justify-between">
                                                                         <span>P:{Math.round(plannedMinutes / 60 * 100) / 100}h</span>
                                                                         <span>E:{Math.round(executedMinutes / 60 * 100) / 100}h</span>
