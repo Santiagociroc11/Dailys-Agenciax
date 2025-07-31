@@ -317,8 +317,10 @@ export default function UserProjectView() {
    // Estados para eventos de trabajo
    const [showEventsModal, setShowEventsModal] = useState(false);
    const [workEvents, setWorkEvents] = useState<WorkEvent[]>([]);
+   const [allWorkEvents, setAllWorkEvents] = useState<WorkEvent[]>([]);
    const [editingEvent, setEditingEvent] = useState<WorkEvent | null>(null);
    const [loadingEvents, setLoadingEvents] = useState(false);
+   const [loadingAllEvents, setLoadingAllEvents] = useState(false);
    
    // Estados para el formulario de eventos
    const [eventForm, setEventForm] = useState({
@@ -1231,6 +1233,7 @@ export default function UserProjectView() {
          // Limpiar formulario y recargar eventos
          resetEventForm();
          fetchWorkEvents();
+         fetchAllWorkEvents(); // También recargar la lista de todas las actividades
          
       } catch (error) {
          console.error('Error saving event:', error);
@@ -1255,6 +1258,7 @@ export default function UserProjectView() {
          
          toast.success('Evento eliminado correctamente');
          fetchWorkEvents();
+         fetchAllWorkEvents(); // También recargar la lista de todas las actividades
          
       } catch (error) {
          console.error('Error deleting event:', error);
@@ -1295,6 +1299,77 @@ export default function UserProjectView() {
          fetchWorkEvents();
       }
    }, [showEventsModal, user]);
+
+   // Función para cargar todas las actividades de la semana
+   async function fetchAllWorkEvents() {
+      if (!user) return;
+      
+      setLoadingAllEvents(true);
+      try {
+         const weekDays = getWeekDays();
+         const startDate = weekDays[0].dateStr;
+         const endDate = weekDays[weekDays.length - 1].dateStr;
+         
+         const { data, error } = await supabase
+            .from('work_events')
+            .select('*')
+            .eq('user_id', user.id)
+            .gte('date', startDate)
+            .lte('date', endDate)
+            .order('date', { ascending: true })
+            .order('start_time', { ascending: true });
+            
+         if (error) throw error;
+         
+         setAllWorkEvents(data || []);
+      } catch (error) {
+         console.error('Error fetching all work events:', error);
+         toast.error('Error al cargar actividades de la semana');
+      } finally {
+         setLoadingAllEvents(false);
+      }
+   }
+
+   // Función para eliminar una actividad
+   async function handleDeleteActivity(eventId: string) {
+      if (!confirm('¿Estás seguro de que quieres eliminar esta actividad?')) {
+         return;
+      }
+      
+      try {
+         const { error } = await supabase
+            .from('work_events')
+            .delete()
+            .eq('id', eventId);
+            
+         if (error) throw error;
+         
+         toast.success('Actividad eliminada correctamente');
+         fetchAllWorkEvents(); // Recargar la lista
+         
+      } catch (error) {
+         console.error('Error deleting activity:', error);
+         toast.error('Error al eliminar la actividad');
+      }
+   }
+
+   // Función para editar una actividad
+   function handleEditActivity(event: WorkEvent) {
+      // Convertir tiempos de string a minutos
+      const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+      const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+      
+      setEventForm({
+         title: event.title,
+         description: event.description || '',
+         event_type: event.event_type,
+         start_time: startMinutes,
+         end_time: endMinutes,
+      });
+      
+      setEditingEvent(event);
+      setShowEventsModal(true);
+   }
 
    async function handleSaveSelectedTasks() {
       if (selectedTasks.length === 0) {
@@ -3198,6 +3273,57 @@ export default function UserProjectView() {
             });
          });
 
+         // Obtener actividades adicionales (work_events) de la semana
+         const { data: workEvents, error: eventsError } = await supabase
+            .from('work_events')
+            .select('*')
+            .eq('user_id', user.id)
+            .gte('date', startDate)
+            .lte('date', endDate)
+            .order('start_time', { ascending: true });
+
+         if (!eventsError && workEvents) {
+            // Agrupar eventos por fecha para crear entradas en el Gantt
+            workEvents.forEach(event => {
+               const eventKey = `event-${event.id}`;
+               
+               // Calcular duración del evento en minutos
+               const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+               const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+               const durationMinutes = endMinutes - startMinutes;
+
+               // Crear entrada para actividad adicional
+               taskGroups[eventKey] = {
+                  id: eventKey,
+                  title: event.title,
+                  description: event.description || "",
+                  priority: "medium",
+                  start_date: event.date,
+                  deadline: event.date,
+                  status: "completed", // Asumir como ejecutada
+                  is_sequential: false,
+                  type: "event", // Nuevo tipo para actividades adicionales
+                  project_id: event.project_id || "",
+                  project_name: "Actividad Adicional",
+                  parent_task_title: "",
+                  estimated_duration: durationMinutes,
+                  event_type: event.event_type,
+                  sessions: {
+                     [event.date]: [{
+                        id: event.id,
+                        status: "completed",
+                        estimated_duration: durationMinutes,
+                        actual_duration: durationMinutes, // Misma duración = ejecutado completamente
+                        start_time: `${event.date}T${event.start_time}`,
+                        end_time: `${event.date}T${event.end_time}`,
+                        notes: event.description || "",
+                        event_type: event.event_type
+                     }]
+                  }
+               };
+            });
+         }
+
          return Object.values(taskGroups);
       } catch (error) {
          console.error("Error fetching weekly gantt data:", error);
@@ -3304,6 +3430,12 @@ export default function UserProjectView() {
    useEffect(() => {
       if (activeTab === "gestion" && activeGestionSubTab === "gantt_semanal") {
          fetchGanttData();
+      }
+   }, [activeTab, activeGestionSubTab]);
+
+   useEffect(() => {
+      if (activeTab === "gestion" && activeGestionSubTab === "actividades") {
+         fetchAllWorkEvents();
       }
    }, [activeTab, activeGestionSubTab]);
 
@@ -3571,6 +3703,10 @@ export default function UserProjectView() {
                      <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
                         Bloqueadas
                         <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600">{blockedTaskItems.length}</span>
+                     </button>
+                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "actividades" ? "border-b-2 border-purple-500 text-purple-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("actividades")}>
+                        📅 Actividades
+                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-600">{workEvents.length}</span>
                      </button>
                      <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
                         Aprobadas
@@ -4208,6 +4344,10 @@ export default function UserProjectView() {
                                  <div className="w-4 h-4 bg-orange-200 border border-orange-400 rounded"></div>
                                  <span>Fuera de cronograma</span>
                               </div>
+                              <div className="flex items-center gap-2">
+                                 <div className="w-4 h-4 bg-purple-200 border border-purple-400 rounded"></div>
+                                 <span>Actividad adicional</span>
+                              </div>
                         </div>
                      </div>
 
@@ -4252,36 +4392,51 @@ export default function UserProjectView() {
                                     return (
                                        <div key={taskGroup.id} className="grid grid-cols-8 gap-2 mb-3 border border-gray-200 rounded-lg">
                                           {/* Nombre de la tarea */}
-                                          <div className="p-2 bg-gray-50 font-medium text-sm text-gray-800 border-r border-gray-200 min-h-[50px]">
+                                          <div className={`p-2 font-medium text-sm border-r border-gray-200 min-h-[50px] ${
+                                             taskGroup.type === "event" 
+                                                ? "bg-purple-50 text-purple-800" 
+                                                : "bg-gray-50 text-gray-800"
+                                          }`}>
                                              <div 
-                                                className="font-medium text-gray-900 mb-1 cursor-pointer hover:text-blue-600 transition-colors"
+                                                className={`font-medium mb-1 cursor-pointer transition-colors ${
+                                                   taskGroup.type === "event"
+                                                      ? "text-purple-900 hover:text-purple-600"
+                                                      : "text-gray-900 hover:text-blue-600"
+                                                }`}
                                                 onClick={() => {
-                                                   // Crear objeto Task para el modal con datos completos
-                                                   const taskForModal: Task = {
-                                                      id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : taskGroup.id.replace("task-", ""),
-                                                      title: taskGroup.title,
-                                                      description: taskGroup.description,
-                                                      priority: taskGroup.priority as "low" | "medium" | "high",
-                                                      estimated_duration: taskGroup.estimated_duration,
-                                                      start_date: taskGroup.start_date,
-                                                      deadline: taskGroup.deadline,
-                                                      status: taskGroup.status,
-                                                      is_sequential: taskGroup.is_sequential,
-                                                      project_id: taskGroup.project_id,
-                                                      projectName: taskGroup.project_name,
-                                                      type: taskGroup.type,
-                                                      original_id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : undefined,
-                                                      subtask_title: taskGroup.parent_task_title
-                                                   };
-                                                   handleViewTaskDetails(taskForModal);
+                                                   if (taskGroup.type === "event") {
+                                                      // Para actividades adicionales, mostrar información básica
+                                                      alert(`📅 Actividad Adicional\n\nTítulo: ${taskGroup.title}\nTipo: ${taskGroup.event_type}\nDescripción: ${taskGroup.description || "Sin descripción"}`);
+                                                   } else {
+                                                      // Crear objeto Task para el modal con datos completos
+                                                      const taskForModal: Task = {
+                                                         id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : taskGroup.id.replace("task-", ""),
+                                                         title: taskGroup.title,
+                                                         description: taskGroup.description,
+                                                         priority: taskGroup.priority as "low" | "medium" | "high",
+                                                         estimated_duration: taskGroup.estimated_duration,
+                                                         start_date: taskGroup.start_date,
+                                                         deadline: taskGroup.deadline,
+                                                         status: taskGroup.status,
+                                                         is_sequential: taskGroup.is_sequential,
+                                                         project_id: taskGroup.project_id,
+                                                         projectName: taskGroup.project_name,
+                                                         type: taskGroup.type,
+                                                         original_id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : undefined,
+                                                         subtask_title: taskGroup.parent_task_title
+                                                      };
+                                                      handleViewTaskDetails(taskForModal);
+                                                   }
                                                 }}
-                                                title="Click para ver detalles de la tarea"
+                                                title={taskGroup.type === "event" ? "Click para ver detalles de la actividad adicional" : "Click para ver detalles de la tarea"}
                                              >
-                                                {taskGroup.title}
+                                                {taskGroup.type === "event" ? "📅 " : ""}{taskGroup.title}
                               </div>
                                              
-                                             <div className="text-xs text-gray-500">
-                                                {taskGroup.type === "subtask" ? "Subtarea" : "Tarea"}
+                                             <div className={`text-xs ${taskGroup.type === "event" ? "text-purple-600" : "text-gray-500"}`}>
+                                                {taskGroup.type === "subtask" ? "Subtarea" : 
+                                                 taskGroup.type === "event" ? `Actividad (${taskGroup.event_type})` : 
+                                                 "Tarea"}
                                     </div>
 
                                              {taskGroup.type === "subtask" && taskGroup.parent_task_title && (
@@ -4334,19 +4489,27 @@ export default function UserProjectView() {
                                                             const executedPercent = maxTime > 0 ? (executedMinutes / maxTime) * 100 : 0;
                                                             
                                                             // Determinar si esta sesión está incumplida
-                                                            const isSessionNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0;
+                                                            const isSessionNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0 && taskGroup.type !== "event";
                                                             
-                                                            // Colores según estado
-                                                            const backgroundClass = isSessionNonCompliant 
-                                                               ? "bg-red-50 border-red-200" 
-                                                               : "bg-blue-50 border-blue-200";
-                                                            const barBackgroundClass = isSessionNonCompliant 
-                                                               ? "bg-red-200" 
-                                                               : "bg-blue-200";
+                                                            // Colores según estado y tipo
+                                                            let backgroundClass, barBackgroundClass, statusText;
                                                             
-                                                            const statusText = isSessionNonCompliant 
-                                                               ? "⚠️ INCUMPLIDO" 
-                                                               : session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Planificado";
+                                                            if (taskGroup.type === "event") {
+                                                               // Actividades adicionales - siempre ejecutadas
+                                                               backgroundClass = "bg-purple-50 border-purple-200";
+                                                               barBackgroundClass = "bg-purple-200";
+                                                               statusText = `✅ Ejecutado (${session.event_type || "actividad"})`;
+                                                            } else if (isSessionNonCompliant) {
+                                                               // Tareas incumplidas
+                                                               backgroundClass = "bg-red-50 border-red-200";
+                                                               barBackgroundClass = "bg-red-200";
+                                                               statusText = "⚠️ INCUMPLIDO";
+                                                            } else {
+                                                               // Tareas normales
+                                                               backgroundClass = "bg-blue-50 border-blue-200";
+                                                               barBackgroundClass = "bg-blue-200";
+                                                               statusText = session.status === "completed" ? "Completado" : session.status === "in_progress" ? "En progreso" : "Planificado";
+                                                            }
                                                             
                                                             return (
                                                                <div 
@@ -4358,14 +4521,20 @@ export default function UserProjectView() {
                                                                   <div className={`absolute inset-0 ${barBackgroundClass} opacity-50`}></div>
                                                                   
                                                                   {/* Barra de progreso - Tiempo ejecutado */}
-                                                                  {executedMinutes > 0 && (
+                                                                  {(executedMinutes > 0 || taskGroup.type === "event") && (
                                                                      <div 
                                                                         className={`absolute inset-y-0 left-0 ${
-                                                                           executedMinutes >= plannedMinutes 
-                                                                              ? 'bg-green-400' 
-                                                                              : 'bg-green-300'
+                                                                           taskGroup.type === "event"
+                                                                              ? 'bg-green-400' // Actividades adicionales siempre verdes
+                                                                              : executedMinutes >= plannedMinutes 
+                                                                                 ? 'bg-green-400' 
+                                                                                 : 'bg-green-300'
                                                                         } opacity-70`}
-                                                                        style={{ width: `${Math.min(executedPercent, 100)}%` }}
+                                                                        style={{ 
+                                                                           width: taskGroup.type === "event" 
+                                                                              ? '100%' // Actividades adicionales siempre al 100%
+                                                                              : `${Math.min(executedPercent, 100)}%` 
+                                                                        }}
                                                                      ></div>
                                                                   )}
                                                                   
@@ -4375,8 +4544,17 @@ export default function UserProjectView() {
                                                                         {startTime && endTime ? `${startTime}-${endTime}` : 'Sin horario'}
                                              </div>
                                                                      <div className="flex justify-between text-xs">
-                                                                        <span>P:{Math.round(plannedMinutes / 60 * 100) / 100}h</span>
-                                                                        <span>E:{Math.round(executedMinutes / 60 * 100) / 100}h</span>
+                                                                        {taskGroup.type === "event" ? (
+                                                                           <>
+                                                                              <span>📅 {Math.round(plannedMinutes / 60 * 100) / 100}h</span>
+                                                                              <span>✅ Ejecutado</span>
+                                                                           </>
+                                                                        ) : (
+                                                                           <>
+                                                                              <span>P:{Math.round(plannedMinutes / 60 * 100) / 100}h</span>
+                                                                              <span>E:{Math.round(executedMinutes / 60 * 100) / 100}h</span>
+                                                                           </>
+                                                                        )}
                                           </div>
                                              </div>
                                           </div>
@@ -4443,8 +4621,18 @@ export default function UserProjectView() {
                                     </div>
                                              <div className="text-gray-700 leading-tight">
                                                 E: {Math.round((getWeekDays().reduce((total, day) => {
-                                                   const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                   return total + realExecutedTime;
+                                                   if (taskGroup.type === "event") {
+                                                      // Para actividades adicionales, contar toda su duración como ejecutada
+                                                      const sessions = taskGroup.sessions[day.dateStr] || [];
+                                                      const eventTime = sessions.reduce((daySum: number, session: any) => {
+                                                         return daySum + (session.actual_duration || 0);
+                                                      }, 0);
+                                                      return total + eventTime;
+                                                   } else {
+                                                      // Para tareas normales, usar executedTimeData
+                                                      const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                      return total + realExecutedTime;
+                                                   }
                                                 }, 0) / 60) * 100) / 100}h
                                     </div>
                                     </div>
@@ -4493,8 +4681,18 @@ export default function UserProjectView() {
                                        </div>
                                        {getWeekDays().map(day => {
                                           const executedHours = ganttData.reduce((total, taskGroup) => {
-                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                             return total + realExecutedTime;
+                                             if (taskGroup.type === "event") {
+                                                // Para actividades adicionales, contar toda su duración como ejecutada
+                                                const sessions = taskGroup.sessions[day.dateStr] || [];
+                                                const eventTime = sessions.reduce((daySum: number, session: any) => {
+                                                   return daySum + (session.actual_duration || 0);
+                                                }, 0);
+                                                return total + eventTime;
+                                             } else {
+                                                // Para tareas normales, usar executedTimeData
+                                                const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                return total + realExecutedTime;
+                                             }
                                           }, 0);
 
                                           return (
@@ -4505,10 +4703,22 @@ export default function UserProjectView() {
                                        })}
                                        <div className="p-1 bg-green-100 text-center text-xs text-green-800">
                                           {Math.round((ganttData.reduce((grandTotal, taskGroup) => {
-                                             return grandTotal + getWeekDays().reduce((total, day) => {
-                                                const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                return total + realExecutedTime;
-                                             }, 0);
+                                             if (taskGroup.type === "event") {
+                                                // Para actividades adicionales, sumar toda su duración como ejecutada
+                                                return grandTotal + getWeekDays().reduce((total, day) => {
+                                                   const sessions = taskGroup.sessions[day.dateStr] || [];
+                                                   const eventTime = sessions.reduce((daySum: number, session: any) => {
+                                                      return daySum + (session.actual_duration || 0);
+                                                   }, 0);
+                                                   return total + eventTime;
+                                                }, 0);
+                                             } else {
+                                                // Para tareas normales, usar executedTimeData
+                                                return grandTotal + getWeekDays().reduce((total, day) => {
+                                                   const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                   return total + realExecutedTime;
+                                                }, 0);
+                                             }
                                           }, 0) / 60) * 100) / 100}h
                                        </div>
                                     </div>
@@ -4659,6 +4869,108 @@ export default function UserProjectView() {
                         </div>
                      )}
                   </>
+               )}
+
+               {/* Vista de Actividades Adicionales */}
+               {activeGestionSubTab === "actividades" && (
+                  <div className="mb-6">
+                     <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center">
+                           <div className="w-4 h-4 bg-purple-500 rounded-full mr-3"></div>
+                           <h3 className="text-lg font-semibold text-purple-700">Actividades Adicionales de la Semana</h3>
+                        </div>
+                        <button
+                           onClick={() => setShowEventsModal(true)}
+                           className="bg-purple-500 text-white px-4 py-2 rounded-md font-medium hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 flex items-center gap-2"
+                        >
+                           ➕ Nueva Actividad
+                        </button>
+                     </div>
+
+                     {loadingAllEvents ? (
+                        <div className="py-8 text-center text-gray-500 bg-white">
+                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mx-auto mb-2"></div>
+                           <p>Cargando actividades...</p>
+                        </div>
+                     ) : allWorkEvents.length > 0 ? (
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                           <div className="grid grid-cols-7 gap-4 p-3 border-b-2 border-purple-300 font-medium text-purple-800 bg-purple-50">
+                              <div>FECHA</div>
+                              <div>TÍTULO</div>
+                              <div>TIPO</div>
+                              <div>HORARIO</div>
+                              <div>DURACIÓN</div>
+                              <div>DESCRIPCIÓN</div>
+                              <div>ACCIONES</div>
+                           </div>
+                           <div className="divide-y divide-gray-200">
+                              {allWorkEvents.map((event) => {
+                                 const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                 const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                 const durationMinutes = endMinutes - startMinutes;
+                                 const durationHours = Math.round((durationMinutes / 60) * 100) / 100;
+
+                                 return (
+                                    <div key={event.id} className="grid grid-cols-7 gap-4 py-3 items-center hover:bg-purple-50 px-3">
+                                       <div className="text-sm font-medium text-gray-700">
+                                          {format(new Date(event.date), "EEE dd/MM", { locale: es })}
+                                       </div>
+                                       <div className="font-medium text-gray-900">
+                                          {event.title}
+                                       </div>
+                                       <div className="text-sm">
+                                          <span className="inline-block px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                                             {event.event_type}
+                                          </span>
+                                       </div>
+                                       <div className="text-sm text-gray-700">
+                                          {event.start_time} - {event.end_time}
+                                       </div>
+                                       <div className="text-sm font-medium text-purple-600">
+                                          {durationHours}h
+                                       </div>
+                                       <div className="text-sm text-gray-600 max-w-xs overflow-hidden">
+                                          {event.description || "-"}
+                                       </div>
+                                       <div className="flex gap-2">
+                                          <button
+                                             onClick={() => handleEditActivity(event)}
+                                             className="text-blue-600 hover:text-blue-800 p-1 rounded transition-colors"
+                                             title="Editar actividad"
+                                          >
+                                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                             </svg>
+                                          </button>
+                                          <button
+                                             onClick={() => handleDeleteActivity(event.id)}
+                                             className="text-red-600 hover:text-red-800 p-1 rounded transition-colors"
+                                             title="Eliminar actividad"
+                                          >
+                                             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                             </svg>
+                                          </button>
+                                       </div>
+                                    </div>
+                                 );
+                              })}
+                           </div>
+                        </div>
+                     ) : (
+                        <div className="py-12 text-center bg-white rounded-lg border border-gray-200">
+                           <div className="text-6xl mb-4">📅</div>
+                           <h4 className="text-lg font-medium text-gray-600 mb-2">No hay actividades adicionales</h4>
+                           <p className="text-sm text-gray-500 mb-4">Crea tu primera actividad adicional para comenzar a registrar reuniones, breaks, etc.</p>
+                           <button
+                              onClick={() => setShowEventsModal(true)}
+                              className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                           >
+                              ➕ Crear Actividad
+                           </button>
+                        </div>
+                     )}
+                  </div>
                )}
 
             </div>
