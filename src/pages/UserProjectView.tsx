@@ -3256,6 +3256,7 @@ export default function UserProjectView() {
             <h1 className="text-2xl font-bold">{project?.name || "Cargando proyecto..."}</h1>
          </div>
 
+
          {/* Tabs */}
          <div className="border-b border-gray-200 mb-6">
             <div className="flex -mb-px">
@@ -3430,13 +3431,6 @@ export default function UserProjectView() {
                   </div>
                   <div className="flex gap-3">
                      <button
-                        onClick={() => setShowEventsModal(true)}
-                        className="bg-purple-500 text-white px-6 py-2 rounded-md font-medium 
-                           hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 
-                           flex items-center gap-2">
-                        📅 GESTIONAR EVENTOS
-                     </button>
-                     <button
                         onClick={handleShowConfirmModal}
                         disabled={selectedTasks.length === 0 || saving}
                         className="bg-yellow-500 text-white px-6 py-2 rounded-md font-medium 
@@ -3451,9 +3445,21 @@ export default function UserProjectView() {
 
          {activeTab === "gestion" && (
             <div>
-               <div className="mb-4">
-                  <h2 className="text-xl font-semibold">GESTIÓN DE TAREAS ASIGNADAS</h2>
-                  <p className="text-sm text-gray-600 mt-1">Administra las tareas que has asignado para trabajar</p>
+               <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between">
+                  <div>
+                     <h2 className="text-xl font-semibold">GESTIÓN DE TAREAS ASIGNADAS</h2>
+                     <p className="text-sm text-gray-600 mt-1">Administra las tareas que has asignado para trabajar</p>
+                  </div>
+                  {/* Botón para crear actividad adicional */}
+                  <div className="mt-4 md:mt-0 flex justify-end">
+                     <button
+                        onClick={() => setShowEventsModal(true)}
+                        className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg
+                           hover:from-purple-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
+                           transform hover:scale-105 transition-all duration-200 flex items-center gap-2">
+                        ✨ CREAR ACTIVIDAD ADICIONAL
+                     </button>
+                  </div>
                </div>
 
                {/* Sub pestañas para gestión */}
