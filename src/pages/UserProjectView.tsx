@@ -1202,7 +1202,7 @@ export default function UserProjectView() {
          
          const eventData = {
             user_id: user.id,
-            title: eventForm.title.trim(),
+            title: eventForm.event_type === 'daily' ? 'Daily Standup' : eventForm.title.trim(),
             description: eventForm.description.trim() || null,
             date: today,
             start_time: startTime,
@@ -1272,7 +1272,7 @@ export default function UserProjectView() {
       const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
       
       setEventForm({
-         title: event.title,
+         title: event.event_type === 'daily' ? 'Daily Standup' : event.title,
          description: event.description || '',
          event_type: event.event_type,
          start_time: startMinutes,
@@ -1360,7 +1360,7 @@ export default function UserProjectView() {
       const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
       
       setEventForm({
-         title: event.title,
+         title: event.event_type === 'daily' ? 'Daily Standup' : event.title,
          description: event.description || '',
          event_type: event.event_type,
          start_time: startMinutes,
@@ -6418,13 +6418,19 @@ export default function UserProjectView() {
                            <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                  Título del evento
+                                 {eventForm.event_type === 'daily' && (
+                                    <span className="ml-2 text-xs text-gray-500">(Bloqueado para Daily)</span>
+                                 )}
                               </label>
                               <input
                                  type="text"
-                                 value={eventForm.title}
+                                 value={eventForm.event_type === 'daily' ? 'Daily Standup' : eventForm.title}
                                  onChange={(e) => setEventForm(prev => ({ ...prev, title: e.target.value }))}
                                  placeholder="ej: Daily, Reunión con cliente..."
-                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                 disabled={eventForm.event_type === 'daily'}
+                                 className={`w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 ${
+                                    eventForm.event_type === 'daily' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+                                 }`}
                               />
                            </div>
 
@@ -6434,7 +6440,15 @@ export default function UserProjectView() {
                               </label>
                               <select 
                                  value={eventForm.event_type}
-                                 onChange={(e) => setEventForm(prev => ({ ...prev, event_type: e.target.value as WorkEvent['event_type'] }))}
+                                 onChange={(e) => {
+                                    const newEventType = e.target.value as WorkEvent['event_type'];
+                                    setEventForm(prev => ({ 
+                                       ...prev, 
+                                       event_type: newEventType,
+                                       // Si cambia a daily, establecer título automáticamente
+                                       title: newEventType === 'daily' ? 'Daily Standup' : prev.title
+                                    }));
+                                 }}
                                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                               >
                                  <option value="meeting">🤝 Reunión</option>
