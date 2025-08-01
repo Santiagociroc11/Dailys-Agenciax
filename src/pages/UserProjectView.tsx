@@ -3505,14 +3505,43 @@ export default function UserProjectView() {
       }
    }
 
+   // Función para obtener la hora más temprana de una tarea en la semana
+   function getEarliestTimeForTask(taskGroup: any): string {
+      const weekDays = getWeekDays();
+      let earliestTime = "23:59"; // Default a final del día
+      
+      weekDays.forEach(day => {
+         const sessions = taskGroup.sessions[day.dateStr] || [];
+         sessions.forEach((session: any) => {
+            if (session.start_time) {
+               // Extraer solo la parte de tiempo (HH:MM)
+               const timeOnly = session.start_time.split('T')[1]?.substring(0, 5) || session.start_time;
+               if (timeOnly < earliestTime) {
+                  earliestTime = timeOnly;
+               }
+            }
+         });
+      });
+      
+      return earliestTime;
+   }
+
    // Función para cargar datos del Gantt
    async function fetchGanttData() {
       const data = await getWeeklyGanttData();
-      setGanttData(data);
+      
+      // Ordenar tareas por horario más temprano
+      const sortedData = data.sort((a, b) => {
+         const timeA = getEarliestTimeForTask(a);
+         const timeB = getEarliestTimeForTask(b);
+         return timeA.localeCompare(timeB);
+      });
+      
+      setGanttData(sortedData);
       
       // Precalcular tiempos ejecutados y trabajo fuera de cronograma
-      await calculateExecutedTimes(data);
-      await calculateOffScheduleWork(data);
+      await calculateExecutedTimes(sortedData);
+      await calculateOffScheduleWork(sortedData);
    }
 
    // ✅ ACTUALIZADA: Función para precalcular tiempos ejecutados usando work_sessions
