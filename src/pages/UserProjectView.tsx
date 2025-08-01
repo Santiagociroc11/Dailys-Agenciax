@@ -1056,11 +1056,7 @@ export default function UserProjectView() {
    // Función para generar horarios del día (8:00 AM - 6:00 PM, excluyendo 12:00 PM - 2:00 PM)
    function generateTimeSlots() {
       const slots = [];
-      for (let hour = 8; hour <= 18; hour++) {
-         // Excluir horario de almuerzo: 12:00 PM - 2:00 PM (horas 12 y 13)
-         if (hour >= 12 && hour < 14) {
-            continue; // Saltar las horas de almuerzo
-         }
+      for (let hour = 8; hour <= 18; hour++) {   
          
          for (let minutes = 0; minutes < 60; minutes += 30) {
             const time = hour * 60 + minutes; // minutos desde medianoche
