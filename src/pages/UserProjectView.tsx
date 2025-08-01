@@ -2082,6 +2082,70 @@ export default function UserProjectView() {
       }
    }
 
+   // ✅ NUEVAS FUNCIONES PARA WORK_SESSIONS
+   // Función para crear sesiones de trabajo en la nueva tabla work_sessions
+   async function createWorkSession(assignmentId: string, durationMinutes: number, notes: string, sessionType: 'progress' | 'completion' | 'block') {
+      try {
+         const workSession = {
+            assignment_id: assignmentId,
+            start_time: new Date().toISOString(), // Hora actual como referencia
+            end_time: new Date().toISOString(),   // Misma hora (es solo registro de cuando se reportó)
+            duration_minutes: durationMinutes,
+            notes: notes,
+            session_type: sessionType,
+            created_at: new Date().toISOString()
+         };
+
+         const { error } = await supabase
+            .from("work_sessions")
+            .insert([workSession]);
+
+         if (error) {
+            console.error("Error creando sesión de trabajo:", error);
+            throw error;
+         }
+
+         console.log("✅ Sesión de trabajo creada exitosamente:", workSession);
+         return workSession;
+      } catch (error) {
+         console.error("Error en createWorkSession:", error);
+         throw error;
+      }
+   }
+
+   // Función para obtener el assignment_id de una tarea/subtarea específica
+   async function getAssignmentId(taskId: string, taskType: string, date: string): Promise<string | null> {
+      try {
+         const isSubtask = taskId.startsWith("subtask-");
+         const originalId = isSubtask ? taskId.replace("subtask-", "") : taskId;
+         
+         let query = supabase
+            .from("task_work_assignments")
+            .select("id")
+            .eq("user_id", user!.id)
+            .eq("date", date)
+            .eq("task_type", taskType);
+            
+         if (isSubtask) {
+            query = query.eq("subtask_id", originalId);
+         } else {
+            query = query.eq("task_id", originalId);
+         }
+         
+         const { data, error } = await query.single();
+         
+         if (error || !data) {
+            console.error("Error obteniendo assignment_id:", error);
+            return null;
+         }
+         
+         return data.id;
+      } catch (error) {
+         console.error("Error en getAssignmentId:", error);
+         return null;
+      }
+   }
+
    // Añadir función para manejar el modal de estado antes de la función fetchAssignedTasks()
    // Función para abrir el modal de actualización de estado
    function handleOpenStatusModal(taskId: string, action: "complete" | "progress" | "block" = "complete") {
@@ -2256,7 +2320,7 @@ export default function UserProjectView() {
 
       try {
          // 4️⃣ Actualizar tanto la tabla de tasks/subtasks como task_work_assignments
-         // Esto es especialmente importante para las tareas devueltas
+         // ✅ CORREGIDO: Ya no sobrescribimos end_time, solo actualizamos el estado
          const promises = [
             // Actualizar la tabla de tasks o subtasks
             supabase
@@ -2267,18 +2331,14 @@ export default function UserProjectView() {
                })
                .eq("id", originalId),
 
-            // Actualizar la asignación en task_work_assignments
+            // ✅ NUEVO: Solo actualizar estado en task_work_assignments, NO tocar horarios planificados
             supabase
                .from("task_work_assignments")
                .update({
                   status: selectedStatus,
                   updated_at: new Date().toISOString(),
                   notes: metadata, // SIN JSON.stringify
-                  ...(selectedStatus === "completed" 
-                     ? { end_time: new Date().toISOString(), actual_duration: durationMin } 
-                     : selectedStatus === "in_progress" 
-                        ? { actual_duration: durationMin } // Solo actualizar duración, no end_time para progreso
-                        : {}),
+                  // ❌ ELIMINADO: Ya no sobrescribimos end_time ni actual_duration aquí
                })
                .eq("user_id", user!.id)
                .eq("task_type", taskType)
@@ -2290,6 +2350,47 @@ export default function UserProjectView() {
 
          if (taskRes.error || assignRes.error) {
             throw taskRes.error || assignRes.error;
+         }
+
+         // ✅ NUEVO: Crear sesión de trabajo en work_sessions
+         try {
+            const assignmentId = await getAssignmentId(selectedTaskId, taskType, today);
+            if (assignmentId) {
+               let sessionType: 'progress' | 'completion' | 'block';
+               if (selectedStatus === "completed") {
+                  sessionType = 'completion';
+               } else if (selectedStatus === "in_progress") {
+                  sessionType = 'progress';
+               } else {
+                  sessionType = 'block';
+               }
+
+               await createWorkSession(assignmentId, durationMin, statusDetails, sessionType);
+               
+               // ✅ NUEVO: Actualizar actual_duration como suma de todas las sesiones
+               if (selectedStatus === "completed") {
+                  // Calcular duración total de todas las sesiones para esta asignación
+                  const { data: sessions, error: sessionsError } = await supabase
+                     .from("work_sessions")
+                     .select("duration_minutes")
+                     .eq("assignment_id", assignmentId);
+
+                  if (!sessionsError && sessions) {
+                     const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
+                     
+                     // Actualizar actual_duration con el total real trabajado
+                     await supabase
+                        .from("task_work_assignments")
+                        .update({ actual_duration: totalDuration })
+                        .eq("id", assignmentId);
+                  }
+               }
+            } else {
+               console.error("❌ No se pudo encontrar assignment_id para crear work_session");
+            }
+         } catch (sessionError) {
+            console.error("Error creando work_session:", sessionError);
+            // No fallar todo el proceso, solo loggear el error
          }
 
          // 🕒 Si es un avance, programar la próxima sesión de trabajo
@@ -3194,6 +3295,60 @@ export default function UserProjectView() {
       }
    }
 
+   // ✅ NUEVA: Función para obtener sesiones reales de trabajo desde work_sessions
+   async function getWorkSessionsForGantt(startDate: string, endDate: string) {
+      try {
+         const { data: workSessions, error } = await supabase
+            .from("work_sessions")
+            .select(`
+               *,
+               task_work_assignments!inner(
+                  id, user_id, task_id, subtask_id, task_type, date,
+                  tasks(title, project_id, projects(name)),
+                  subtasks(title, task_id, tasks!subtasks_task_id_fkey(title, project_id, projects(name)))
+               )
+            `)
+            .eq("task_work_assignments.user_id", user!.id)
+            .gte("created_at", `${startDate} 00:00:00`)
+            .lte("created_at", `${endDate} 23:59:59`)
+            .order("created_at", { ascending: true });
+
+         if (error) {
+            console.error("Error obteniendo work_sessions:", error);
+            return {};
+         }
+
+         console.log("✅ Work sessions obtenidas:", workSessions);
+         
+         // Agrupar sesiones por assignment y por fecha
+         const sessionsByAssignment: Record<string, Record<string, any[]>> = {};
+         
+         workSessions?.forEach(session => {
+            const assignment = session.task_work_assignments;
+            const assignmentKey = `${assignment.task_type}-${assignment.task_type === "subtask" ? assignment.subtask_id : assignment.task_id}`;
+            const sessionDate = assignment.date; // Usar la fecha de la asignación, no del reporte
+            
+            if (!sessionsByAssignment[assignmentKey]) {
+               sessionsByAssignment[assignmentKey] = {};
+            }
+            
+            if (!sessionsByAssignment[assignmentKey][sessionDate]) {
+               sessionsByAssignment[assignmentKey][sessionDate] = [];
+            }
+            
+            sessionsByAssignment[assignmentKey][sessionDate].push({
+               ...session,
+               assignment: assignment
+            });
+         });
+
+         return sessionsByAssignment;
+      } catch (error) {
+         console.error("Error en getWorkSessionsForGantt:", error);
+         return {};
+      }
+   }
+
    // Función para obtener datos del Gantt semanal
    async function getWeeklyGanttData() {
       if (!user) return [];
@@ -3273,6 +3428,16 @@ export default function UserProjectView() {
             });
          });
 
+         // ✅ NUEVO: Obtener sesiones reales de trabajo desde work_sessions
+         const workSessionsData = await getWorkSessionsForGantt(startDate, endDate);
+         
+         // ✅ NUEVO: Agregar información de sesiones reales a cada taskGroup
+         Object.keys(taskGroups).forEach(taskKey => {
+            if (workSessionsData[taskKey]) {
+               taskGroups[taskKey].workSessions = workSessionsData[taskKey];
+            }
+         });
+
          // Obtener actividades adicionales (work_events) de la semana
          const { data: workEvents, error: eventsError } = await supabase
             .from('work_events')
@@ -3341,7 +3506,7 @@ export default function UserProjectView() {
       await calculateOffScheduleWork(data);
    }
 
-   // Función para precalcular tiempos ejecutados
+   // ✅ ACTUALIZADA: Función para precalcular tiempos ejecutados usando work_sessions
    async function calculateExecutedTimes(ganttData: any[]) {
       const weekDays = getWeekDays();
       const executedTimes: Record<string, Record<string, number>> = {};
@@ -3351,14 +3516,24 @@ export default function UserProjectView() {
          
          for (const day of weekDays) {
             const sessions = taskGroup.sessions[day.dateStr] || [];
+            
             if (sessions.length > 0) {
-               // Obtener ID real de la tarea/subtarea
+               // ✅ NUEVO: Usar work_sessions si están disponibles
+               if (taskGroup.workSessions && taskGroup.workSessions[day.dateStr]) {
+                  const workSessions = taskGroup.workSessions[day.dateStr];
+                  const totalExecutedTime = workSessions.reduce((total: number, session: any) => {
+                     return total + (session.duration_minutes || 0);
+                  }, 0);
+                  executedTimes[taskGroup.id][day.dateStr] = totalExecutedTime;
+               } else {
+                  // ✅ FALLBACK: Usar método anterior si no hay work_sessions
                const realTaskId = taskGroup.type === "subtask" 
                   ? taskGroup.id.replace("subtask-", "")
                   : taskGroup.id.replace("task-", "");
                
                const realTime = await getRealExecutedTime(realTaskId, taskGroup.type, day.dateStr);
                executedTimes[taskGroup.id][day.dateStr] = realTime;
+               }
             } else {
                executedTimes[taskGroup.id][day.dateStr] = 0;
             }
@@ -3380,9 +3555,38 @@ export default function UserProjectView() {
       setOffScheduleWorkData(offScheduleWork);
    }
 
-   // Función para obtener tiempo real ejecutado de las sesiones de trabajo
+   // ✅ ACTUALIZADA: Función para obtener tiempo real ejecutado usando work_sessions primero
    async function getRealExecutedTime(taskId: string, taskType: "task" | "subtask", dateStr: string): Promise<number> {
       try {
+         // ✅ NUEVO: Primero intentar obtener desde work_sessions
+         const { data: assignmentData, error: assignmentError } = await supabase
+            .from("task_work_assignments")
+            .select("id")
+            .eq("user_id", user!.id)
+            .eq("date", dateStr)
+            .eq("task_type", taskType)
+            .eq(taskType === "subtask" ? "subtask_id" : "task_id", taskId)
+            .single();
+
+         if (!assignmentError && assignmentData) {
+            // Obtener sesiones de trabajo para esta asignación
+            const { data: workSessions, error: sessionsError } = await supabase
+               .from("work_sessions")
+               .select("duration_minutes")
+               .eq("assignment_id", assignmentData.id);
+
+            if (!sessionsError && workSessions) {
+               const totalFromSessions = workSessions.reduce((total, session) => {
+                  return total + (session.duration_minutes || 0);
+               }, 0);
+               
+               if (totalFromSessions > 0) {
+                  return totalFromSessions;
+               }
+            }
+         }
+
+         // ✅ FALLBACK: Usar método anterior con status_history si no hay work_sessions
          const { data, error } = await supabase
             .from("status_history")
             .select("metadata, changed_at")
@@ -4384,7 +4588,13 @@ export default function UserProjectView() {
                                     const totalTaskHours = getWeekDays().reduce((total, day) => {
                                        const sessions = taskGroup.sessions[day.dateStr] || [];
                                        const dayTotal = sessions.reduce((daySum: number, session: any) => {
-                                          return daySum + (session.estimated_duration || 0);
+                                          if (session.start_time && session.end_time) {
+                                             const startDate = new Date(session.start_time);
+                                             const endDate = new Date(session.end_time);
+                                             const durationMinutes = Math.max(0, (endDate.getTime() - startDate.getTime()) / (1000 * 60));
+                                             return daySum + durationMinutes;
+                                          }
+                                          return daySum;
                                        }, 0);
                                        return total + dayTotal;
                                     }, 0);
@@ -4479,9 +4689,16 @@ export default function UserProjectView() {
                                                             const startTime = session.start_time ? new Date(session.start_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
                                                             const endTime = session.end_time ? new Date(session.end_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
                                                             
+                                                            // Calcular duración real del rango de tiempo planificado
+                                                            let plannedMinutes = 0;
+                                                            if (session.start_time && session.end_time) {
+                                                               const startDate = new Date(session.start_time);
+                                                               const endDate = new Date(session.end_time);
+                                                               plannedMinutes = Math.max(0, (endDate.getTime() - startDate.getTime()) / (1000 * 60));
+                                                            }
+                                                            
                                                             // Calcular tiempo ejecutado real para esta sesión
                                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                            const plannedMinutes = session.estimated_duration || 0;
                                                             const executedMinutes = realExecutedTime;
 
                                                             // Calcular porcentajes para las barras
@@ -4517,29 +4734,29 @@ export default function UserProjectView() {
                                                                   className={`text-xs p-1 rounded border ${backgroundClass} relative overflow-hidden`}
                                                                   title={`${startTime} - ${endTime}\nPlanificado: ${Math.round(plannedMinutes / 60 * 100) / 100}h\nEjecutado: ${Math.round(executedMinutes / 60 * 100) / 100}h\nEstado: ${statusText}`}
                                                                >
-                                                                  {/* Barra de fondo - Tiempo planificado */}
-                                                                  <div className={`absolute inset-0 ${barBackgroundClass} opacity-50`}></div>
+                                                                                                                                    {/* Barra de fondo - Tiempo planificado */}
+                                                                   <div className={`absolute inset-0 ${barBackgroundClass} opacity-50`}></div>
                                                                   
-                                                                  {/* Barra de progreso - Tiempo ejecutado */}
-                                                                  {(executedMinutes > 0 || taskGroup.type === "event") && (
-                                                                     <div 
-                                                                        className={`absolute inset-y-0 left-0 ${
-                                                                           taskGroup.type === "event"
-                                                                              ? 'bg-green-400' // Actividades adicionales siempre verdes
-                                                                              : executedMinutes >= plannedMinutes 
-                                                                                 ? 'bg-green-400' 
-                                                                                 : 'bg-green-300'
-                                                                        } opacity-70`}
-                                                                        style={{ 
-                                                                           width: taskGroup.type === "event" 
-                                                                              ? '100%' // Actividades adicionales siempre al 100%
-                                                                              : `${Math.min(executedPercent, 100)}%` 
-                                                                        }}
-                                                                     ></div>
-                                                                  )}
+                                                                   {/* ✅ NUEVO: Barra de progreso - Tiempo ejecutado */}
+                                                                   {(executedMinutes > 0 || taskGroup.type === "event") && (
+                                                                      <div 
+                                                                         className={`absolute inset-y-0 left-0 ${
+                                                                            taskGroup.type === "event"
+                                                                               ? 'bg-purple-400'
+                                                                               : executedMinutes >= plannedMinutes 
+                                                                                  ? 'bg-green-400' 
+                                                                                  : 'bg-green-300'
+                                                                         } opacity-70`}
+                                                                         style={{ 
+                                                                            width: taskGroup.type === "event" 
+                                                                               ? '100%' 
+                                                                               : `${Math.min(executedPercent, 100)}%` 
+                                                                         }}
+                                                                      ></div>
+                                                                   )}
                                                                   
-                                                                  {/* Contenido de texto */}
-                                                                  <div className="relative z-10">
+                                                                   {/* Contenido de texto */}
+                                                                   <div className="relative z-10">
                                                                      <div className="font-medium text-gray-800">
                                                                         {startTime && endTime ? `${startTime}-${endTime}` : 'Sin horario'}
                                              </div>
@@ -4651,7 +4868,13 @@ export default function UserProjectView() {
                                           const plannedHours = ganttData.reduce((total, taskGroup) => {
                                              const sessions = taskGroup.sessions[day.dateStr] || [];
                                              const dayTotal = sessions.reduce((daySum: number, session: any) => {
-                                                return session.start_time && session.end_time ? daySum + (session.estimated_duration || 0) : daySum;
+                                                if (session.start_time && session.end_time) {
+                                                   const startDate = new Date(session.start_time);
+                                                   const endDate = new Date(session.end_time);
+                                                   const durationMinutes = Math.max(0, (endDate.getTime() - startDate.getTime()) / (1000 * 60));
+                                                   return daySum + durationMinutes;
+                                                }
+                                                return daySum;
                                              }, 0);
                                              return total + dayTotal;
                                           }, 0);
@@ -4667,7 +4890,13 @@ export default function UserProjectView() {
                                              return grandTotal + getWeekDays().reduce((total, day) => {
                                                 const sessions = taskGroup.sessions[day.dateStr] || [];
                                                 return total + sessions.reduce((daySum: number, session: any) => {
-                                                   return session.start_time && session.end_time ? daySum + (session.estimated_duration || 0) : daySum;
+                                                   if (session.start_time && session.end_time) {
+                                                      const startDate = new Date(session.start_time);
+                                                      const endDate = new Date(session.end_time);
+                                                      const durationMinutes = Math.max(0, (endDate.getTime() - startDate.getTime()) / (1000 * 60));
+                                                      return daySum + durationMinutes;
+                                                   }
+                                                   return daySum;
                                                 }, 0);
                                              }, 0);
                                           }, 0) / 60) * 100) / 100}h

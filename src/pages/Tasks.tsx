@@ -2,7 +2,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen } from 'lucide-react';
+import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
@@ -86,7 +86,9 @@ function Tasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showTaskDetailModal, setShowTaskDetailModal] = useState(false);
@@ -123,14 +125,32 @@ function Tasks() {
     deadline: string;
   } | null>(null);
 
+  // Estados para paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const [tasksPerPage, setTasksPerPage] = useState(10);
+  const [totalTasks, setTotalTasks] = useState(0);
+
   useEffect(() => {
     fetchTasks();
     fetchProjects();
   }, []);
 
   useEffect(() => {
+    setCurrentPage(1); // Resetear a la primera página cuando cambie el filtro
+  }, [selectedProject, searchTerm]);
+
+  useEffect(() => {
     fetchTasks();
-  }, [selectedProject]);
+  }, [currentPage, tasksPerPage]);
+
+  // Efecto para manejar cambios en la búsqueda con debounce
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      fetchTasks();
+    }, 300); // Debounce de 300ms
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   useEffect(() => {
     async function fetchUsers() {
@@ -168,13 +188,42 @@ function Tasks() {
 
   async function fetchTasks() {
     try {
+      setPageLoading(true);
+      
+      // Primero obtener el total de tareas para la paginación
+      let countQuery = supabase
+        .from('tasks')
+        .select('*', { count: 'exact', head: true });
+      
+      if (selectedProject) {
+        countQuery = countQuery.eq('project_id', selectedProject);
+      }
+
+      if (searchTerm.trim()) {
+        countQuery = countQuery.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+      }
+
+      const { count, error: countError } = await countQuery;
+      
+      if (countError) throw countError;
+      setTotalTasks(count || 0);
+
+      // Luego obtener las tareas con paginación
+      const from = (currentPage - 1) * tasksPerPage;
+      const to = from + tasksPerPage - 1;
+
       let query = supabase
         .from('tasks')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(from, to);
       
       if (selectedProject) {
         query = query.eq('project_id', selectedProject);
+      }
+
+      if (searchTerm.trim()) {
+        query = query.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
       }
 
       const { data, error } = await query;
@@ -185,8 +234,9 @@ function Tasks() {
       console.error('Error al cargar las tareas:', error);
     } finally {
       setLoading(false);
-      }
+      setPageLoading(false);
     }
+  }
 
     async function fetchSubtasks() {
       try {
@@ -1151,6 +1201,13 @@ function Tasks() {
     );
   }
 
+  // Funciones para manejar la paginación
+  const totalPages = Math.ceil(totalTasks / tasksPerPage);
+  
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
   const getPriorityText = (priority: string) => {
     switch (priority) {
       case 'high':
@@ -1200,36 +1257,87 @@ function Tasks() {
       </div>
 
       <div className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <label className="text-sm font-medium text-gray-700">Filtrar por proyecto:</label>
-          <select
-            value={selectedProject || ''}
-            onChange={(e) => {
-              setSelectedProject(e.target.value || null);
-            }}
-            className="p-2 border rounded-md"
-          >
-            <option value="">Todos los proyectos</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              setSelectedProject(null);
-              fetchTasks();
-            }}
-            className="text-sm text-indigo-600 hover:text-indigo-800"
-          >
-            Limpiar filtro
-          </button>
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+            {/* Barra de búsqueda */}
+            <div className="relative w-full sm:w-80">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Buscar tareas por título o descripción..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                >
+                  <X className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                </button>
+              )}
+            </div>
+
+            {/* Filtro por proyecto */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Filtrar por proyecto:</label>
+              <select
+                value={selectedProject || ''}
+                onChange={(e) => {
+                  setSelectedProject(e.target.value || null);
+                }}
+                className="p-2 border rounded-md"
+              >
+                <option value="">Todos los proyectos</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  setSelectedProject(null);
+                  fetchTasks();
+                }}
+                className="text-sm text-indigo-600 hover:text-indigo-800"
+              >
+                Limpiar filtro
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">Tareas por página:</label>
+            <select
+              value={tasksPerPage}
+              onChange={(e) => {
+                setTasksPerPage(Number(e.target.value));
+                setCurrentPage(1); // Resetear a la primera página
+              }}
+              className="p-2 border rounded-md"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
         </div>
       </div>
 
       <div className="grid gap-4">
-        {tasks.length > 0 ? (
+        {pageLoading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            <span className="ml-2 text-gray-600">Cargando tareas...</span>
+          </div>
+        )}
+        
+        {!pageLoading && tasks.length > 0 ? (
           tasks.map((task) => (
           <div
             key={task.id}
@@ -1572,16 +1680,77 @@ function Tasks() {
               )}
             </div>
           ))
-        ) : (
+        ) : !pageLoading && (
           <div className="text-center py-12">
             <p className="text-gray-500">
-              {selectedProject 
+              {searchTerm.trim() && selectedProject 
+                ? `No se encontraron tareas que coincidan con "${searchTerm}" en este proyecto`
+                : searchTerm.trim()
+                ? `No se encontraron tareas que coincidan con "${searchTerm}"`
+                : selectedProject 
                 ? "No se encontraron tareas para este proyecto" 
                 : "No se encontraron tareas"}
             </p>
           </div>
         )}
       </div>
+
+      {/* Componente de paginación */}
+      {totalPages > 1 && (
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-sm text-gray-700">
+            {searchTerm.trim() 
+              ? `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} resultados para "${searchTerm}"`
+              : `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} tareas`
+            }
+          </div>
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Anterior
+            </button>
+            
+            {/* Mostrar números de página */}
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNumber;
+              if (totalPages <= 5) {
+                pageNumber = i + 1;
+              } else if (currentPage <= 3) {
+                pageNumber = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNumber = totalPages - 4 + i;
+              } else {
+                pageNumber = currentPage - 2 + i;
+              }
+              
+              return (
+                <button
+                  key={pageNumber}
+                  onClick={() => handlePageChange(pageNumber)}
+                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                    currentPage === pageNumber
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-gray-500 bg-white border border-gray-300 hover:bg-gray-50 hover:text-gray-700'
+                  }`}
+                >
+                  {pageNumber}
+                </button>
+              );
+            })}
+            
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
 
 
       {showModal && (
