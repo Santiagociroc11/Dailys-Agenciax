@@ -3231,10 +3231,19 @@ export default function UserProjectView() {
 
    // Función para verificar si un día ya pasó
    function isDayPassed(dateStr: string): boolean {
-      const dayDate = new Date(dateStr);
+      // Crear fecha manualmente para evitar problemas de zona horaria
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const dayDate = new Date(year, month - 1, day); // month es 0-indexed
+      
       const today = new Date();
-      today.setHours(23, 59, 59, 999); // Fin del día actual
-      return dayDate < today;
+      today.setHours(0, 0, 0, 0);
+      
+      // Un día se considera "pasado" solo cuando ya no es el día actual
+      // Es decir, cuando today > dayDate (ya pasó medianoche)
+      const isPassed = today > dayDate;
+      
+      
+      return isPassed;
    }
 
    // Función para detectar incumplimientos (días pasados sin trabajo reportado)
