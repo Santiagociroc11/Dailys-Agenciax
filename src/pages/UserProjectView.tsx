@@ -1297,6 +1297,9 @@ export default function UserProjectView() {
    useEffect(() => {
       if (showEventsModal && user) {
          fetchWorkEvents();
+         if (ganttData.length === 0) {
+            fetchGanttData();
+         }
       }
    }, [showEventsModal, user]);
 
@@ -5436,7 +5439,6 @@ export default function UserProjectView() {
                                                    </span>
                                                    <h5 className="text-sm font-medium text-gray-900 leading-tight">{task.title}</h5>
                                                 </div>
-                                                
                                                 <div className="flex items-center gap-3 text-xs text-gray-500 ml-7">
                                                    {task.type === "subtask" && task.subtask_title && (
                                                       <span>T.P: {task.subtask_title}</span>
@@ -6681,7 +6683,7 @@ export default function UserProjectView() {
                            <h4 className="text-lg font-medium text-gray-900">
                               {editingEvent ? "Editar evento" : "Nuevo evento"}
                            </h4>
-                           
+
                            <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                  Título del evento
@@ -6793,70 +6795,105 @@ export default function UserProjectView() {
                            </div>
                         </div>
 
-                        {/* Lista de eventos del día */}
+                        {/* Lista de eventos del día con timeline */}
                         <div className="space-y-4">
                            <h4 className="text-lg font-medium text-gray-900">Eventos programados</h4>
                            
-                           {loadingEvents ? (
-                              <div className="text-center py-8 text-gray-500">
-                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-2"></div>
-                                 <p className="text-sm">Cargando eventos...</p>
-                              </div>
-                           ) : workEvents.length === 0 ? (
-                              <div className="text-center py-8 text-gray-500">
-                                 <div className="text-4xl mb-2">📅</div>
-                                 <p className="text-sm">No tienes eventos programados para hoy</p>
-                                 <p className="text-xs text-gray-400 mt-1">Crea tu primer evento usando el formulario</p>
-                              </div>
-                           ) : (
-                              <div className="space-y-2">
-                                 {workEvents.map((event) => (
-                                    <div key={event.id} className="p-3 border border-gray-200 rounded-lg bg-gray-50 hover:bg-gray-100">
-                                       <div className="flex items-start justify-between">
-                                          <div className="flex-1">
-                                             <div className="flex items-center mb-1">
-                                                <span className="text-lg mr-2">
+                           {/* Timeline con actividades principales */}
+                           <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                              <h5 className="text-sm font-medium text-gray-900 mb-3">Timeline del día</h5>
+                              <div className="grid grid-cols-[60px_1fr] gap-2 h-80 overflow-y-auto">
+                                 {/* Columna de horas */}
+                                 <div className="relative">
+                                    {Array.from({length: 12}).map((_, i) => {
+                                       const hour = 8 + i;
+                                       return (
+                                          <div key={hour} className="h-[50px] flex items-start justify-end pr-2 text-xs text-gray-500 border-b border-gray-200 last:border-b-0">
+                                             {hour}:00
+                                          </div>
+                                       );
+                                    })}
+                                 </div>
+
+                                 {/* Área de timeline */}
+                                 <div className="relative bg-white border-l border-gray-200">
+                                    {/* Líneas horizontales */}
+                                    {Array.from({length: 12}).map((_, i) => (
+                                       <div key={i} className="absolute w-full border-b border-gray-200" style={{top: `${i * 50}px`, height: '50px'}} />
+                                    ))}
+
+                                    {/* Actividades principales (ganttData) */}
+                                    {(() => {
+                                       interface Session {
+                                          id: string;
+                                          start_time?: string;
+                                          end_time?: string;
+                                       }
+                                       const todayStr = format(new Date(), 'yyyy-MM-dd');
+                                       const todaySessions: JSX.Element[] = [];
+                                       ganttData.forEach(task => {
+                                          const sessions: Session[] = task.sessions[todayStr] || [];
+                                          sessions.forEach(session => {
+                                             if (session.start_time && session.end_time) {
+                                                const startDate = new Date(session.start_time);
+                                                const endDate = new Date(session.end_time);
+                                                const startMin = (startDate.getHours() + startDate.getMinutes() / 60) - 8;
+                                                const durationHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+                                                const top = startMin * 50; // 50px per hour
+                                                const height = durationHours * 50;
+                                                todaySessions.push(
+                                                   <div
+                                                      key={session.id}
+                                                      className="absolute left-1 right-1 bg-blue-100 border border-blue-300 rounded px-2 py-1 text-xs overflow-hidden"
+                                                      style={{top: `${top}px`, height: `${height}px`}}
+                                                   >
+                                                      <div className="font-medium truncate">{task.title}</div>
+                                                      <div className="text-gray-600">
+                                                         {format(startDate, 'HH:mm')} - {format(endDate, 'HH:mm')}
+                                                      </div>
+                                                   </div>
+                                                );
+                                             }
+                                          });
+                                       });
+                                       return todaySessions;
+                                    })()}
+
+                                    {/* Eventos adicionales (workEvents) */}
+                                    {workEvents.map((event) => {
+                                       const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
+                                       const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
+                                       const startHour = (startMinutes / 60) - 8;
+                                       const durationHours = (endMinutes - startMinutes) / 60;
+                                       const top = startHour * 50;
+                                       const height = durationHours * 50;
+                                       
+                                       return (
+                                          <div
+                                             key={event.id}
+                                             className="absolute left-1 right-1 bg-purple-100 border border-purple-300 rounded px-2 py-1 text-xs overflow-hidden"
+                                             style={{top: `${top}px`, height: `${height}px`}}
+                                          >
+                                             <div className="font-medium truncate flex items-center">
+                                                <span className="mr-1">
                                                    {event.event_type === 'meeting' ? '🤝' :
                                                     event.event_type === 'daily' ? '🗣️' :
-                                                    event.event_type === 'review' ? '📋' :
-                                                    event.event_type === 'planning' ? '📅' :
                                                     event.event_type === 'training' ? '📚' :
                                                     event.event_type === 'break' ? '☕' : '📌'}
                                                 </span>
-                                                <h5 className="font-medium text-gray-900">{event.title}</h5>
+                                                {event.title}
                                              </div>
-                                             <p className="text-sm text-gray-600 mb-1">
-                                                {(() => {
-                                                   const startMinutes = parseInt(event.start_time.split(':')[0]) * 60 + parseInt(event.start_time.split(':')[1]);
-                                                   const endMinutes = parseInt(event.end_time.split(':')[0]) * 60 + parseInt(event.end_time.split(':')[1]);
-                                                   return `${minutesToTimeAMPM(startMinutes)} - ${minutesToTimeAMPM(endMinutes)}`;
-                                                })()}
-                                             </p>
-                                             {event.description && (
-                                                <p className="text-xs text-gray-500">{event.description}</p>
-                                             )}
+                                             <div className="text-gray-600">
+                                                {format(new Date(`1970-01-01T${event.start_time}`), "HH:mm")} - {format(new Date(`1970-01-01T${event.end_time}`), "HH:mm")}
+                                             </div>
                                           </div>
-                                          <div className="ml-3 flex gap-1">
-                                             <button
-                                                onClick={() => handleEditEvent(event)}
-                                                className="p-1 text-gray-400 hover:text-purple-600"
-                                                title="Editar evento"
-                                             >
-                                                ✏️
-                                             </button>
-                                             <button
-                                                onClick={() => handleDeleteEvent(event.id)}
-                                                className="p-1 text-gray-400 hover:text-red-600"
-                                                title="Eliminar evento"
-                                             >
-                                                🗑️
-                                             </button>
-                                          </div>
-                                       </div>
-                                    </div>
-                                 ))}
+                                       );
+                                    })}
+                                 </div>
                               </div>
-                           )}
+                           </div>
+                           
+                           
                         </div>
                      </div>
                   </div>
