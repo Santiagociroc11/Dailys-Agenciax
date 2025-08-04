@@ -3213,7 +3213,7 @@ export default function UserProjectView() {
       monday.setDate(today.getDate() + mondayOffset);
       
       const weekDays = [];
-      for (let i = 0; i < 6; i++) { // Lunes a Sábado (6 días)
+      for (let i = 0; i < 7; i++) { // Lunes a Domingo (7 días)
          const day = new Date(monday);
          day.setDate(monday.getDate() + i);
          weekDays.push({
@@ -4594,9 +4594,9 @@ export default function UserProjectView() {
 
                         {ganttData.length > 0 ? (
                            <div className="overflow-x-auto">
-                              <div className="min-w-[900px]">
+                              <div className="min-w-[1000px]">
                                  {/* Header con días de la semana */}
-                                 <div className="grid grid-cols-8 gap-2 mb-4">
+                                 <div className="grid grid-cols-9 gap-2 mb-4">
                                     <div className="font-medium text-sm text-gray-700 p-1 min-h-[50px] flex items-center">Tareas</div>
                                     {getWeekDays().map(day => (
                                        <div key={day.dateStr} className={`text-center p-1 text-sm min-h-[50px] flex flex-col justify-center relative ${
@@ -4637,7 +4637,7 @@ export default function UserProjectView() {
                                     }, 0);
 
                                     return (
-                                       <div key={taskGroup.id} className="grid grid-cols-8 gap-2 mb-3 border border-gray-200 rounded-lg">
+                                       <div key={taskGroup.id} className="grid grid-cols-9 gap-2 mb-3 border border-gray-200 rounded-lg">
                                           {/* Nombre de la tarea */}
                                           <div className={`p-2 font-medium text-sm border-r border-gray-200 min-h-[50px] ${
                                              taskGroup.type === "event" 
