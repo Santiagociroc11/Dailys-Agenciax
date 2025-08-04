@@ -4794,9 +4794,10 @@ export default function UserProjectView() {
                                                                plannedMinutes = Math.max(0, (endDate.getTime() - startDate.getTime()) / (1000 * 60));
                                                             }
                                                             
-                                                            // Calcular tiempo ejecutado real para esta sesión
+                                                            // Calcular tiempo ejecutado real para esta sesión (incluye tiempos extra)
                                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                            const executedMinutes = realExecutedTime;
+                                                            const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+                                                            const executedMinutes = realExecutedTime + offScheduleTime;
 
                                                             // Calcular porcentajes para las barras
                                                             const maxTime = Math.max(plannedMinutes, executedMinutes);
@@ -4878,8 +4879,9 @@ export default function UserProjectView() {
                                                          {/* Sesiones sin horario específico */}
                                                          {sessions.filter((s: any) => !s.start_time || !s.end_time).map((session: any, idx: number) => {
                                                             const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+                                                            const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
                                                             const plannedMinutes = session.estimated_duration || 0;
-                                                            const executedMinutes = realExecutedTime;
+                                                            const executedMinutes = realExecutedTime + offScheduleTime;
 
                                                             // Determinar si esta sesión está incumplida
                                                             const isSessionNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0;
@@ -4943,9 +4945,10 @@ export default function UserProjectView() {
                                                       }, 0);
                                                       return total + eventTime;
                                                    } else {
-                                                      // Para tareas normales, usar executedTimeData
+                                                      // Para tareas normales, usar executedTimeData + tiempos extra
                                                       const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                      return total + realExecutedTime;
+                                                      const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+                                                      return total + realExecutedTime + offScheduleTime;
                                                    }
                                                 }, 0) / 60) * 100) / 100}h
                                     </div>
@@ -5015,9 +5018,10 @@ export default function UserProjectView() {
                                                 }, 0);
                                                 return total + eventTime;
                                              } else {
-                                                // Para tareas normales, usar executedTimeData
+                                                // Para tareas normales, usar executedTimeData + tiempos extra
                                                 const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                return total + realExecutedTime;
+                                                const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+                                                return total + realExecutedTime + offScheduleTime;
                                              }
                                           }, 0);
 
@@ -5039,10 +5043,11 @@ export default function UserProjectView() {
                                                    return total + eventTime;
                                                 }, 0);
                                              } else {
-                                                // Para tareas normales, usar executedTimeData
+                                                // Para tareas normales, usar executedTimeData + tiempos extra
                                                 return grandTotal + getWeekDays().reduce((total, day) => {
                                                    const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
-                                                   return total + realExecutedTime;
+                                                   const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+                                                   return total + realExecutedTime + offScheduleTime;
                                                 }, 0);
                                              }
                                           }, 0) / 60) * 100) / 100}h
