@@ -297,6 +297,7 @@ export default function UserProjectView() {
    const [ganttData, setGanttData] = useState<any[]>([]);
    const [executedTimeData, setExecutedTimeData] = useState<Record<string, Record<string, number>>>({});
    const [offScheduleWorkData, setOffScheduleWorkData] = useState<Record<string, Record<string, number>>>({});
+   const [selectedWeekDate, setSelectedWeekDate] = useState<Date>(new Date());
 
    // Estados para modales
    const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -3204,13 +3205,13 @@ export default function UserProjectView() {
    // FUNCIONES PARA GANTT SEMANAL
    // =====================
 
-   function getWeekDays() {
-      const today = new Date();
-      const currentDay = today.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+   function getWeekDays(baseDate?: Date) {
+      const referenceDate = baseDate || selectedWeekDate;
+      const currentDay = referenceDate.getDay(); // 0 = Domingo, 1 = Lunes, etc.
       const mondayOffset = currentDay === 0 ? -6 : -(currentDay - 1); // Ajustar para que Lunes sea el primer día
       
-      const monday = new Date(today);
-      monday.setDate(today.getDate() + mondayOffset);
+      const monday = new Date(referenceDate);
+      monday.setDate(referenceDate.getDate() + mondayOffset);
       
       const weekDays = [];
       for (let i = 0; i < 7; i++) { // Lunes a Domingo (7 días)
@@ -3222,10 +3223,41 @@ export default function UserProjectView() {
             dayName: format(day, "EEEE", { locale: es }),
             dayShort: format(day, "EEE", { locale: es }),
             dayNumber: format(day, "dd"),
-            isToday: format(day, "yyyy-MM-dd") === format(today, "yyyy-MM-dd")
+            isToday: format(day, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd")
          });
       }
       return weekDays;
+   }
+
+   // Función para obtener el rango de fechas de la semana
+   function getWeekRange(baseDate?: Date): string {
+      const weekDays = getWeekDays(baseDate);
+      const startDate = weekDays[0].date;
+      const endDate = weekDays[weekDays.length - 1].date;
+      
+      const startFormatted = format(startDate, "dd 'de' MMMM", { locale: es });
+      const endFormatted = format(endDate, "dd 'de' MMMM 'de' yyyy", { locale: es });
+      
+      return `Semana del ${startFormatted} al ${endFormatted}`;
+   }
+
+   // Función para navegar a la semana anterior
+   function goToPreviousWeek() {
+      const newDate = new Date(selectedWeekDate);
+      newDate.setDate(selectedWeekDate.getDate() - 7);
+      setSelectedWeekDate(newDate);
+   }
+
+   // Función para navegar a la semana siguiente
+   function goToNextWeek() {
+      const newDate = new Date(selectedWeekDate);
+      newDate.setDate(selectedWeekDate.getDate() + 7);
+      setSelectedWeekDate(newDate);
+   }
+
+   // Función para ir a la semana actual
+   function goToCurrentWeek() {
+      setSelectedWeekDate(new Date());
    }
 
    // Función para verificar si un día ya pasó
@@ -3667,12 +3699,12 @@ export default function UserProjectView() {
       }
    }
 
-   // useEffect para cargar datos del Gantt cuando se activa la vista
+   // useEffect para cargar datos del Gantt cuando se activa la vista o cambia la semana
    useEffect(() => {
       if (activeTab === "gestion" && activeGestionSubTab === "gantt_semanal") {
          fetchGanttData();
       }
-   }, [activeTab, activeGestionSubTab]);
+   }, [activeTab, activeGestionSubTab, selectedWeekDate]);
 
    useEffect(() => {
       if (activeTab === "gestion" && activeGestionSubTab === "actividades") {
@@ -4567,7 +4599,35 @@ export default function UserProjectView() {
                   <div className="mb-6">
                      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                         <div className="flex justify-between items-center mb-6">
-                           <h4 className="font-medium text-gray-800">📈 Gantt Semanal</h4>
+                           <div className="flex items-center gap-4">
+                              <h4 className="font-medium text-gray-800">📈 Gantt Semanal</h4>
+                              <div className="flex items-center gap-2">
+                                 <button
+                                    onClick={goToPreviousWeek}
+                                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                                    title="Semana anterior"
+                                 >
+                                    ⬅️
+                                 </button>
+                                 <div className="text-sm font-medium text-gray-700 px-3 py-1 bg-gray-100 rounded-lg">
+                                    {getWeekRange()}
+                                 </div>
+                                 <button
+                                    onClick={goToNextWeek}
+                                    className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                                    title="Semana siguiente"
+                                 >
+                                    ➡️
+                                 </button>
+                                 <button
+                                    onClick={goToCurrentWeek}
+                                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 transition-colors ml-2"
+                                    title="Ir a semana actual"
+                                 >
+                                    Hoy
+                                 </button>
+                              </div>
+                           </div>
                            <div className="flex items-center gap-4 text-sm">
                               <div className="flex items-center gap-2">
                                  <div className="w-4 h-4 bg-blue-200 border border-blue-400 rounded"></div>
@@ -4897,7 +4957,7 @@ export default function UserProjectView() {
                                  {/* Filas de totales por día - simplificadas */}
                                  <div className="mt-3 pt-2 border-t border-gray-300">
                                     {/* Fila de horas planificadas */}
-                                    <div className="grid grid-cols-8 gap-2 mb-1">
+                                    <div className="grid grid-cols-9 gap-2 mb-1">
                                        <div className="p-1 bg-blue-50 text-xs text-blue-700 text-center">
                                           📅 Plan
                                        </div>
@@ -4941,7 +5001,7 @@ export default function UserProjectView() {
                                     </div>
 
                                     {/* Fila de horas ejecutadas */}
-                                    <div className="grid grid-cols-8 gap-2">
+                                    <div className="grid grid-cols-9 gap-2">
                                        <div className="p-1 bg-green-50 text-xs text-green-700 text-center">
                                           ✅ Ejec
                                        </div>
