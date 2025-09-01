@@ -4003,7 +4003,7 @@ export default function UserProjectView() {
                                  </span>
                               </h3>
                            </div>
-                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                           <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {/* Tareas retrasadas sin avances */}
                               {delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
@@ -4183,7 +4183,7 @@ export default function UserProjectView() {
                                  </span>
                               </h3>
                            </div>
-                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                           <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {/* Tareas devueltas (prioridad) */}
                               {returnedTaskItems.map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
@@ -4457,7 +4457,7 @@ export default function UserProjectView() {
                                  </span>
                               </h3>
                                        </div>
-                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                           <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {completedTaskItems.map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
@@ -4529,7 +4529,7 @@ export default function UserProjectView() {
                                  </span>
                               </h3>
                            </div>
-                           <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                           <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {inReviewTaskItems.map((task) => {
                                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
