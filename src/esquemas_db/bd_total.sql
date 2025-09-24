@@ -58,6 +58,8 @@ CREATE TABLE "public"."projects" (
   "deadline" TIMESTAMP WITH TIME ZONE NOT NULL,
   "created_at" TIMESTAMP WITH TIME ZONE NULL DEFAULT now() ,
   "created_by" UUID NOT NULL,
+  "is_archived" BOOLEAN NOT NULL DEFAULT false,
+  "archived_at" TIMESTAMP WITH TIME ZONE NULL,
   CONSTRAINT "projects_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "public"."areas" ( 

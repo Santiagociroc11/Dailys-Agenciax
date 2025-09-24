@@ -2,9 +2,10 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, X, Calendar, Clock, Users } from 'lucide-react';
+import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { toast } from 'react-hot-toast';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 
 interface Project {
@@ -16,6 +17,8 @@ interface Project {
   created_at: string;
   created_by: string;
   restricted_access?: boolean;
+  is_archived?: boolean;
+  archived_at?: string;
 }
 
 interface Task {
@@ -45,6 +48,7 @@ interface User {
 function Projects() {
   const { isAdmin, user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -55,6 +59,7 @@ function Projects() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [editedProject, setEditedProject] = useState<any>(null);
   const [editMode, setEditMode] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
@@ -97,18 +102,28 @@ function Projects() {
   async function fetchData() {
     setLoading(true);
     try {
-      const projectsPromise = supabase.from('projects').select('*').order('created_at', { ascending: false });
+      const projectsPromise = supabase.from('projects').select('*').eq('is_archived', false).order('created_at', { ascending: false });
+      const archivedProjectsPromise = supabase.from('projects').select('*').eq('is_archived', true).order('archived_at', { ascending: false });
       const tasksPromise = supabase.from('tasks').select('*');
       const subtasksPromise = supabase.from('subtasks').select('id, task_id, status');
       
-      const [{ data: projectsData, error: projectsError }, { data: tasksData, error: tasksError }, { data: subtasksData, error: subtasksError }] = await Promise.all([
+      const [
+        { data: projectsData, error: projectsError }, 
+        { data: archivedProjectsData, error: archivedProjectsError },
+        { data: tasksData, error: tasksError }, 
+        { data: subtasksData, error: subtasksError }
+      ] = await Promise.all([
         projectsPromise,
+        archivedProjectsPromise,
         tasksPromise,
         subtasksPromise,
       ]);
 
       if (projectsError) throw projectsError;
       setProjects(projectsData || []);
+      
+      if (archivedProjectsError) throw archivedProjectsError;
+      setArchivedProjects(archivedProjectsData || []);
       
       if (tasksError) throw tasksError;
       setTasks(tasksData || []);
@@ -129,6 +144,50 @@ function Projects() {
       userProjectAssignments[u.id]?.includes(projectId) || 
       projects.find(p => p.id === projectId)?.created_by === u.id
     );
+  }
+
+  // Función para archivar un proyecto
+  async function handleArchiveProject(projectId: string) {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ 
+          is_archived: true, 
+          archived_at: new Date().toISOString() 
+        })
+        .eq('id', projectId);
+
+      if (error) throw error;
+      
+      // Actualizar la lista local
+      setProjects(projects.filter(p => p.id !== projectId));
+      toast.success('Proyecto archivado correctamente');
+    } catch (error) {
+      console.error('Error al archivar el proyecto:', error);
+      toast.error('Error al archivar el proyecto');
+    }
+  }
+
+  // Función para desarchivar un proyecto
+  async function handleUnarchiveProject(projectId: string) {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({ 
+          is_archived: false, 
+          archived_at: null 
+        })
+        .eq('id', projectId);
+
+      if (error) throw error;
+      
+      // Recargar los datos para mostrar el proyecto desarchivado
+      fetchData();
+      toast.success('Proyecto desarchivado correctamente');
+    } catch (error) {
+      console.error('Error al desarchivar el proyecto:', error);
+      toast.error('Error al desarchivar el proyecto');
+    }
   }
 
   async function handleCreateProject(e: React.FormEvent) {
@@ -536,6 +595,17 @@ function Projects() {
           <p className="text-gray-600">Gestiona tus proyectos y sus tareas asociadas</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            className={`px-4 py-2 rounded-md flex items-center transition-colors ${
+              showArchived 
+                ? 'bg-orange-100 text-orange-700 border border-orange-200' 
+                : 'bg-gray-100 text-gray-700 border border-gray-200'
+            }`}
+          >
+            {showArchived ? <ArchiveRestore className="w-4 h-4 mr-2" /> : <Archive className="w-4 h-4 mr-2" />}
+            {showArchived ? 'Ver Activos' : `Ver Archivados (${archivedProjects.length})`}
+          </button>
           {isAdmin && (
             <button
               onClick={() => setShowModal(true)}
@@ -549,8 +619,8 @@ function Projects() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {projects.length > 0 ? (
-          projects.map((project) => {
+        {(showArchived ? archivedProjects : projects).length > 0 ? (
+          (showArchived ? archivedProjects : projects).map((project) => {
             // Calcular estadísticas del proyecto de forma profunda
             const projectTasks = tasks.filter(t => t.project_id === project.id);
             const allTaskIds = new Set(projectTasks.map(t => t.id));
@@ -720,13 +790,48 @@ function Projects() {
                     <p className="text-sm text-gray-500">No hay tareas asociadas a este proyecto.</p>
                   )}
                 </div>
+                
+                {/* Botón de archivar/desarchivar proyecto */}
+                {isAdmin && (
+                  <div className="mt-4 pt-4 border-t">
+                    {showArchived ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('¿Estás seguro de que quieres desarchivar este proyecto? Volverá a aparecer en las vistas principales.')) {
+                            handleUnarchiveProject(project.id);
+                          }
+                        }}
+                        className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 hover:text-green-700 transition-colors"
+                      >
+                        <ArchiveRestore className="w-4 h-4 mr-2" />
+                        Desarchivar Proyecto
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('¿Estás seguro de que quieres archivar este proyecto? Las tareas asociadas no se mostrarán en las vistas principales.')) {
+                            handleArchiveProject(project.id);
+                          }
+                        }}
+                        className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-orange-600 bg-orange-50 border border-orange-200 rounded-md hover:bg-orange-100 hover:text-orange-700 transition-colors"
+                      >
+                        <Archive className="w-4 h-4 mr-2" />
+                        Archivar Proyecto
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })
         ) : (
           <div className="col-span-full text-center py-12">
-            <p className="text-gray-500">No se encontraron proyectos.</p>
-            {isAdmin && (
+            <p className="text-gray-500">
+              {showArchived ? 'No hay proyectos archivados.' : 'No se encontraron proyectos.'}
+            </p>
+            {!showArchived && isAdmin && (
               <button
                 onClick={() => setShowModal(true)}
                 className="mt-4 text-emerald-600 hover:text-emerald-700 flex items-center mx-auto"

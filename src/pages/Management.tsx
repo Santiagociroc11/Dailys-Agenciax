@@ -359,7 +359,8 @@ function Management() {
     try {
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name');
+        .select('id, name')
+        .eq('is_archived', false);
 
       if (error) throw error;
       setProjects(data || []);
@@ -433,8 +434,14 @@ function Management() {
     
     setRefreshing(true);
     try {
-      // Fetch tasks with filter
-      let query = supabase.from('tasks').select('*');
+      // Fetch tasks with filter - excluyendo proyectos archivados
+      let query = supabase
+        .from('tasks')
+        .select(`
+          *,
+          projects!inner(id, is_archived)
+        `)
+        .eq('projects.is_archived', false);
       
       if (selectedProject) {
         query = query.eq('project_id', selectedProject);
@@ -448,8 +455,17 @@ function Management() {
       
       if (tasksError) throw tasksError;
       
-      // Fetch subtasks
-      let subtasksQuery = supabase.from('subtasks').select('*');
+      // Fetch subtasks - excluyendo proyectos archivados
+      let subtasksQuery = supabase
+        .from('subtasks')
+        .select(`
+          *,
+          tasks!inner(
+            id, project_id,
+            projects!inner(id, is_archived)
+          )
+        `)
+        .eq('tasks.projects.is_archived', false);
       
       // Si hay un proyecto seleccionado, filtrar subtareas por las tareas de ese proyecto
       if (selectedProject && tasksData) {
@@ -613,6 +629,7 @@ function Management() {
                   .from('projects')
                   .select('name')
                   .eq('id', parentTask.project_id)
+                  .eq('is_archived', false)
                   .single();
                   
                 if (projectData) {
@@ -632,6 +649,7 @@ function Management() {
                 .from('projects')
                 .select('name')
                 .eq('id', taskData.project_id)
+                .eq('is_archived', false)
                 .single();
                 
               if (projectData) {
@@ -757,6 +775,7 @@ function Management() {
                   .from('projects')
                   .select('name')
                   .eq('id', parentTask.project_id)
+                  .eq('is_archived', false)
                   .single();
                   
                 if (projectData) {
@@ -1119,6 +1138,7 @@ function Management() {
           .from('projects')
           .select('name')
           .eq('id', taskData.project_id)
+          .eq('is_archived', false)
           .single();
           
         if (projectData) {
@@ -1228,6 +1248,7 @@ function Management() {
                     .from('projects')
                     .select('name')
                     .eq('id', parentTask.project_id)
+                    .eq('is_archived', false)
                     .single();
                     
                   if (projectData) {
@@ -1256,6 +1277,7 @@ function Management() {
                   .from('projects')
                   .select('name')
                   .eq('id', taskData.project_id)
+                  .eq('is_archived', false)
                   .single();
                   
                 if (projectData) {

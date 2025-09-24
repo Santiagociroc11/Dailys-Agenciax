@@ -546,7 +546,7 @@ export default function UserProjectView() {
 
    async function fetchProject() {
       try {
-         const { data, error } = await supabase.from("projects").select("id, name").eq("id", projectId).single();
+         const { data, error } = await supabase.from("projects").select("id, name").eq("id", projectId).eq("is_archived", false).single();
 
          if (error) throw error;
          setProject(data);
@@ -604,33 +604,52 @@ export default function UserProjectView() {
 
          const isAll = projectId === "all";
 
-         // 1️⃣ Todas las tareas (sin importar si están asignadas al usuario)
-         let allTasksQ = supabase.from("tasks").select("*").not("status", "in", "(approved, assigned)").order("deadline", { ascending: true });
+         // 1️⃣ Todas las tareas (sin importar si están asignadas al usuario) - excluyendo proyectos archivados
+         let allTasksQ = supabase
+            .from("tasks")
+            .select(`
+               *,
+               projects!inner(id, is_archived)
+            `)
+            .not("status", "in", "(approved, assigned)")
+            .eq("projects.is_archived", false)
+            .order("deadline", { ascending: true });
          if (!isAll) {
             allTasksQ = allTasksQ.in("project_id", [projectId!]);
          }
          const { data: allTasksData, error: allTasksError } = await allTasksQ;
          if (allTasksError) throw allTasksError;
 
-         // 2️⃣ Tareas que ya están asignadas al usuario (pendientes/in_progress)
-         let taskDataQ = supabase.from("tasks").select("*").contains("assigned_users", [user.id]).not("status", "in", "(approved, completed, in_review, returned, assigned, in_progress, blocked)").order("deadline", { ascending: true });
+         // 2️⃣ Tareas que ya están asignadas al usuario (pendientes/in_progress) - excluyendo proyectos archivados
+         let taskDataQ = supabase
+            .from("tasks")
+            .select(`
+               *,
+               projects!inner(id, is_archived)
+            `)
+            .contains("assigned_users", [user.id])
+            .not("status", "in", "(approved, completed, in_review, returned, assigned, in_progress, blocked)")
+            .eq("projects.is_archived", false)
+            .order("deadline", { ascending: true });
          if (!isAll) {
             taskDataQ = taskDataQ.in("project_id", [projectId!]);
          }
          const { data: taskData, error: taskError } = await taskDataQ;
          if (taskError) throw taskError;
 
-         // 3️⃣ Todas las subtareas del/los proyecto(s) - INCLUYE completed/approved para lógica secuencial
+         // 3️⃣ Todas las subtareas del/los proyecto(s) - INCLUYE completed/approved para lógica secuencial - excluyendo proyectos archivados
          let allSubtasksQ = supabase
             .from("subtasks")
             .select(
                `
           *,
           tasks (
-            id, title, is_sequential, project_id
+            id, title, is_sequential, project_id,
+            projects!inner(id, is_archived)
           )
         `
             )
+            .eq("tasks.projects.is_archived", false)
             .order("sequence_order", { ascending: true });
          if (!isAll) {
             allSubtasksQ = allSubtasksQ.in("tasks.project_id", [projectId!]);
@@ -649,7 +668,7 @@ export default function UserProjectView() {
          });
 
          // 5️⃣ Cargar nombre de cada proyecto
-         const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds));
+         const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
          if (projectsError) console.error("Error cargando proyectos:", projectsError);
 
          const projectMap: Record<string, string> = {};
@@ -1893,7 +1912,7 @@ export default function UserProjectView() {
          });
 
          // Cargar nombre de cada proyecto
-         const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds));
+         const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
 
          if (projectsError) {
             console.error("Error cargando nombres de proyectos:", projectsError);
@@ -2658,7 +2677,7 @@ export default function UserProjectView() {
                });
 
                // Cargar nombre de cada proyecto
-               const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds));
+               const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
 
                if (projectsError) {
                   console.error("Error cargando nombres de proyectos:", projectsError);
@@ -2720,7 +2739,7 @@ export default function UserProjectView() {
                });
 
                // Cargar nombre de cada proyecto
-               const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds));
+               const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
 
                if (projectsError) {
                   console.error("Error cargando nombres de proyectos:", projectsError);

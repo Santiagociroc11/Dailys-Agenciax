@@ -177,6 +177,7 @@ function Tasks() {
       const { data, error } = await supabase
         .from('projects')
         .select('*')
+        .eq('is_archived', false)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -190,10 +191,14 @@ function Tasks() {
     try {
       setPageLoading(true);
       
-      // Primero obtener el total de tareas para la paginación
+      // Primero obtener el total de tareas para la paginación - excluyendo proyectos archivados
       let countQuery = supabase
         .from('tasks')
-        .select('*', { count: 'exact', head: true });
+        .select(`
+          *,
+          projects!inner(id, is_archived)
+        `, { count: 'exact', head: true })
+        .eq('projects.is_archived', false);
       
       if (selectedProject) {
         countQuery = countQuery.eq('project_id', selectedProject);
@@ -208,13 +213,17 @@ function Tasks() {
       if (countError) throw countError;
       setTotalTasks(count || 0);
 
-      // Luego obtener las tareas con paginación
+      // Luego obtener las tareas con paginación - excluyendo proyectos archivados
       const from = (currentPage - 1) * tasksPerPage;
       const to = from + tasksPerPage - 1;
 
       let query = supabase
         .from('tasks')
-        .select('*')
+        .select(`
+          *,
+          projects!inner(id, is_archived)
+        `)
+        .eq('projects.is_archived', false)
         .order('created_at', { ascending: false })
         .range(from, to);
       
@@ -243,7 +252,14 @@ function Tasks() {
         console.log('Fetching subtasks...');
         const { data: subtasksData, error: subtasksError } = await supabase
           .from('subtasks')
-          .select('*');
+          .select(`
+            *,
+            tasks!inner(
+              id, project_id,
+              projects!inner(id, is_archived)
+            )
+          `)
+          .eq('tasks.projects.is_archived', false);
 
         if (subtasksError) {
           console.error('Error fetching subtasks:', subtasksError);
@@ -445,6 +461,7 @@ function Tasks() {
               .from('projects')
               .select('name')
               .eq('id', createdTask.project_id)
+              .eq('is_archived', false)
               .single();
               
             if (projectData) {
@@ -611,6 +628,7 @@ function Tasks() {
             .from('projects')
             .select('name')
             .eq('id', editedTask.project_id)
+            .eq('is_archived', false)
             .single();
             
           if (projectData) {
@@ -750,6 +768,7 @@ function Tasks() {
               .from('projects')
               .select('name')
               .eq('id', parentTask.project_id)
+              .eq('is_archived', false)
               .single();
               
             if (projectData) {
@@ -1103,6 +1122,7 @@ function Tasks() {
                 .from('projects')
                 .select('name')
                 .eq('id', editedTask.project_id)
+                .eq('is_archived', false)
                 .single();
                 
               if (projectData) {
