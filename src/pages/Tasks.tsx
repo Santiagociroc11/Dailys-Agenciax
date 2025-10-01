@@ -129,6 +129,14 @@ function Tasks() {
   const [currentPage, setCurrentPage] = useState(1);
   const [tasksPerPage, setTasksPerPage] = useState(10);
   const [totalTasks, setTotalTasks] = useState(0);
+  const [activeTab, setActiveTab] = useState<'active' | 'approved'>('active');
+
+  // Función auxiliar para determinar si una tarea está aprobada
+  const isTaskApproved = (taskId: string): boolean => {
+    const taskSubtasks = subtasks[taskId] || [];
+    if (taskSubtasks.length === 0) return false;
+    return taskSubtasks.every(subtask => subtask.status === 'approved');
+  };
 
   useEffect(() => {
     fetchTasks();
@@ -137,7 +145,7 @@ function Tasks() {
 
   useEffect(() => {
     setCurrentPage(1); // Resetear a la primera página cuando cambie el filtro
-  }, [selectedProject, searchTerm]);
+  }, [selectedProject, searchTerm, activeTab]);
 
   useEffect(() => {
     fetchTasks();
@@ -150,7 +158,7 @@ function Tasks() {
     }, 300); // Debounce de 300ms
 
     return () => clearTimeout(timeoutId);
-  }, [searchTerm]);
+  }, [searchTerm, activeTab]);
 
   useEffect(() => {
     async function fetchUsers() {
@@ -211,34 +219,45 @@ function Tasks() {
       const { count, error: countError } = await countQuery;
       
       if (countError) throw countError;
-      setTotalTasks(count || 0);
-
-      // Luego obtener las tareas con paginación - excluyendo proyectos archivados
-      const from = (currentPage - 1) * tasksPerPage;
-      const to = from + tasksPerPage - 1;
-
-      let query = supabase
+      
+      // Para el conteo preciso con filtros de pestañas, necesitamos obtener todas las tareas
+      // y luego filtrarlas, ya que el filtro de pestañas depende de las subtareas
+      let allTasksQuery = supabase
         .from('tasks')
         .select(`
           *,
           projects!inner(id, is_archived)
         `)
         .eq('projects.is_archived', false)
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .order('created_at', { ascending: false });
       
       if (selectedProject) {
-        query = query.eq('project_id', selectedProject);
+        allTasksQuery = allTasksQuery.eq('project_id', selectedProject);
       }
 
       if (searchTerm.trim()) {
-        query = query.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+        allTasksQuery = allTasksQuery.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
       }
 
-      const { data, error } = await query;
+      const { data: allTasks, error: allTasksError } = await allTasksQuery;
+      if (allTasksError) throw allTasksError;
+      
+      // Aplicar filtro de pestañas para el conteo
+      let filteredForCount = allTasks || [];
+      if (activeTab === 'approved') {
+        filteredForCount = filteredForCount.filter(task => isTaskApproved(task.id));
+      } else if (activeTab === 'active') {
+        filteredForCount = filteredForCount.filter(task => !isTaskApproved(task.id));
+      }
+      
+      setTotalTasks(filteredForCount.length);
 
-      if (error) throw error;
-      setTasks(data || []);
+      // Aplicar paginación a las tareas ya filtradas
+      const from = (currentPage - 1) * tasksPerPage;
+      const to = from + tasksPerPage;
+      const paginatedTasks = filteredForCount.slice(from, to);
+      
+      setTasks(paginatedTasks);
     } catch (error) {
       console.error('Error al cargar las tareas:', error);
     } finally {
@@ -1349,6 +1368,40 @@ function Tasks() {
         </div>
       </div>
 
+      {/* Pestañas para separar tareas activas y aprobadas */}
+      <div className="mb-6">
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'active'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Tareas Activas
+              <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
+                {tasks.filter(task => !isTaskApproved(task.id)).length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('approved')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'approved'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Tareas Aprobadas
+              <span className="ml-2 bg-green-100 text-green-600 py-0.5 px-2 rounded-full text-xs">
+                {tasks.filter(task => isTaskApproved(task.id)).length}
+              </span>
+            </button>
+          </nav>
+        </div>
+      </div>
+
       <div className="grid gap-4">
         {pageLoading && (
           <div className="flex items-center justify-center py-8">
@@ -1704,12 +1757,12 @@ function Tasks() {
           <div className="text-center py-12">
             <p className="text-gray-500">
               {searchTerm.trim() && selectedProject 
-                ? `No se encontraron tareas que coincidan con "${searchTerm}" en este proyecto`
+                ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} que coincidan con "${searchTerm}" en este proyecto`
                 : searchTerm.trim()
-                ? `No se encontraron tareas que coincidan con "${searchTerm}"`
+                ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} que coincidan con "${searchTerm}"`
                 : selectedProject 
-                ? "No se encontraron tareas para este proyecto" 
-                : "No se encontraron tareas"}
+                ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} para este proyecto` 
+                : `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'}`}
             </p>
           </div>
         )}
@@ -1721,7 +1774,7 @@ function Tasks() {
           <div className="text-sm text-gray-700">
             {searchTerm.trim() 
               ? `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} resultados para "${searchTerm}"`
-              : `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} tareas`
+              : `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'}`
             }
           </div>
           <div className="flex items-center space-x-1">
