@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast, { Toaster } from 'react-hot-toast';
 import { statusTextMap } from '../components/TaskStatusDisplay';
@@ -919,8 +919,7 @@ function Management() {
                     projectName: projectName,
                     adminName: user?.name || user?.email || 'Administrador',
                     isSubtask: isSubtask,
-                    parentTaskTitle: parentTaskTitle,
-                    timeInfo: timeInfo // Incluir información de tiempo para mostrar duración
+                    parentTaskTitle: parentTaskTitle
                   })
                 }).then(response => {
                   if (response.ok) {
@@ -998,6 +997,125 @@ function Management() {
       toast.error('Error al actualizar el estado');
       // Recargar datos para asegurar consistencia
       fetchData();
+    }
+  }
+
+  // Función para eliminar tareas o subtareas
+  async function handleDeleteItem(itemId: string, isSubtask: boolean) {
+    const itemType = isSubtask ? 'subtarea' : 'tarea';
+    
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar esta ${itemType}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    
+    try {
+      console.log(`🗑️ Iniciando eliminación de ${itemType}:`, itemId);
+      
+      const table = isSubtask ? 'subtasks' : 'tasks';
+      
+      // 1. Eliminar asignaciones de trabajo
+      console.log('🔗 Eliminando asignaciones de trabajo...');
+      
+      if (isSubtask) {
+        // Eliminar por subtask_id
+        const { error: workAssignmentsError1 } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .eq('subtask_id', itemId);
+        
+        if (workAssignmentsError1) {
+          console.error("❌ Error al eliminar asignaciones por subtask_id:", workAssignmentsError1);
+          throw workAssignmentsError1;
+        }
+        
+        // También eliminar por task_id cuando se refiere a esta subtarea
+        const { error: workAssignmentsError2 } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .eq('task_id', itemId)
+          .eq('task_type', 'subtask');
+        
+        if (workAssignmentsError2) {
+          console.error("❌ Error al eliminar asignaciones por task_id:", workAssignmentsError2);
+          throw workAssignmentsError2;
+        }
+      } else {
+        // Para tareas principales, eliminar por task_id
+        const { error: workAssignmentsError } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .eq('task_id', itemId)
+          .eq('task_type', 'task');
+        
+        if (workAssignmentsError) {
+          console.error("❌ Error al eliminar asignaciones de trabajo:", workAssignmentsError);
+          throw workAssignmentsError;
+        }
+        
+        // También eliminar todas las subtareas asociadas
+        const { data: subtasksToDelete, error: subtasksQueryError } = await supabase
+          .from('subtasks')
+          .select('id')
+          .eq('task_id', itemId);
+        
+        if (subtasksQueryError) {
+          console.error("❌ Error al consultar subtareas:", subtasksQueryError);
+          throw subtasksQueryError;
+        }
+        
+        if (subtasksToDelete && subtasksToDelete.length > 0) {
+          // Eliminar asignaciones de las subtareas
+          for (const subtask of subtasksToDelete) {
+            const { error: subtaskWorkError } = await supabase
+              .from('task_work_assignments')
+              .delete()
+              .eq('subtask_id', subtask.id);
+            
+            if (subtaskWorkError) {
+              console.error(`❌ Error al eliminar asignaciones de subtarea ${subtask.id}:`, subtaskWorkError);
+            }
+          }
+          
+          // Eliminar las subtareas
+          const { error: deleteSubtasksError } = await supabase
+            .from('subtasks')
+            .delete()
+            .eq('task_id', itemId);
+          
+          if (deleteSubtasksError) {
+            console.error("❌ Error al eliminar subtareas:", deleteSubtasksError);
+            throw deleteSubtasksError;
+          }
+        }
+      }
+      
+      // 2. Eliminar el item principal
+      const { error: deleteError } = await supabase
+        .from(table)
+        .delete()
+        .eq('id', itemId);
+      
+      if (deleteError) {
+        console.error(`❌ Error al eliminar ${itemType}:`, deleteError);
+        throw deleteError;
+      }
+      
+      console.log(`✅ ${itemType.charAt(0).toUpperCase() + itemType.slice(1)} eliminada exitosamente`);
+      
+      // 3. Actualizar el estado local
+      if (isSubtask) {
+        setSubtasks(prev => prev.filter(s => s.id !== itemId));
+      } else {
+        setTasks(prev => prev.filter(t => t.id !== itemId));
+        // También filtrar las subtareas del estado local
+        setSubtasks(prev => prev.filter(s => s.task_id !== itemId));
+      }
+      
+      toast.success(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} eliminada correctamente`);
+      
+    } catch (error) {
+      console.error(`💥 Error al eliminar ${itemType}:`, error);
+      toast.error(`Error al eliminar la ${itemType}: ${error instanceof Error ? error.message : 'Por favor, inténtalo de nuevo.'}`);
     }
   }
   
@@ -2573,18 +2691,31 @@ function Management() {
                             </button>
                           </>
                         )}
-                                                 {reviewSubTab === 'blocked' && (
-                           <button
-                             onClick={(e) => {
-                               e.stopPropagation();
-                               setSelectedItem({ id: item.id, type: isSubtask ? 'subtask' : 'task', status: item.status });
-                               setShowUnblockModal(true);
-                             }}
-                             className="px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors bg-blue-100 text-blue-800 hover:bg-blue-200"
-                           >
-                             <ArrowLeft className="w-3 h-3" />
-                             <span>Desbloquear</span>
-                           </button>
+                        {reviewSubTab === 'blocked' && (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedItem({ id: item.id, type: isSubtask ? 'subtask' : 'task', status: item.status });
+                                setShowUnblockModal(true);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors bg-blue-100 text-blue-800 hover:bg-blue-200"
+                            >
+                              <ArrowLeft className="w-3 h-3" />
+                              <span>Desbloquear</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteItem(item.id, isSubtask);
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors bg-red-100 text-red-800 hover:bg-red-200"
+                              title="Eliminar tarea"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Eliminar</span>
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
