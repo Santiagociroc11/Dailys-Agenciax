@@ -1013,8 +1013,102 @@ function Management() {
       
       const table = isSubtask ? 'subtasks' : 'tasks';
       
-      // 1. Eliminar asignaciones de trabajo
-      console.log('🔗 Eliminando asignaciones de trabajo...');
+      // 1. Obtener todas las asignaciones de trabajo relacionadas
+      console.log('🔍 Buscando asignaciones de trabajo...');
+      let assignmentIds: string[] = [];
+      
+      if (isSubtask) {
+        // Buscar por subtask_id
+        const { data: assignments1, error: assignmentsError1 } = await supabase
+          .from('task_work_assignments')
+          .select('id')
+          .eq('subtask_id', itemId);
+        
+        if (assignmentsError1) {
+          console.error("❌ Error al buscar asignaciones por subtask_id:", assignmentsError1);
+          throw assignmentsError1;
+        }
+        
+        if (assignments1) {
+          assignmentIds.push(...assignments1.map(a => a.id));
+        }
+        
+        // También buscar por task_id con tipo subtask
+        const { data: assignments2, error: assignmentsError2 } = await supabase
+          .from('task_work_assignments')
+          .select('id')
+          .eq('task_id', itemId)
+          .eq('task_type', 'subtask');
+        
+        if (assignmentsError2) {
+          console.error("❌ Error al buscar asignaciones por task_id:", assignmentsError2);
+          throw assignmentsError2;
+        }
+        
+        if (assignments2) {
+          assignmentIds.push(...assignments2.map(a => a.id));
+        }
+      } else {
+        // Para tareas principales
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from('task_work_assignments')
+          .select('id')
+          .eq('task_id', itemId)
+          .eq('task_type', 'task');
+        
+        if (assignmentsError) {
+          console.error("❌ Error al buscar asignaciones de trabajo:", assignmentsError);
+          throw assignmentsError;
+        }
+        
+        if (assignments) {
+          assignmentIds.push(...assignments.map(a => a.id));
+        }
+        
+        // También obtener asignaciones de subtareas
+        const { data: subtasksToDelete, error: subtasksQueryError } = await supabase
+          .from('subtasks')
+          .select('id')
+          .eq('task_id', itemId);
+        
+        if (subtasksQueryError) {
+          console.error("❌ Error al consultar subtareas:", subtasksQueryError);
+          throw subtasksQueryError;
+        }
+        
+        if (subtasksToDelete && subtasksToDelete.length > 0) {
+          for (const subtask of subtasksToDelete) {
+            const { data: subtaskAssignments, error: subtaskAssignmentsError } = await supabase
+              .from('task_work_assignments')
+              .select('id')
+              .eq('subtask_id', subtask.id);
+            
+            if (subtaskAssignmentsError) {
+              console.error(`❌ Error al buscar asignaciones de subtarea ${subtask.id}:`, subtaskAssignmentsError);
+            } else if (subtaskAssignments) {
+              assignmentIds.push(...subtaskAssignments.map(a => a.id));
+            }
+          }
+        }
+      }
+      
+      // 2. Eliminar sesiones de trabajo relacionadas con las asignaciones
+      if (assignmentIds.length > 0) {
+        console.log(`🗑️ Eliminando ${assignmentIds.length} sesiones de trabajo...`);
+        const { error: workSessionsError } = await supabase
+          .from('work_sessions')
+          .delete()
+          .in('assignment_id', assignmentIds);
+        
+        if (workSessionsError) {
+          console.error("❌ Error al eliminar sesiones de trabajo:", workSessionsError);
+          throw workSessionsError;
+        }
+        console.log('✅ Sesiones de trabajo eliminadas');
+      }
+      
+      // 3. Eliminar asignaciones de trabajo
+      console.log('🗑️ Eliminando asignaciones de trabajo...');
       
       if (isSubtask) {
         // Eliminar por subtask_id
@@ -1040,19 +1134,7 @@ function Management() {
           throw workAssignmentsError2;
         }
       } else {
-        // Para tareas principales, eliminar por task_id
-        const { error: workAssignmentsError } = await supabase
-          .from('task_work_assignments')
-          .delete()
-          .eq('task_id', itemId)
-          .eq('task_type', 'task');
-        
-        if (workAssignmentsError) {
-          console.error("❌ Error al eliminar asignaciones de trabajo:", workAssignmentsError);
-          throw workAssignmentsError;
-        }
-        
-        // También eliminar todas las subtareas asociadas
+        // Para tareas principales, primero eliminar asignaciones de subtareas
         const { data: subtasksToDelete, error: subtasksQueryError } = await supabase
           .from('subtasks')
           .select('id')
@@ -1064,7 +1146,6 @@ function Management() {
         }
         
         if (subtasksToDelete && subtasksToDelete.length > 0) {
-          // Eliminar asignaciones de las subtareas
           for (const subtask of subtasksToDelete) {
             const { error: subtaskWorkError } = await supabase
               .from('task_work_assignments')
@@ -1073,6 +1154,7 @@ function Management() {
             
             if (subtaskWorkError) {
               console.error(`❌ Error al eliminar asignaciones de subtarea ${subtask.id}:`, subtaskWorkError);
+              throw subtaskWorkError;
             }
           }
           
@@ -1087,9 +1169,23 @@ function Management() {
             throw deleteSubtasksError;
           }
         }
+        
+        // Eliminar asignaciones de la tarea principal
+        const { error: workAssignmentsError } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .eq('task_id', itemId)
+          .eq('task_type', 'task');
+        
+        if (workAssignmentsError) {
+          console.error("❌ Error al eliminar asignaciones de trabajo:", workAssignmentsError);
+          throw workAssignmentsError;
+        }
       }
       
-      // 2. Eliminar el item principal
+      console.log('✅ Asignaciones de trabajo eliminadas');
+      
+      // 4. Eliminar el item principal
       const { error: deleteError } = await supabase
         .from(table)
         .delete()
@@ -1102,7 +1198,7 @@ function Management() {
       
       console.log(`✅ ${itemType.charAt(0).toUpperCase() + itemType.slice(1)} eliminada exitosamente`);
       
-      // 3. Actualizar el estado local
+      // 5. Actualizar el estado local
       if (isSubtask) {
         setSubtasks(prev => prev.filter(s => s.id !== itemId));
       } else {
