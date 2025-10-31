@@ -674,19 +674,21 @@ export default function UserProjectView() {
          const projectMap: Record<string, string> = {};
          projects?.forEach((p) => (projectMap[p.id] = p.name));
 
-         // 6️⃣ Subtareas asignadas al usuario
+         // 6️⃣ Subtareas asignadas al usuario - excluyendo proyectos archivados
          let subtaskDataQ = supabase
             .from("subtasks")
             .select(
                `
           *,
-          tasks (
-            id, title, is_sequential, project_id
+          tasks!inner (
+            id, title, is_sequential, project_id,
+            projects!inner(id, is_archived)
           )
         `
             )
             .eq("assigned_to", user.id)
             .not("status", "in", "(approved, completed, in_review, returned, assigned, in_progress, blocked)")
+            .eq("tasks.projects.is_archived", false)
             .order("sequence_order", { ascending: true });
          if (!isAll) {
             subtaskDataQ = subtaskDataQ.in("tasks.project_id", [projectId!]);
@@ -1832,12 +1834,20 @@ export default function UserProjectView() {
 
          const subtaskIds = assignments.filter((a) => a.task_type === "subtask" && a.subtask_id !== null).map((a) => a.subtask_id);
 
-         // 3. Buscar tareas devueltas en la tabla tasks
+         // 3. Buscar tareas devueltas en la tabla tasks - excluyendo proyectos archivados
          let returnedTasks = null;
          let returnedTasksError = null;
 
          if (normalTaskIds.length > 0) {
-            const result = await supabase.from("tasks").select("*").in("id", normalTaskIds).eq("status", "returned");
+            const result = await supabase
+               .from("tasks")
+               .select(`
+                  *,
+                  projects!inner(id, is_archived)
+               `)
+               .in("id", normalTaskIds)
+               .eq("status", "returned")
+               .eq("projects.is_archived", false);
 
             returnedTasks = result.data;
             returnedTasksError = result.error;
@@ -1847,7 +1857,7 @@ export default function UserProjectView() {
             console.error("Error al cargar tareas devueltas:", returnedTasksError);
          }
 
-         // 4. Buscar subtareas devueltas en la tabla subtasks
+         // 4. Buscar subtareas devueltas en la tabla subtasks - excluyendo proyectos archivados
          let returnedSubtasks = null;
          let returnedSubtasksError = null;
 
@@ -1857,13 +1867,15 @@ export default function UserProjectView() {
                .select(
                   `
             *,
-            tasks (
-              id, title, is_sequential, project_id
+            tasks!inner (
+              id, title, is_sequential, project_id,
+              projects!inner(id, is_archived)
             )
           `
                )
                .in("id", subtaskIds)
-               .eq("status", "returned");
+               .eq("status", "returned")
+               .eq("tasks.projects.is_archived", false);
 
             returnedSubtasks = result.data;
             returnedSubtasksError = result.error;
@@ -1923,9 +1935,16 @@ export default function UserProjectView() {
 
          // ... resto del código como antes para obtener detalles de tareas normales ...
 
-         // Obtener detalles de tareas normales
+         // Obtener detalles de tareas normales - excluyendo proyectos archivados
          if (normalTaskIds.length > 0) {
-            const { data: taskData, error: taskError } = await supabase.from("tasks").select("*").in("id", normalTaskIds);
+            const { data: taskData, error: taskError } = await supabase
+               .from("tasks")
+               .select(`
+                  *,
+                  projects!inner(id, is_archived)
+               `)
+               .in("id", normalTaskIds)
+               .eq("projects.is_archived", false);
 
             if (taskError) {
                console.error("Error al cargar tareas asignadas:", taskError);
@@ -1995,19 +2014,21 @@ export default function UserProjectView() {
             }
          }
 
-         // Obtener detalles de subtareas
+         // Obtener detalles de subtareas - excluyendo proyectos archivados
          if (subtaskIds.length > 0) {
             const { data: subtaskData, error: subtaskError } = await supabase
                .from("subtasks")
                .select(
                   `
             *,
-            tasks (
-              id, title, is_sequential, project_id
+            tasks!inner (
+              id, title, is_sequential, project_id,
+              projects!inner(id, is_archived)
             )
           `
                )
-               .in("id", subtaskIds);
+               .in("id", subtaskIds)
+               .eq("tasks.projects.is_archived", false);
 
             if (subtaskError) {
                console.error("Error al cargar subtareas asignadas:", subtaskError);
@@ -2229,8 +2250,16 @@ export default function UserProjectView() {
    // Helper para actualizar el estado de una tarea padre tras completar todas sus subtareas
    async function updateParentTaskStatus(parentId: string) {
       try {
-         // 1. Get parent task's current state first
-         const { data: parentTask, error: parentError } = await supabase.from("tasks").select("status").eq("id", parentId).single();
+         // 1. Get parent task's current state first - excluyendo proyectos archivados
+         const { data: parentTask, error: parentError } = await supabase
+            .from("tasks")
+            .select(`
+               status,
+               projects!inner(id, is_archived)
+            `)
+            .eq("id", parentId)
+            .eq("projects.is_archived", false)
+            .single();
 
          if (parentError) {
             console.error(`[HISTORY] Could not get parent task ${parentId} for history logging`, parentError);
@@ -2661,9 +2690,16 @@ export default function UserProjectView() {
 
          const subtaskIds = completedTaskAssignments.filter((a) => a.task_type === "subtask" && a.subtask_id !== null).map((a) => a.subtask_id);
 
-         // Obtener detalles de tareas completadas
+         // Obtener detalles de tareas completadas - excluyendo proyectos archivados
          if (normalTaskIds.length > 0) {
-            const { data: taskData, error: taskError } = await supabase.from("tasks").select("*").in("id", normalTaskIds);
+            const { data: taskData, error: taskError } = await supabase
+               .from("tasks")
+               .select(`
+                  *,
+                  projects!inner(id, is_archived)
+               `)
+               .in("id", normalTaskIds)
+               .eq("projects.is_archived", false);
 
             if (taskError) {
                console.error("Error al cargar tareas completadas:", taskError);
@@ -2713,19 +2749,21 @@ export default function UserProjectView() {
             }
          }
 
-         // Obtener detalles de subtareas completadas
+         // Obtener detalles de subtareas completadas - excluyendo proyectos archivados
          if (subtaskIds.length > 0) {
             const { data: subtaskData, error: subtaskError } = await supabase
                .from("subtasks")
                .select(
                   `
             *,
-            tasks (
-              id, title, is_sequential, project_id
+            tasks!inner (
+              id, title, is_sequential, project_id,
+              projects!inner(id, is_archived)
             )
           `
                )
-               .in("id", subtaskIds);
+               .in("id", subtaskIds)
+               .eq("tasks.projects.is_archived", false);
 
             if (subtaskError) {
                console.error("Error al cargar subtareas completadas:", subtaskError);
@@ -2965,11 +3003,15 @@ export default function UserProjectView() {
                }
             }
          } else {
-            // Lógica similar para tareas normales
+            // Lógica similar para tareas normales - excluyendo proyectos archivados
             const { data, error } = await supabase
                .from("tasks")
-               .select("*")
+               .select(`
+                  *,
+                  projects!inner(id, is_archived)
+               `)
                .eq("id", task.original_id || task.id)
+               .eq("projects.is_archived", false)
                .single();
 
             if (error) {
