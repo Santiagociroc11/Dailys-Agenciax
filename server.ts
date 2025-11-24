@@ -4,11 +4,12 @@ import { fileURLToPath } from 'url';
 import { 
   handleTestNotification, 
   sendAdminNotification, 
-  createTaskCompletedMessage, 
-  createTaskBlockedMessage,
-  createTaskInReviewMessage,
-  createTaskApprovedMessage,
-  createTaskReturnedMessage,
+    createTaskCompletedMessage,
+    createTaskBlockedMessage,
+    createTaskInReviewMessage,
+    createTaskApprovedMessage,
+    createTaskReturnedMessage,
+    createTaskReassignedMessage,
   getTimeInfo,
   notifyMultipleUsersTaskAvailable,
   notifyUsersTaskInReview
@@ -77,6 +78,8 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
     const { 
       taskTitle, 
       userName, 
+      previousUserName,
+      newUserName,
       projectName, 
       areaName,
       status, 
@@ -89,18 +92,33 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
     } = req.body;
 
     // Validar parámetros requeridos
-    if (!taskTitle || !userName || !projectName || !status) {
+    if (!taskTitle || !projectName || !status) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Faltan parámetros requeridos: taskTitle, userName, projectName, status' 
+        error: 'Faltan parámetros requeridos: taskTitle, projectName, status' 
       });
     }
 
     // Validar que el status sea válido
-    if (!['completed', 'blocked', 'in_review', 'approved', 'returned'].includes(status)) {
+    if (!['completed', 'blocked', 'in_review', 'approved', 'returned', 'reassigned'].includes(status)) {
       return res.status(400).json({ 
         success: false, 
-        error: 'El status debe ser "completed", "blocked", "in_review", "approved" o "returned"' 
+        error: 'El status debe ser "completed", "blocked", "in_review", "approved", "returned" o "reassigned"' 
+      });
+    }
+
+    // Validaciones específicas por estado
+    if (status !== 'reassigned' && !userName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'El parámetro userName es requerido para este status' 
+      });
+    }
+
+    if (status === 'reassigned' && (!previousUserName || !newUserName)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Los parámetros previousUserName y newUserName son requeridos cuando status es "reassigned"' 
       });
     }
 
@@ -151,6 +169,9 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
         break;
       case 'returned':
         message = createTaskReturnedMessage(taskTitle, userName, projectName, areaName || 'Sin área', returnFeedback, adminName || 'Administrador', isSubtask, parentTaskTitle, timeInfo);
+        break;
+      case 'reassigned':
+        message = createTaskReassignedMessage(taskTitle, previousUserName, newUserName, projectName, areaName || 'Sin área', adminName || 'Administrador', isSubtask, parentTaskTitle);
         break;
       default:
         return res.status(400).json({ 
@@ -268,7 +289,7 @@ app.post('/api/telegram/task-available', async (req, res) => {
     }
 
     // Validar que el reason sea válido
-    const validReasons = ['unblocked', 'returned', 'sequential_dependency_completed', 'created_available'];
+    const validReasons = ['unblocked', 'returned', 'sequential_dependency_completed', 'created_available', 'reassigned'];
     if (!validReasons.includes(reason)) {
       return res.status(400).json({ 
         success: false, 

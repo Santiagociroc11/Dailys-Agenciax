@@ -555,11 +555,45 @@ ${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.
 🔧 La ${taskType} ha sido devuelta por ${escapeHtml(safeAdminName)} al usuario para correcciones.`;
 }
 
+// Función para crear mensaje de notificación de reasignación para administradores
+export function createTaskReassignedMessage(
+  taskTitle: string,
+  previousUserName: string,
+  newUserName: string,
+  projectName: string,
+  areaName: string,
+  adminName: string,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safePreviousUserName = previousUserName || 'Usuario desconocido';
+  const safeNewUserName = newUserName || 'Usuario desconocido';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const safeAreaName = areaName || 'Sin área';
+  const safeAdminName = adminName || 'Administrador';
+  
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
+  
+  return `👤 <b>TAREA REASIGNADA</b>
+
+👩‍💼 <b>Admin:</b> ${escapeHtml(safeAdminName)}
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+🏷️ <b>Área:</b> ${escapeHtml(safeAreaName)}
+
+👤 <b>Responsable anterior:</b> ${escapeHtml(safePreviousUserName)}
+👤 <b>Nuevo responsable:</b> ${escapeHtml(safeNewUserName)}
+
+La ${taskType} ha sido reasignada por ${escapeHtml(safeAdminName)}.`;
+}
+
 // Función para crear mensaje de notificación de tarea disponible
 export function createTaskAvailableMessage(
   taskTitle: string, 
   projectName: string,
-  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available' | 'reassigned',
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): string {
@@ -589,6 +623,10 @@ export function createTaskAvailableMessage(
     case 'created_available':
       reasonText = 'Una nueva tarea está disponible para trabajar';
       icon = '✨';
+      break;
+    case 'reassigned':
+      reasonText = 'Has sido asignado a esta tarea';
+      icon = '👤';
       break;
   }
   
@@ -710,7 +748,7 @@ export async function notifyTaskAvailable(
   userId: string,
   taskTitle: string,
   projectName: string,
-  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available' | 'reassigned',
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): Promise<boolean> {
@@ -766,7 +804,7 @@ export async function notifyMultipleUsersTaskAvailable(
   userIds: string[],
   taskTitle: string,
   projectName: string,
-  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available' | 'reassigned',
   isSubtask: boolean = false,
   parentTaskTitle?: string
 ): Promise<number> {
@@ -790,7 +828,7 @@ export async function notifyTaskAvailableWithRetry(
   userId: string,
   taskTitle: string,
   projectName: string,
-  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available',
+  reason: 'unblocked' | 'returned' | 'sequential_dependency_completed' | 'created_available' | 'reassigned',
   isSubtask: boolean = false,
   parentTaskTitle?: string,
   maxRetries: number = 3

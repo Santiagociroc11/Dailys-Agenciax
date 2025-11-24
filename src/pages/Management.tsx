@@ -291,6 +291,8 @@ function Management() {
   const [previousSubtask, setPreviousSubtask] = useState<Subtask | null>(null);
   const [nextSubtask, setNextSubtask] = useState<Subtask | null>(null);
   const [deliveryComments, setDeliveryComments] = useState<string>('');
+  const [newAssignee, setNewAssignee] = useState<string>(''); // Estado para el nuevo responsable
+  const [isUpdatingAssignee, setIsUpdatingAssignee] = useState(false); // Estado para controlar la actualización
 
   // Agregar estos estados nuevos después de los estados existentes
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -997,6 +999,249 @@ function Management() {
       toast.error('Error al actualizar el estado');
       // Recargar datos para asegurar consistencia
       fetchData();
+    }
+  }
+
+  // Función para actualizar el responsable de una tarea o subtarea
+  async function handleUpdateAssignee(itemId: string, isSubtask: boolean, newAssigneeId: string) {
+    if (!newAssigneeId) {
+      toast.error('Por favor selecciona un usuario');
+      return;
+    }
+
+    setIsUpdatingAssignee(true);
+    try {
+      const table = isSubtask ? 'subtasks' : 'tasks';
+      let taskTitle = '';
+      let projectName = 'Proyecto sin nombre';
+      let parentTaskTitle: string | undefined = undefined;
+      
+      if (isSubtask) {
+        // Para subtareas, obtener información antes de actualizar (incluyendo el usuario anterior)
+        const { data: subtaskData, error: fetchError } = await supabase
+          .from('subtasks')
+          .select('title, task_id, assigned_to')
+          .eq('id', itemId)
+          .single();
+
+        if (fetchError) throw fetchError;
+        
+        taskTitle = subtaskData.title;
+        const previousUserId = subtaskData.assigned_to;
+        
+        // Obtener información de la tarea padre
+        if (subtaskData.task_id) {
+          const { data: parentTaskData } = await supabase
+            .from('tasks')
+            .select('title, project_id')
+            .eq('id', subtaskData.task_id)
+            .single();
+          
+          if (parentTaskData) {
+            parentTaskTitle = parentTaskData.title;
+            
+            // Obtener nombre del proyecto
+            if (parentTaskData.project_id) {
+              const { data: projectData } = await supabase
+                .from('projects')
+                .select('name')
+                .eq('id', parentTaskData.project_id)
+                .eq('is_archived', false)
+                .single();
+              
+              if (projectData) {
+                projectName = projectData.name;
+              }
+            }
+          }
+        }
+        
+        // Actualizar assigned_to
+        const { error } = await supabase
+          .from('subtasks')
+          .update({ assigned_to: newAssigneeId })
+          .eq('id', itemId);
+
+        if (error) throw error;
+      } else {
+        // Para tareas principales, obtener información antes de actualizar
+        const { data: currentTask, error: fetchError } = await supabase
+          .from('tasks')
+          .select('title, assigned_users, project_id')
+          .eq('id', itemId)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        taskTitle = currentTask.title;
+        
+        // Obtener el usuario anterior antes de actualizar
+        if (currentTask.assigned_users && currentTask.assigned_users.length > 0) {
+          previousUserId = currentTask.assigned_users[0];
+        }
+        
+        // Obtener nombre del proyecto
+        if (currentTask.project_id) {
+          const { data: projectData } = await supabase
+            .from('projects')
+            .select('name')
+            .eq('id', currentTask.project_id)
+            .eq('is_archived', false)
+            .single();
+          
+          if (projectData) {
+            projectName = projectData.name;
+          }
+        }
+
+        // Reemplazar el array con el nuevo usuario (o agregarlo si no existe)
+        const updatedAssignedUsers = currentTask.assigned_users 
+          ? [newAssigneeId] // Simplificar: asignar solo al nuevo usuario
+          : [newAssigneeId];
+
+        const { error } = await supabase
+          .from('tasks')
+          .update({ assigned_users: updatedAssignedUsers })
+          .eq('id', itemId);
+
+        if (error) throw error;
+      }
+
+      // Obtener información de usuarios para la notificación
+      let previousUserName = 'No asignado';
+      let newUserName = 'Usuario desconocido';
+      let newUserAreaName = 'Sin área';
+      
+      // Obtener información del usuario anterior
+      if (previousUserId) {
+        const { data: previousUserData } = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', previousUserId)
+          .single();
+        
+        if (previousUserData) {
+          previousUserName = previousUserData.name || previousUserData.email || 'Usuario desconocido';
+        }
+      }
+      
+      // Obtener información del nuevo usuario
+      const { data: newUserData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', newAssigneeId)
+        .single();
+      
+      if (newUserData) {
+        newUserName = newUserData.name || newUserData.email || 'Usuario desconocido';
+      }
+      
+      // Obtener área del nuevo usuario
+      try {
+        const { data: userAreas } = await supabase
+          .rpc('get_areas_by_user', { user_uuid: newAssigneeId });
+        
+        if (userAreas && userAreas.length > 0) {
+          newUserAreaName = userAreas[0].area_name || 'Sin área';
+        }
+      } catch (error) {
+        console.error("Error obteniendo área del nuevo usuario:", error);
+      }
+
+      // 🔔 Enviar notificación al nuevo usuario asignado
+      try {
+        fetch('/api/telegram/task-available', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userIds: [newAssigneeId],
+            taskTitle: taskTitle,
+            projectName: projectName,
+            reason: 'reassigned',
+            isSubtask: isSubtask,
+            parentTaskTitle: parentTaskTitle
+          })
+        }).then(response => {
+          if (response.ok) {
+            console.log(`✅ [NOTIFICATION] Notificación de reasignación enviada al usuario ${newAssigneeId}`);
+          } else {
+            console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de reasignación: ${response.status}`);
+          }
+        }).catch(error => {
+          console.error('🚨 [NOTIFICATION] Error al enviar notificación de reasignación:', error);
+        });
+      } catch (notificationError) {
+        // No bloquear el flujo por errores de notificación
+        console.error('🚨 [NOTIFICATION] Error preparando notificación de reasignación:', notificationError);
+      }
+
+      // 🔔 Enviar notificación al grupo de administradores
+      try {
+        const adminName = user?.name || user?.email || 'Administrador';
+        
+        fetch('/api/telegram/admin-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskTitle: taskTitle,
+            previousUserName: previousUserName,
+            newUserName: newUserName,
+            projectName: projectName,
+            areaName: newUserAreaName,
+            adminName: adminName,
+            isSubtask: isSubtask,
+            parentTaskTitle: parentTaskTitle,
+            status: 'reassigned'
+          })
+        }).then(response => {
+          if (response.ok) {
+            console.log(`✅ [NOTIFICATION] Notificación de reasignación enviada al grupo de administradores`);
+          } else {
+            console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de reasignación a administradores: ${response.status}`);
+          }
+        }).catch(error => {
+          console.error('🚨 [NOTIFICATION] Error al enviar notificación de reasignación a administradores:', error);
+        });
+      } catch (adminNotificationError) {
+        // No bloquear el flujo por errores de notificación
+        console.error('🚨 [NOTIFICATION] Error preparando notificación de reasignación a administradores:', adminNotificationError);
+      }
+
+      toast.success('Responsable actualizado correctamente');
+      
+      // Actualizar la UI localmente
+      if (isSubtask) {
+        setSubtasks(prev => prev.map(subtask => 
+          subtask.id === itemId 
+            ? { ...subtask, assigned_to: newAssigneeId }
+            : subtask
+        ));
+        // Actualizar también taskDetails si está abierto
+        if (taskDetails && taskDetails.id === itemId) {
+          setTaskDetails({ ...taskDetails, assigned_to: newAssigneeId });
+        }
+      } else {
+        setTasks(prev => prev.map(task => 
+          task.id === itemId 
+            ? { ...task, assigned_users: [newAssigneeId] }
+            : task
+        ));
+        // Actualizar también taskDetails si está abierto
+        if (taskDetails && taskDetails.id === itemId) {
+          setTaskDetails({ ...taskDetails, assigned_users: [newAssigneeId] });
+        }
+      }
+
+      // Recargar datos para asegurar consistencia
+      await fetchData();
+      
+      // Limpiar el selector
+      setNewAssignee('');
+    } catch (error) {
+      console.error('Error al actualizar responsable:', error);
+      toast.error('Error al actualizar el responsable');
+    } finally {
+      setIsUpdatingAssignee(false);
     }
   }
 
@@ -2155,6 +2400,7 @@ function Management() {
     setPreviousSubtask(null);
     setNextSubtask(null);
     setDeliveryComments('');
+    setNewAssignee(''); // Limpiar el selector de responsable
 
     try {
       let item: Task | Subtask | null = null;
@@ -2259,6 +2505,7 @@ function Management() {
       toast.error(`Error al cargar los detalles: ${error.message}`);
       setShowTaskDetailsModal(false); // Close modal on error
       setDetailsItem(null);
+      setNewAssignee(''); // Limpiar el selector de responsable
     } finally {
       setLoading(false); // Hide loading indicator
     }
@@ -3590,6 +3837,7 @@ function Management() {
                   setNextSubtask(null);
                   setDeliveryComments('');
                   setDetailsItem(null); // Reset details item
+                  setNewAssignee(''); // Limpiar el selector de responsable
                 }}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
@@ -3800,11 +4048,96 @@ function Management() {
                           <TaskStatusDisplay status={taskDetails.status} />
                         </div>
                         {detailsItem?.type === 'subtask' && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-600">Asignada a:</span>
-                            <span className="font-medium text-gray-800">
-                              {users.find(u => u.id === taskDetails.assigned_to)?.name || <span className="italic">No asignada</span>}
-                            </span>
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-gray-600">Asignada a:</span>
+                              <span className="font-medium text-gray-800">
+                                {users.find(u => u.id === taskDetails.assigned_to)?.name || <span className="italic">No asignada</span>}
+                              </span>
+                            </div>
+                            <div className="border-t border-gray-100 pt-2">
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Cambiar responsable:
+                              </label>
+                              <div className="flex gap-2">
+                                <select
+                                  value={newAssignee || taskDetails.assigned_to || ''}
+                                  onChange={(e) => setNewAssignee(e.target.value)}
+                                  className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  disabled={isUpdatingAssignee}
+                                >
+                                  <option value="">Seleccionar usuario...</option>
+                                  {users.map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name || u.email}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => {
+                                    const assigneeToUse = newAssignee || taskDetails.assigned_to;
+                                    if (assigneeToUse && assigneeToUse !== taskDetails.assigned_to) {
+                                      handleUpdateAssignee(taskDetails.id, true, assigneeToUse);
+                                    } else if (!assigneeToUse) {
+                                      toast.error('Por favor selecciona un usuario');
+                                    }
+                                  }}
+                                  disabled={isUpdatingAssignee || (!newAssignee && taskDetails.assigned_to) || (newAssignee === taskDetails.assigned_to)}
+                                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  {isUpdatingAssignee ? 'Guardando...' : 'Cambiar'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {detailsItem?.type === 'task' && taskDetails.assigned_users && taskDetails.assigned_users.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-gray-600">Asignada a:</span>
+                              <span className="font-medium text-gray-800">
+                                {users.find(u => u.id === taskDetails.assigned_users[0])?.name || <span className="italic">No asignada</span>}
+                                {taskDetails.assigned_users.length > 1 && (
+                                  <span className="text-xs text-gray-500 ml-1">
+                                    (+{taskDetails.assigned_users.length - 1} más)
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="border-t border-gray-100 pt-2">
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Cambiar responsable:
+                              </label>
+                              <div className="flex gap-2">
+                                <select
+                                  value={newAssignee || taskDetails.assigned_users[0] || ''}
+                                  onChange={(e) => setNewAssignee(e.target.value)}
+                                  className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  disabled={isUpdatingAssignee}
+                                >
+                                  <option value="">Seleccionar usuario...</option>
+                                  {users.map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name || u.email}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => {
+                                    const assigneeToUse = newAssignee || taskDetails.assigned_users[0];
+                                    if (assigneeToUse && assigneeToUse !== taskDetails.assigned_users[0]) {
+                                      handleUpdateAssignee(taskDetails.id, false, assigneeToUse);
+                                    } else if (!assigneeToUse) {
+                                      toast.error('Por favor selecciona un usuario');
+                                    }
+                                  }}
+                                  disabled={isUpdatingAssignee || (!newAssignee && taskDetails.assigned_users[0]) || (newAssignee === taskDetails.assigned_users[0])}
+                                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  {isUpdatingAssignee ? 'Guardando...' : 'Cambiar'}
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         )}
                          <div className="flex justify-between text-sm">
@@ -3964,6 +4297,7 @@ function Management() {
                    setNextSubtask(null);
                    setDeliveryComments('');
                    setDetailsItem(null); // Reset details item
+                   setNewAssignee(''); // Limpiar el selector de responsable
                  }}
                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors text-sm font-medium"
                >
