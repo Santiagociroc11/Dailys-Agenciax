@@ -1015,6 +1015,7 @@ function Management() {
       let taskTitle = '';
       let projectName = 'Proyecto sin nombre';
       let parentTaskTitle: string | undefined = undefined;
+      let previousUserId: string | null = null;
       
       if (isSubtask) {
         // Para subtareas, obtener información antes de actualizar (incluyendo el usuario anterior)
@@ -1027,7 +1028,7 @@ function Management() {
         if (fetchError) throw fetchError;
         
         taskTitle = subtaskData.title;
-        const previousUserId = subtaskData.assigned_to;
+        previousUserId = subtaskData.assigned_to;
         
         // Obtener información de la tarea padre
         if (subtaskData.task_id) {
