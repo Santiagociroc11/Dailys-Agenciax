@@ -1108,6 +1108,70 @@ function Management() {
         if (error) throw error;
       }
 
+      // 🗑️ Eliminar sesiones de trabajo y asignaciones del usuario anterior
+      if (previousUserId && previousUserId !== newAssigneeId) {
+        try {
+          console.log(`[REASSIGN] Limpiando sesiones de trabajo del usuario anterior: ${previousUserId}`);
+          
+          // 1. Obtener los task_work_assignments del usuario anterior para esta tarea
+          const assignmentQuery = supabase
+            .from('task_work_assignments')
+            .select('id')
+            .eq('user_id', previousUserId)
+            .eq('task_type', isSubtask ? 'subtask' : 'task');
+          
+          if (isSubtask) {
+            assignmentQuery.eq('subtask_id', itemId);
+          } else {
+            assignmentQuery.eq('task_id', itemId);
+          }
+          
+          const { data: assignments, error: assignmentsError } = await assignmentQuery;
+          
+          if (assignmentsError) {
+            console.warn('[REASSIGN] Error al obtener task_work_assignments:', assignmentsError);
+          } else if (assignments && assignments.length > 0) {
+            const assignmentIds = assignments.map(a => a.id);
+            
+            // 2. Eliminar work_sessions asociados a estos assignments
+            const { error: sessionsError } = await supabase
+              .from('work_sessions')
+              .delete()
+              .in('assignment_id', assignmentIds);
+            
+            if (sessionsError) {
+              console.warn('[REASSIGN] Error al eliminar work_sessions:', sessionsError);
+            } else {
+              console.log(`[REASSIGN] Eliminados ${assignments.length} work_sessions del usuario anterior`);
+            }
+            
+            // 3. Eliminar task_work_assignments del usuario anterior
+            const deleteQuery = supabase
+              .from('task_work_assignments')
+              .delete()
+              .eq('user_id', previousUserId)
+              .eq('task_type', isSubtask ? 'subtask' : 'task');
+            
+            if (isSubtask) {
+              deleteQuery.eq('subtask_id', itemId);
+            } else {
+              deleteQuery.eq('task_id', itemId);
+            }
+            
+            const { error: deleteError } = await deleteQuery;
+            
+            if (deleteError) {
+              console.warn('[REASSIGN] Error al eliminar task_work_assignments:', deleteError);
+            } else {
+              console.log(`[REASSIGN] Eliminados task_work_assignments del usuario anterior`);
+            }
+          }
+        } catch (cleanupError) {
+          // No bloquear el flujo por errores de limpieza
+          console.error('[REASSIGN] Error al limpiar sesiones del usuario anterior:', cleanupError);
+        }
+      }
+
       // Obtener información de usuarios para la notificación
       let previousUserName = 'No asignado';
       let newUserName = 'Usuario desconocido';
@@ -1838,6 +1902,43 @@ function Management() {
   // Función para eliminar task_work_assignments al desbloquear
   async function removeTaskWorkAssignments(itemId: string, itemType: 'task' | 'subtask') {
     try {
+      // Primero verificar si hay work_sessions asociados
+      const { data: assignments, error: fetchError } = await supabase
+        .from('task_work_assignments')
+        .select('id')
+        .eq(itemType === 'subtask' ? 'subtask_id' : 'task_id', itemId)
+        .eq('task_type', itemType);
+      
+      if (fetchError) {
+        console.warn('Error al obtener task_work_assignments:', fetchError);
+        return; // Salir silenciosamente si no se pueden obtener
+      }
+      
+      if (!assignments || assignments.length === 0) {
+        console.log('No hay task_work_assignments para eliminar');
+        return; // No hay nada que eliminar
+      }
+      
+      // Verificar si alguno de estos assignments tiene work_sessions asociados
+      const assignmentIds = assignments.map(a => a.id);
+      const { data: workSessions, error: sessionsError } = await supabase
+        .from('work_sessions')
+        .select('assignment_id')
+        .in('assignment_id', assignmentIds)
+        .limit(1);
+      
+      if (sessionsError) {
+        console.warn('Error al verificar work_sessions:', sessionsError);
+        // Continuar intentando eliminar de todas formas
+      }
+      
+      // Si hay work_sessions asociados, no eliminar (es normal cuando el usuario ya trabajó en la tarea)
+      if (workSessions && workSessions.length > 0) {
+        console.log('Hay work_sessions asociados, no se eliminarán los task_work_assignments (esto es normal)');
+        return; // Salir silenciosamente, no es un error
+      }
+      
+      // Si no hay work_sessions, proceder a eliminar
       const { error } = await supabase
         .from('task_work_assignments')
         .delete()
@@ -1845,14 +1946,28 @@ function Management() {
         .eq('task_type', itemType);
       
       if (error) {
+        // Si el error es por foreign key constraint, es esperado y no debemos mostrar error
+        if (error.code === '23503') {
+          console.log('No se pueden eliminar task_work_assignments porque tienen work_sessions asociados (esto es normal)');
+          return; // Salir silenciosamente
+        }
         console.error('Error al eliminar task_work_assignments:', error);
+        // Solo mostrar error si no es un error de foreign key
         toast.error('Error al limpiar las asignaciones de trabajo');
       } else {
         console.log('Task work assignments eliminados correctamente al desbloquear');
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Si el error es por foreign key constraint, es esperado
+      if (err?.code === '23503') {
+        console.log('No se pueden eliminar task_work_assignments porque tienen work_sessions asociados (esto es normal)');
+        return; // Salir silenciosamente
+      }
       console.error('Error al eliminar task_work_assignments:', err);
-      toast.error('Error al limpiar las asignaciones de trabajo');
+      // Solo mostrar error si no es un error de foreign key
+      if (err?.code !== '23503') {
+        toast.error('Error al limpiar las asignaciones de trabajo');
+      }
     }
   }
   
