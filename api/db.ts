@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { executeQuery } from '../lib/db/queryExecutor.js';
 import type { QueryRequest } from '../lib/db/types.js';
-import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, ProjectTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
+import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, ProjectTemplate, TaskTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
 
 export async function handleDbQuery(req: Request, res: Response): Promise<void> {
   try {
@@ -580,6 +580,109 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         }
       }
       data = project.toObject ? project.toObject() : project;
+    } else if (fn === 'create_task_template_from_task') {
+      const taskId = params.task_id as string;
+      const templateName = (params.template_name as string) || 'Plantilla de tarea';
+      const createdBy = params.created_by as string;
+      if (!taskId || !createdBy) {
+        res.status(400).json({ data: null, error: { message: 'Faltan task_id o created_by' } });
+        return;
+      }
+      const task = await Task.findOne({ id: taskId }).lean().exec();
+      if (!task) {
+        res.status(404).json({ data: null, error: { message: 'Tarea no encontrada' } });
+        return;
+      }
+      const subs = await Subtask.find({ task_id: taskId }).sort({ sequence_order: 1 }).lean().exec();
+      const templateSubs = subs.map((s: { title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }) => ({
+        title: s.title,
+        description: s.description ?? null,
+        estimated_duration: s.estimated_duration ?? 30,
+        sequence_order: s.sequence_order ?? null,
+        checklist: (s.checklist || []).map((c: { id: string; title: string; order?: number }) => ({ id: c.id, title: c.title, order: c.order ?? 0 })),
+      }));
+      const taskChecklist = ((task as { checklist?: Array<{ id: string; title: string; checked?: boolean; order?: number }> }).checklist || []).map((c) => ({
+        id: c.id,
+        title: c.title,
+        order: c.order ?? 0,
+      }));
+      const template = await TaskTemplate.create({
+        name: templateName,
+        title: (task as { title: string }).title,
+        description: (task as { description?: string | null }).description ?? null,
+        estimated_duration: (task as { estimated_duration: number }).estimated_duration ?? 60,
+        priority: (task as { priority?: string }).priority ?? 'medium',
+        is_sequential: (task as { is_sequential?: boolean }).is_sequential ?? false,
+        subtasks: templateSubs,
+        checklist: taskChecklist,
+        created_by: createdBy,
+        source_task_id: taskId,
+      });
+      data = template.toObject ? template.toObject() : template;
+    } else if (fn === 'create_task_from_template') {
+      const templateId = params.template_id as string;
+      const projectId = params.project_id as string;
+      const startDate = params.start_date as string;
+      const deadline = params.deadline as string;
+      const createdBy = params.created_by as string;
+      const assignedUsers = (params.assigned_users as string[]) || [];
+      if (!templateId || !projectId || !startDate || !deadline || !createdBy) {
+        res.status(400).json({ data: null, error: { message: 'Faltan template_id, project_id, start_date, deadline o created_by' } });
+        return;
+      }
+      const template = await TaskTemplate.findOne({ id: templateId }).lean().exec();
+      if (!template) {
+        res.status(404).json({ data: null, error: { message: 'Plantilla de tarea no encontrada' } });
+        return;
+      }
+      const users = assignedUsers.length > 0 ? assignedUsers : [createdBy];
+      const taskChecklist = ((template as { checklist?: Array<{ id: string; title: string; order?: number }> }).checklist || []).map((c) => ({
+        id: c.id,
+        title: c.title,
+        checked: false,
+        order: c.order ?? 0,
+      }));
+      const task = await Task.create({
+        title: (template as { title: string }).title,
+        description: (template as { description?: string | null }).description ?? null,
+        start_date: new Date(startDate),
+        deadline: new Date(deadline),
+        estimated_duration: (template as { estimated_duration: number }).estimated_duration ?? 60,
+        priority: (template as { priority?: string }).priority ?? 'medium',
+        is_sequential: (template as { is_sequential?: boolean }).is_sequential ?? false,
+        created_by: createdBy,
+        project_id: projectId,
+        assigned_users: [],
+        status: 'pending',
+        checklist: taskChecklist,
+      });
+      const subs: Array<{ title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }> = (template as { subtasks?: Array<{ title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }> }).subtasks || [];
+      let userIdx = 0;
+      for (let i = 0; i < subs.length; i++) {
+        const s = subs[i];
+        const assignee = users[userIdx % users.length];
+        userIdx++;
+        const subChecklist = (s.checklist || []).map((c) => ({ id: c.id, title: c.title, checked: false, order: c.order ?? 0 }));
+        await Subtask.create({
+          title: s.title,
+          description: s.description ?? null,
+          estimated_duration: s.estimated_duration ?? 30,
+          sequence_order: s.sequence_order ?? i + 1,
+          assigned_to: assignee,
+          task_id: task.id,
+          start_date: new Date(startDate),
+          deadline: new Date(deadline),
+          status: 'pending',
+          checklist: subChecklist,
+        });
+      }
+      if (subs.length === 0) {
+        await Task.updateOne({ id: task.id }, { $set: { assigned_users: [users[0]] } }).exec();
+      } else {
+        const subUsers = [...new Set(subs.map((_, i) => users[i % users.length]))];
+        await Task.updateOne({ id: task.id }, { $set: { assigned_users: subUsers } }).exec();
+      }
+      data = task.toObject ? task.toObject() : task;
     } else if (fn === 'get_audit_logs') {
       const entityType = params.entity_type as string | undefined;
       const entityId = params.entity_id as string | undefined;

@@ -2,6 +2,7 @@ export { User } from './User.js';
 export { Client } from './Client.js';
 export { Project } from './Project.js';
 export { ProjectTemplate } from './ProjectTemplate.js';
+export { TaskTemplate } from './TaskTemplate.js';
 export { Task } from './Task.js';
 export { TaskWorkAssignment } from './TaskWorkAssignment.js';
 export { Subtask } from './Subtask.js';

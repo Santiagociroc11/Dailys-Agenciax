@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles } from 'lucide-react';
+import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles, Upload } from 'lucide-react';
 import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -148,6 +148,44 @@ function Tasks() {
   });
   const [generatingDaily, setGeneratingDaily] = useState(false);
   const [projectSelected, setProjectSelected] = useState(false);
+  const [showSelectTaskForDailyModal, setShowSelectTaskForDailyModal] = useState(false);
+  const [tasksForDailyModal, setTasksForDailyModal] = useState<Task[]>([]);
+  const [dailyModalProjectFilter, setDailyModalProjectFilter] = useState<string | null>(null);
+  const [showSupervisionTaskModal, setShowSupervisionTaskModal] = useState(false);
+  const [supervisionTaskConfig, setSupervisionTaskConfig] = useState({
+    project_id: '',
+    title: '',
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(addDays(new Date(), 13), 'yyyy-MM-dd'),
+    assignee: '',
+    duration: 15,
+    includeWeekends: false,
+  });
+  const [creatingSupervision, setCreatingSupervision] = useState(false);
+  const [showQuickCreateModal, setShowQuickCreateModal] = useState(false);
+  const [taskTemplates, setTaskTemplates] = useState<{ id: string; name: string; title: string; subtasks?: unknown[] }[]>([]);
+  const [selectedTaskTemplateId, setSelectedTaskTemplateId] = useState<string | null>(null);
+  const [savingAsTemplate, setSavingAsTemplate] = useState(false);
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [showBulkCreateModal, setShowBulkCreateModal] = useState(false);
+  const [bulkTasks, setBulkTasks] = useState<{ title: string; duration: number; assignee: string }[]>([
+    { title: '', duration: 60, assignee: '' },
+  ]);
+  const [bulkProjectId, setBulkProjectId] = useState<string | null>(null);
+  const [bulkDeadline, setBulkDeadline] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+  const [creatingBulk, setCreatingBulk] = useState(false);
+  const [showCsvImportModal, setShowCsvImportModal] = useState(false);
+  const [csvImportData, setCsvImportData] = useState<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]>([]);
+  const [csvImportProject, setCsvImportProject] = useState<string | null>(null);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvInputRef = React.useRef<HTMLInputElement>(null);
+  const [quickTask, setQuickTask] = useState({
+    title: '',
+    project_id: '' as string | null,
+    assigned_to: '' as string | null,
+    deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+  });
   const [selectedProjectDates, setSelectedProjectDates] = useState<{
     start_date: string;
     deadline: string;
@@ -172,8 +210,59 @@ function Tasks() {
   }, []);
 
   useEffect(() => {
+    async function loadTaskTemplates() {
+      try {
+        const { data } = await supabase.from('task_templates').select('id, name, title, subtasks').order('name');
+        setTaskTemplates((data || []) as { id: string; name: string; title: string; subtasks?: unknown[] }[]);
+      } catch {
+        setTaskTemplates([]);
+      }
+    }
+    loadTaskTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (showSelectTaskForDailyModal) {
+      async function fetchForModal() {
+        try {
+          const { data: tasksData, error } = await supabase
+            .from('tasks')
+            .select(`
+              id, title, start_date, deadline, project_id, status,
+              projects!inner(id, is_archived)
+            `)
+            .eq('projects.is_archived', false)
+            .in('status', ['pending', 'in_progress', 'completed', 'in_review', 'returned', 'blocked'])
+            .order('created_at', { ascending: false })
+            .limit(100);
+          if (error) throw error;
+          setTasksForDailyModal((tasksData || []) as Task[]);
+        } catch (e) {
+          console.error('Error fetching tasks for daily modal:', e);
+          setTasksForDailyModal([]);
+        }
+      }
+      fetchForModal();
+    }
+  }, [showSelectTaskForDailyModal]);
+
+  useEffect(() => {
     setCurrentPage(1); // Resetear a la primera página cuando cambie el filtro
   }, [selectedProject, searchTerm, activeTab]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        if (isAdmin && !showModal && !showQuickCreateModal) {
+          setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
+          setShowQuickCreateModal(true);
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isAdmin, showModal, showQuickCreateModal]);
 
   useEffect(() => {
     fetchTasks();
@@ -390,6 +479,74 @@ function Tasks() {
       u.assigned_projects?.includes(projectId) || 
       u.id === projectCreatorId
     );
+  }
+
+  async function handleQuickCreateTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !quickTask.title?.trim() || !quickTask.project_id) {
+      toast.error('Título y proyecto son obligatorios.');
+      return;
+    }
+    setError('');
+    try {
+      const proj = projects.find((p) => p.id === quickTask.project_id);
+      const startDate = proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert([{
+          title: quickTask.title.trim(),
+          description: '',
+          start_date: startDate,
+          deadline: quickTask.deadline,
+          estimated_duration: 60,
+          priority: 'medium',
+          is_sequential: false,
+          created_by: user.id,
+          assigned_users: quickTask.assigned_to ? [quickTask.assigned_to] : [user.id],
+          project_id: quickTask.project_id,
+          status: 'pending',
+        }])
+        .select();
+      if (error) throw error;
+      const created = data?.[0] as { id: string };
+      if (created && user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'task',
+          entity_id: created.id,
+          action: 'create',
+          summary: `Tarea creada: ${quickTask.title.trim()}`,
+        });
+      }
+      toast.success('Tarea creada');
+      setShowQuickCreateModal(false);
+      setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
+      await fetchTasks();
+    } catch (err) {
+      console.error('Error:', err);
+      toast.error('Error al crear la tarea.');
+    }
+  }
+
+  function openFullCreateFromQuick() {
+    if (quickTask.project_id) {
+      const proj = projects.find((p) => p.id === quickTask.project_id);
+      setNewTask({
+        title: quickTask.title,
+        description: '',
+        start_date: proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        deadline: quickTask.deadline,
+        estimated_duration: 60,
+        priority: 'medium',
+        is_sequential: false,
+        assigned_to: quickTask.assigned_to ? [quickTask.assigned_to] : [],
+        subtasks: [],
+        project_id: quickTask.project_id,
+      });
+      setProjectSelected(true);
+    }
+    setShowQuickCreateModal(false);
+    setShowModal(true);
   }
 
   async function handleCreateTask(e: React.FormEvent) {
@@ -677,6 +834,88 @@ function Tasks() {
     if (start > end) return [];
     const days = eachDayOfInterval({ start, end });
     return includeWeekends ? days : days.filter(d => !isWeekend(d));
+  }
+
+  async function handleCreateSupervisionTask(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const { project_id, title, startDate, endDate, assignee, duration, includeWeekends } = supervisionTaskConfig;
+    if (!project_id || !title?.trim()) {
+      toast.error('Proyecto y título son obligatorios.');
+      return;
+    }
+    const dates = getDailyDates(startDate, endDate, includeWeekends);
+    if (dates.length === 0) {
+      toast.error('No hay días en el rango. Revisa las fechas.');
+      return;
+    }
+    if (dates.length > 90) {
+      toast.error('Máximo 90 días. Reduce el rango.');
+      return;
+    }
+    setCreatingSupervision(true);
+    try {
+      const startDateTime = `${startDate}T09:00:00`;
+      const endDateTime = `${endDate}T18:00:00`;
+      const { data: taskData, error: taskError } = await supabase
+        .from('tasks')
+        .insert([{
+          title: title.trim(),
+          description: '',
+          start_date: startDateTime,
+          deadline: endDateTime,
+          estimated_duration: duration * dates.length,
+          priority: 'medium',
+          is_sequential: false,
+          created_by: user.id,
+          assigned_users: assignee ? [assignee] : [user.id],
+          project_id,
+          status: 'pending',
+        }])
+        .select()
+        .single();
+      if (taskError) throw taskError;
+      const taskId = (taskData as { id: string }).id;
+      const prefix = title.trim().slice(0, 40);
+      const subtasksToInsert = dates.map((date, i) => ({
+        task_id: taskId,
+        title: `${prefix} – ${format(date, 'd MMM', { locale: es })}`,
+        description: '',
+        estimated_duration: duration,
+        sequence_order: i + 1,
+        assigned_to: assignee || user.id,
+        status: 'pending',
+        start_date: format(date, "yyyy-MM-dd'T'09:00:00"),
+        deadline: format(date, "yyyy-MM-dd'T'18:00:00"),
+      }));
+      const { error: subError } = await supabase.from('subtasks').insert(subtasksToInsert);
+      if (subError) throw subError;
+      await logAudit({
+        user_id: user.id,
+        entity_type: 'task',
+        entity_id: taskId,
+        action: 'create',
+        summary: `Tarea de supervisión creada: ${title} (${dates.length} checkpoints diarios)`,
+      });
+      toast.success(`Tarea creada con ${dates.length} subtareas diarias`);
+      setShowSupervisionTaskModal(false);
+      setSupervisionTaskConfig({
+        project_id: '',
+        title: '',
+        startDate: format(new Date(), 'yyyy-MM-dd'),
+        endDate: format(addDays(new Date(), 13), 'yyyy-MM-dd'),
+        assignee: '',
+        duration: 15,
+        includeWeekends: false,
+      });
+      await fetchTasks();
+      await fetchSubtasks();
+    } catch (err) {
+      console.error('Error creando tarea de supervisión:', err);
+      toast.error('Error al crear. Inténtalo de nuevo.');
+    } finally {
+      setCreatingSupervision(false);
+    }
   }
 
   async function handleGenerateDailySubtasks() {
@@ -1015,6 +1254,325 @@ function Tasks() {
     }
   }
   
+  async function handleDuplicateTask() {
+    if (!selectedTask || !user) return;
+    try {
+      const taskSubs = subtasks[selectedTask.id] || [];
+      const startDate = selectedTask.start_date ? new Date(selectedTask.start_date) : new Date();
+      const endDate = selectedTask.deadline ? new Date(selectedTask.deadline) : addDays(new Date(), 7);
+      const offsetDays = 7;
+      const newStart = addDays(startDate, offsetDays);
+      const newEnd = addDays(endDate, offsetDays);
+      const newStartStr = format(newStart, "yyyy-MM-dd'T'HH:mm");
+      const newEndStr = format(newEnd, "yyyy-MM-dd'T'HH:mm");
+      const { data: newTaskData, error: taskErr } = await supabase
+        .from('tasks')
+        .insert([{
+          title: `${selectedTask.title} (copia)`,
+          description: selectedTask.description || '',
+          start_date: newStartStr,
+          deadline: newEndStr,
+          estimated_duration: selectedTask.estimated_duration,
+          priority: selectedTask.priority,
+          is_sequential: selectedTask.is_sequential,
+          created_by: user.id,
+          assigned_users: selectedTask.assigned_users || [],
+          project_id: selectedTask.project_id,
+          status: 'pending',
+        }])
+        .select()
+        .single();
+      if (taskErr) throw taskErr;
+      const newTaskId = (newTaskData as { id: string }).id;
+      if (taskSubs.length > 0) {
+        const subsToInsert = taskSubs.map((s, i) => {
+          const sStart = s.start_date ? new Date(s.start_date) : newStart;
+          const sEnd = s.deadline ? new Date(s.deadline) : newEnd;
+          return {
+            task_id: newTaskId,
+            title: s.title,
+            description: s.description || '',
+            estimated_duration: s.estimated_duration,
+            sequence_order: s.sequence_order ?? i + 1,
+            assigned_to: s.assigned_to,
+            status: 'pending',
+            start_date: format(addDays(sStart, offsetDays), "yyyy-MM-dd'T'HH:mm"),
+            deadline: format(addDays(sEnd, offsetDays), "yyyy-MM-dd'T'HH:mm"),
+          };
+        });
+        const { error: subErr } = await supabase.from('subtasks').insert(subsToInsert);
+        if (subErr) throw subErr;
+      }
+      await logAudit({
+        user_id: user.id,
+        entity_type: 'task',
+        entity_id: newTaskId,
+        action: 'create',
+        summary: `Tarea duplicada: ${selectedTask.title}`,
+      });
+      toast.success('Tarea duplicada correctamente');
+      setShowTaskDetailModal(false);
+      setSelectedTask(null);
+      await fetchTasks();
+      await fetchSubtasks();
+    } catch (err) {
+      console.error('Error duplicando tarea:', err);
+      toast.error('Error al duplicar');
+    }
+  }
+
+  async function handleSaveTaskAsTemplate() {
+    if (!selectedTask || !user) return;
+    const name = newTemplateName.trim() || `${selectedTask.title} (plantilla)`;
+    setSavingAsTemplate(true);
+    try {
+      const { data, error } = await supabase.rpc('create_task_template_from_task', {
+        task_id: selectedTask.id,
+        template_name: name,
+        created_by: user.id,
+      });
+      if (error) throw error;
+      if (data && user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project_template',
+          entity_id: (data as { id?: string }).id || '',
+          action: 'create',
+          summary: `Plantilla de tarea creada: ${name}`,
+        });
+      }
+      toast.success('Plantilla guardada');
+      setShowSaveTemplateModal(false);
+      setNewTemplateName('');
+      const { data: updated } = await supabase.from('task_templates').select('id, name, title, subtasks').order('name');
+      setTaskTemplates((updated || []) as { id: string; name: string; title: string; subtasks?: unknown[] }[]);
+    } catch (err) {
+      console.error('Error guardando plantilla:', err);
+      toast.error('Error al guardar plantilla');
+    } finally {
+      setSavingAsTemplate(false);
+    }
+  }
+
+  async function handleCreateFromTaskTemplate(projectId?: string, startDate?: string, deadline?: string) {
+    const pid = projectId ?? newTask.project_id;
+    if (!selectedTaskTemplateId || !user || !pid) return;
+    const tpl = taskTemplates.find((t) => t.id === selectedTaskTemplateId);
+    if (!tpl) return;
+    const proj = projects.find((p) => p.id === pid);
+    const start = startDate ?? proj?.start_date ?? format(new Date(), "yyyy-MM-dd'T'HH:mm");
+    const end = deadline ?? proj?.deadline ?? format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm");
+    try {
+      const { data, error } = await supabase.rpc('create_task_from_template', {
+        template_id: selectedTaskTemplateId,
+        project_id: pid,
+        start_date: start.replace(' ', 'T').slice(0, 16),
+        deadline: end.replace(' ', 'T').slice(0, 16),
+        created_by: user.id,
+        assigned_users: newTask.assigned_to.length > 0 ? newTask.assigned_to : [user.id],
+      });
+      if (error) throw error;
+      if (data && user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'task',
+          entity_id: (data as { id?: string }).id || '',
+          action: 'create',
+          summary: `Tarea creada desde plantilla: ${tpl.title}`,
+        });
+      }
+      toast.success('Tarea creada desde plantilla');
+      setShowModal(false);
+      setProjectSelected(false);
+      setSelectedTaskTemplateId(null);
+      setNewTask({
+        title: '',
+        description: '',
+        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        estimated_duration: 30,
+        priority: 'medium',
+        is_sequential: false,
+        assigned_to: [],
+        subtasks: [],
+        project_id: null,
+      });
+      await fetchTasks();
+      await fetchSubtasks();
+    } catch (err) {
+      console.error('Error creando desde plantilla:', err);
+      toast.error('Error al crear desde plantilla');
+    }
+  }
+
+  function parseCsvFile(file: File): Promise<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = (e.target?.result as string) || '';
+          const lines = text.split(/\r?\n/).filter((l) => l.trim());
+          if (lines.length < 2) {
+            resolve([]);
+            return;
+          }
+          const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+          const titleIdx = headers.findIndex((h) => h === 'titulo' || h === 'title');
+          const durationIdx = headers.findIndex((h) => h === 'duracion' || h === 'duration' || h === 'duration_min');
+          const assigneeIdx = headers.findIndex((h) => h === 'asignado' || h === 'assignee' || h === 'email');
+          const deadlineIdx = headers.findIndex((h) => h === 'fecha_limite' || h === 'deadline' || h === 'fecha');
+          const result: { title: string; project_id: string; deadline: string; duration: number; assignee: string }[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+            const title = titleIdx >= 0 ? cols[titleIdx] || '' : cols[0] || '';
+            if (!title) continue;
+            const duration = durationIdx >= 0 ? Number(cols[durationIdx]) || 60 : 60;
+            const assignee = assigneeIdx >= 0 ? cols[assigneeIdx] || '' : '';
+            let deadline = deadlineIdx >= 0 ? cols[deadlineIdx] || '' : '';
+            if (deadline && !deadline.includes('T')) {
+              deadline = deadline.length === 10 ? `${deadline}T18:00:00` : deadline;
+            }
+            if (!deadline) deadline = format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm");
+            result.push({ title, project_id: '', deadline, duration, assignee });
+          }
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error('Error leyendo archivo'));
+      reader.readAsText(file, 'UTF-8');
+    });
+  }
+
+  async function handleCsvFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const rows = await parseCsvFile(file);
+      setCsvImportData(rows);
+      setShowCsvImportModal(true);
+      if (!csvImportProject && projects.length > 0) setCsvImportProject(projects[0].id);
+    } catch (err) {
+      toast.error('Error al leer el CSV');
+    }
+    e.target.value = '';
+  }
+
+  async function handleCsvImport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !csvImportProject) {
+      toast.error('Selecciona un proyecto');
+      return;
+    }
+    const valid = csvImportData.filter((r) => r.title?.trim());
+    if (valid.length === 0) {
+      toast.error('No hay filas válidas');
+      return;
+    }
+    setImportingCsv(true);
+    try {
+      const proj = projects.find((p) => p.id === csvImportProject);
+      const startDate = proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+      const tasksToInsert = valid.map((r) => {
+        let assigneeId = user.id;
+        if (r.assignee) {
+          const u = users.find((us) => us.email === r.assignee || us.id === r.assignee || us.name === r.assignee);
+          if (u) assigneeId = u.id;
+        }
+        return {
+          title: r.title.trim(),
+          description: '',
+          start_date: startDate,
+          deadline: r.deadline,
+          estimated_duration: r.duration,
+          priority: 'medium',
+          is_sequential: false,
+          created_by: user.id,
+          assigned_users: [assigneeId],
+          project_id: csvImportProject,
+          status: 'pending',
+        };
+      });
+      const { data, error } = await supabase.from('tasks').insert(tasksToInsert).select();
+      if (error) throw error;
+      for (const d of (data || []) as { id: string; title: string }[]) {
+        if (user?.id) {
+          await logAudit({
+            user_id: user.id,
+            entity_type: 'task',
+            entity_id: d.id,
+            action: 'create',
+            summary: `Tarea creada (CSV): ${d.title}`,
+          });
+        }
+      }
+      toast.success(`${valid.length} tareas importadas`);
+      setShowCsvImportModal(false);
+      setCsvImportData([]);
+      await fetchTasks();
+    } catch (err) {
+      console.error('Error importando CSV:', err);
+      toast.error('Error al importar');
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
+  async function handleBulkCreateTasks(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !bulkProjectId) {
+      toast.error('Selecciona un proyecto');
+      return;
+    }
+    const valid = bulkTasks.filter((t) => t.title?.trim());
+    if (valid.length === 0) {
+      toast.error('Añade al menos una tarea con título');
+      return;
+    }
+    setCreatingBulk(true);
+    try {
+      const proj = projects.find((p) => p.id === bulkProjectId);
+      const startDate = proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+      const tasksToInsert = valid.map((t) => ({
+        title: t.title.trim(),
+        description: '',
+        start_date: startDate,
+        deadline: bulkDeadline,
+        estimated_duration: t.duration,
+        priority: 'medium',
+        is_sequential: false,
+        created_by: user.id,
+        assigned_users: t.assignee ? [t.assignee] : [user.id],
+        project_id: bulkProjectId,
+        status: 'pending',
+      }));
+      const { data, error } = await supabase.from('tasks').insert(tasksToInsert).select();
+      if (error) throw error;
+      for (const d of (data || []) as { id: string; title: string }[]) {
+        if (user?.id) {
+          await logAudit({
+            user_id: user.id,
+            entity_type: 'task',
+            entity_id: d.id,
+            action: 'create',
+            summary: `Tarea creada: ${d.title}`,
+          });
+        }
+      }
+      toast.success(`${valid.length} tareas creadas`);
+      setShowBulkCreateModal(false);
+      setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
+      setBulkProjectId(null);
+      await fetchTasks();
+    } catch (err) {
+      console.error('Error creando tareas:', err);
+      toast.error('Error al crear las tareas');
+    } finally {
+      setCreatingBulk(false);
+    }
+  }
+
   async function handleDeleteTask() {
     if (!selectedTask) return;
     
@@ -1394,7 +1952,19 @@ function Tasks() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-6 relative">
+      {isAdmin && (
+        <button
+          onClick={() => {
+            setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
+            setShowQuickCreateModal(true);
+          }}
+          className="fixed bottom-8 right-8 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center z-40 transition-transform hover:scale-110"
+          title="Crear tarea rápida (Ctrl+N)"
+        >
+          <Plus className="w-7 h-7" />
+        </button>
+      )}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Tareas</h1>
@@ -1403,21 +1973,60 @@ function Tasks() {
         <div className="flex gap-2">
         {isAdmin && (
             <>
- 
+          <button
+            onClick={() => setShowSupervisionTaskModal(true)}
+            className="bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 flex items-center gap-2"
+            title="Crear tarea de supervisión con checkpoints diarios en un solo paso"
+          >
+            <Sparkles className="w-5 h-5" />
+            Tarea supervisión
+          </button>
+          <button
+            onClick={() => setShowSelectTaskForDailyModal(true)}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 flex items-center gap-2"
+            title="Añadir subtareas diarias a una tarea existente"
+          >
+            <CalendarDays className="w-5 h-5" />
+            Subtareas diarias
+          </button>
           <button
             onClick={() => {
-              console.log('Opening modal, current state:', {
-                showModal: false,
-                newTask,
-                users,
-              });
-              setShowModal(true);
-              console.log('Modal opened, new state:', {
-                showModal: true,
-                newTask,
-                users,
-              });
+              setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
+              setShowQuickCreateModal(true);
             }}
+            className="bg-indigo-500 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Crear rápida
+          </button>
+          <button
+            onClick={() => csvInputRef.current?.click()}
+            className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center gap-2"
+          >
+            <Upload className="w-5 h-5" />
+            Importar CSV
+          </button>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleCsvFileSelect}
+            className="hidden"
+          />
+          <button
+            onClick={() => {
+              setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
+              setBulkProjectId(null);
+              setBulkDeadline(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+              setShowBulkCreateModal(true);
+            }}
+            className="bg-indigo-500/80 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Crear varias
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
             className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
           >
             <Plus className="w-5 h-5 mr-2" />
@@ -1958,6 +2567,253 @@ function Tasks() {
       )}
 
 
+      {/* Modal Importar CSV */}
+      {showCsvImportModal && csvImportData.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleCsvImport} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b">
+              <h2 className="text-lg font-semibold">Importar desde CSV</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {csvImportData.length} filas detectadas. Columnas: titulo, duracion, asignado (email), fecha_limite
+              </p>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Proyecto para todas las tareas *</label>
+                <select
+                  value={csvImportProject || ''}
+                  onChange={(e) => setCsvImportProject(e.target.value || null)}
+                  className="w-full p-2 border rounded-lg"
+                  required
+                >
+                  <option value="">Seleccionar</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="max-h-48 overflow-y-auto border rounded-lg p-2 text-sm">
+                {csvImportData.slice(0, 20).map((r, i) => (
+                  <div key={i} className="flex gap-2 py-1">
+                    <span className="flex-1 truncate">{r.title || '(sin título)'}</span>
+                    <span className="text-gray-500">{r.duration}min</span>
+                    <span className="text-gray-500 truncate w-24">{r.assignee || '—'}</span>
+                  </div>
+                ))}
+                {csvImportData.length > 20 && (
+                  <p className="text-gray-500 py-2">... y {csvImportData.length - 20} más</p>
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button type="button" onClick={() => { setShowCsvImportModal(false); setCsvImportData([]); }} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                Cancelar
+              </button>
+              <button type="submit" disabled={importingCsv} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {importingCsv ? 'Importando...' : `Importar ${csvImportData.filter((r) => r.title?.trim()).length} tareas`}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Crear varias tareas */}
+      {showBulkCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleBulkCreateTasks} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b">
+              <h2 className="text-lg font-semibold">Crear varias tareas</h2>
+              <p className="text-sm text-gray-500 mt-0.5">Añade filas y crea todas a la vez</p>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Proyecto *</label>
+                  <select
+                    value={bulkProjectId || ''}
+                    onChange={(e) => setBulkProjectId(e.target.value || null)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    required
+                  >
+                    <option value="">Seleccionar</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Fecha límite</label>
+                  <input
+                    type="datetime-local"
+                    value={bulkDeadline}
+                    onChange={(e) => setBulkDeadline(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex text-xs font-medium text-gray-500">
+                  <span className="flex-1">Título</span>
+                  <span className="w-20">Duración</span>
+                  <span className="w-36">Asignar a</span>
+                  <span className="w-8" />
+                </div>
+                {bulkTasks.map((row, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={row.title}
+                      onChange={(e) => {
+                        const next = [...bulkTasks];
+                        next[i] = { ...next[i], title: e.target.value };
+                        setBulkTasks(next);
+                      }}
+                      placeholder="Título de la tarea"
+                      className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                    />
+                    <input
+                      type="number"
+                      min={5}
+                      value={row.duration}
+                      onChange={(e) => {
+                        const next = [...bulkTasks];
+                        next[i] = { ...next[i], duration: Number(e.target.value) || 60 };
+                        setBulkTasks(next);
+                      }}
+                      className="w-20 px-2 py-2 border rounded-lg text-sm"
+                    />
+                    <select
+                      value={row.assignee}
+                      onChange={(e) => {
+                        const next = [...bulkTasks];
+                        next[i] = { ...next[i], assignee: e.target.value };
+                        setBulkTasks(next);
+                      }}
+                      className="w-36 px-2 py-2 border rounded-lg text-sm"
+                    >
+                      <option value="">Yo</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setBulkTasks((p) => p.filter((_, j) => j !== i))}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setBulkTasks((p) => [...p, { title: '', duration: 60, assignee: '' }])}
+                  className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800"
+                >
+                  <Plus className="w-4 h-4" />
+                  Añadir fila
+                </button>
+              </div>
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button type="button" onClick={() => setShowBulkCreateModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                Cancelar
+              </button>
+              <button type="submit" disabled={creatingBulk} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {creatingBulk ? 'Creando...' : `Crear ${bulkTasks.filter((t) => t.title?.trim()).length} tareas`}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Crear rápida */}
+      {showQuickCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleQuickCreateTask} className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+            <div className="p-5 border-b">
+              <h2 className="text-lg font-semibold text-gray-800">Crear tarea rápida</h2>
+              <p className="text-sm text-gray-500 mt-0.5">Título, proyecto y fecha límite</p>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Título *</label>
+                <input
+                  type="text"
+                  value={quickTask.title}
+                  onChange={(e) => setQuickTask((p) => ({ ...p, title: e.target.value }))}
+                  placeholder="Nombre de la tarea"
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Proyecto *</label>
+                <select
+                  value={quickTask.project_id || ''}
+                  onChange={(e) => {
+                    const id = e.target.value || null;
+                    const proj = projects.find((p) => p.id === id);
+                    setQuickTask((p) => ({
+                      ...p,
+                      project_id: id,
+                      deadline: proj?.deadline ? proj.deadline.replace(' ', 'T').slice(0, 16) : p.deadline,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  required
+                >
+                  <option value="">Seleccionar</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Asignar a</label>
+                <select
+                  value={quickTask.assigned_to || ''}
+                  onChange={(e) => setQuickTask((p) => ({ ...p, assigned_to: e.target.value || null }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                >
+                  <option value="">Yo</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Fecha límite</label>
+                <input
+                  type="datetime-local"
+                  value={quickTask.deadline}
+                  onChange={(e) => setQuickTask((p) => ({ ...p, deadline: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t flex justify-between items-center">
+              <button
+                type="button"
+                onClick={openFullCreateFromQuick}
+                className="text-sm text-indigo-600 hover:text-indigo-800"
+              >
+                Expandir →
+              </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowQuickCreateModal(false)} className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+                  Cancelar
+                </button>
+                <button type="submit" className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                  Crear
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
@@ -2042,6 +2898,40 @@ function Tasks() {
                       </select>
                     </div>
                     
+                    {taskTemplates.length > 0 && (
+                      <div className="mb-4 pt-4 border-t border-indigo-100">
+                        <p className="text-sm font-medium text-indigo-700 mb-2">O crear desde plantilla de tarea</p>
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedTaskTemplateId || ''}
+                            onChange={(e) => setSelectedTaskTemplateId(e.target.value || null)}
+                            className="flex-1 p-2 border rounded-md text-sm"
+                          >
+                            <option value="">Seleccionar plantilla...</option>
+                            {taskTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>{t.name} ({t.title})</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!newTask.project_id || !selectedTaskTemplateId) {
+                                toast.error('Selecciona proyecto y plantilla');
+                                return;
+                              }
+                              const proj = projects.find((p) => p.id === newTask.project_id);
+                              const start = proj?.start_date?.replace?.(' ', 'T')?.slice(0, 16) || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                              const end = proj?.deadline?.replace?.(' ', 'T')?.slice(0, 16) || format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm");
+                              handleCreateFromTaskTemplate(newTask.project_id, start, end);
+                            }}
+                            disabled={!newTask.project_id || !selectedTaskTemplateId}
+                            className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 text-sm"
+                          >
+                            Crear desde plantilla
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-end">
                       <button
                         type="button"
@@ -3202,16 +4092,278 @@ function Tasks() {
                       Cerrar
                     </button>
                     {isAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => setEditMode(true)}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                      >
-                        Editar
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewTemplateName(selectedTask.title);
+                            setShowSaveTemplateModal(true);
+                          }}
+                          className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                        >
+                          Guardar como plantilla
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDuplicateTask}
+                          className="px-4 py-2 border border-indigo-300 text-indigo-700 rounded-md hover:bg-indigo-50"
+                        >
+                          Duplicar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditMode(true)}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                        >
+                          Editar
+                        </button>
+                      </>
                     )}
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Guardar tarea como plantilla */}
+      {showSaveTemplateModal && selectedTask && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[70]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold mb-2">Guardar como plantilla</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Se guardará la estructura de &quot;{selectedTask.title}&quot; como plantilla reutilizable.
+            </p>
+            <input
+              type="text"
+              value={newTemplateName}
+              onChange={(e) => setNewTemplateName(e.target.value)}
+              placeholder="Nombre de la plantilla"
+              className="w-full px-3 py-2 border rounded-lg mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowSaveTemplateModal(false); setNewTemplateName(''); }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTaskAsTemplate}
+                disabled={savingAsTemplate}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {savingAsTemplate ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Crear tarea de supervisión (tarea + diarias en un paso) */}
+      {showSupervisionTaskModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
+          <form onSubmit={handleCreateSupervisionTask} className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="bg-gradient-to-r from-teal-600 to-cyan-600 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white">
+                  <Sparkles className="w-6 h-6" />
+                  <h2 className="text-lg font-semibold">Crear tarea de supervisión</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSupervisionTaskModal(false)}
+                  className="text-white/80 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-teal-100 text-sm mt-1">
+                Crea la tarea padre y sus checkpoints diarios en un solo paso.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Proyecto *</label>
+                <select
+                  value={supervisionTaskConfig.project_id}
+                  onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, project_id: e.target.value }))}
+                  className="w-full p-2 border rounded-lg"
+                  required
+                >
+                  <option value="">Seleccionar proyecto</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Título *</label>
+                <input
+                  type="text"
+                  value={supervisionTaskConfig.title}
+                  onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, title: e.target.value }))}
+                  placeholder="Ej: Revisión embudo diaria"
+                  className="w-full p-2 border rounded-lg"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha inicio</label>
+                  <input
+                    type="date"
+                    value={supervisionTaskConfig.startDate}
+                    onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, startDate: e.target.value }))}
+                    className="w-full p-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha fin</label>
+                  <input
+                    type="date"
+                    value={supervisionTaskConfig.endDate}
+                    onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, endDate: e.target.value }))}
+                    className="w-full p-2 border rounded-lg"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Asignar a</label>
+                  <select
+                    value={supervisionTaskConfig.assignee}
+                    onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, assignee: e.target.value }))}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="">Yo</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duración (min/día)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={480}
+                    value={supervisionTaskConfig.duration}
+                    onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, duration: Number(e.target.value) || 15 }))}
+                    className="w-full p-2 border rounded-lg"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={supervisionTaskConfig.includeWeekends}
+                  onChange={(e) => setSupervisionTaskConfig((p) => ({ ...p, includeWeekends: e.target.checked }))}
+                  className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span className="text-sm text-gray-700">Incluir fines de semana</span>
+              </label>
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                {(() => {
+                  const dates = getDailyDates(supervisionTaskConfig.startDate, supervisionTaskConfig.endDate, supervisionTaskConfig.includeWeekends);
+                  return (
+                    <p className="text-gray-600">
+                      Se crearán <strong>1 tarea</strong> + <strong>{dates.length} subtareas</strong> diarias
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSupervisionTaskModal(false)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={creatingSupervision}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-2"
+              >
+                {creatingSupervision ? 'Creando...' : 'Crear'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal seleccionar tarea para subtareas diarias (acceso directo) */}
+      {showSelectTaskForDailyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white">
+                  <CalendarDays className="w-6 h-6" />
+                  <h2 className="text-lg font-semibold">Generar subtareas diarias</h2>
+                </div>
+                <button
+                  onClick={() => setShowSelectTaskForDailyModal(false)}
+                  className="text-white/80 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-emerald-100 text-sm mt-1">
+                Selecciona la tarea a la que añadir checkpoints diarios (supervisión, revisiones, etc.)
+              </p>
+            </div>
+            <div className="p-6 max-h-[60vh] overflow-y-auto">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Proyecto (opcional)</label>
+                <select
+                  value={dailyModalProjectFilter || ''}
+                  onChange={(e) => setDailyModalProjectFilter(e.target.value || null)}
+                  className="w-full p-2 border rounded-lg"
+                >
+                  <option value="">Todos los proyectos</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Tarea padre</label>
+                <div className="space-y-1 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                  {tasksForDailyModal
+                    .filter((t) => !dailyModalProjectFilter || t.project_id === dailyModalProjectFilter)
+                    .map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTask(t);
+                          setDailySubtaskConfig((prev) => ({
+                            ...prev,
+                            startDate: t.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
+                            endDate: t.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
+                            titlePrefix: t.title?.slice(0, 40) || '',
+                          }));
+                          setShowSelectTaskForDailyModal(false);
+                          setShowGenerateDailyModal(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-md hover:bg-emerald-50 hover:border-emerald-200 border border-transparent transition-colors flex justify-between items-center"
+                      >
+                        <span className="font-medium text-gray-800 truncate flex-1">{t.title}</span>
+                        <span className="text-xs text-gray-500 ml-2 shrink-0">
+                          {projects.find((p) => p.id === t.project_id)?.name || 'Sin proyecto'}
+                        </span>
+                      </button>
+                    ))}
+                  {tasksForDailyModal.filter((t) => !dailyModalProjectFilter || t.project_id === dailyModalProjectFilter).length === 0 && (
+                    <p className="text-gray-500 text-sm py-4 text-center">No hay tareas activas para seleccionar.</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
