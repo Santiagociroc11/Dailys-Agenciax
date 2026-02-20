@@ -609,8 +609,9 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const users = await User.find({ id: { $in: userIds } }).select('id name').lean().exec();
       const userMap = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
 
-      data = (logs as { user_id: string; entity_type: string; entity_id: string; action: string; field_name?: string; summary?: string; createdAt: string }[]).map((l) => ({
+      data = (logs as { id?: string; user_id: string; entity_type: string; entity_id: string; action: string; field_name?: string; summary?: string; createdAt: Date }[]).map((l) => ({
         ...l,
+        createdAt: l.createdAt instanceof Date ? l.createdAt.toISOString() : String(l.createdAt),
         user_name: userMap.get(l.user_id) || 'Desconocido',
       }));
     } else if (fn === 'get_cost_by_user') {
@@ -625,7 +626,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         {
           $match: {
             date: { $gte: startDate, $lte: endDate },
-            actual_duration: { $exists: true, $ne: null, $gt: 0 },
+            actual_duration: { $exists: true, $ne: null, $gt: 0 } as Record<string, unknown>,
           },
         },
         {
