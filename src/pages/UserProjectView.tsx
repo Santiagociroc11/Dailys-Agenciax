@@ -681,36 +681,24 @@ export default function UserProjectView() {
          const { data: allSubtasksData, error: allSubtasksError } = await allSubtasksQ;
          if (allSubtasksError) throw allSubtasksError;
 
-         // 4️⃣ Obtener tareas padre para subtareas (MongoDB no hace joins, s.tasks viene vacío)
-         const parentTaskIds = new Set<string>();
-         allSubtasksData?.forEach((s) => s.task_id && parentTaskIds.add(s.task_id));
-         const parentTaskIdsArr = Array.from(parentTaskIds);
-         const { data: parentTasksData } =
-            parentTaskIdsArr.length > 0
-               ? await supabase.from("tasks").select("id, title, project_id, is_sequential").in("id", parentTaskIdsArr)
-               : { data: [] as { id: string; title: string; project_id: string | null; is_sequential: boolean }[] };
-         const parentTaskMap: Record<string, { id: string; title: string; project_id: string | null; is_sequential: boolean }> = {};
-         (parentTasksData || []).forEach((t) => (parentTaskMap[t.id] = t));
-
-         // 5️⃣ Construir Set de project_ids para luego pedir sus nombres
+         // 4️⃣ Construir Set de project_ids para luego pedir sus nombres (tasks/projects vienen del $lookup)
          const projectIds = new Set<string>();
          allTasksData?.forEach((t) => {
             if (t.project_id) projectIds.add(t.project_id);
          });
          allSubtasksData?.forEach((s) => {
-            const parent = parentTaskMap[s.task_id];
-            const pid = parent?.project_id ?? s.tasks?.project_id;
+            const pid = s.tasks?.project_id ?? (s.tasks as { project_id?: string })?.project_id;
             if (pid) projectIds.add(pid);
          });
 
-         // 6️⃣ Cargar nombre de cada proyecto
+         // 5️⃣ Cargar nombre de cada proyecto
          const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
          if (projectsError) console.error("Error cargando proyectos:", projectsError);
 
          const projectMap: Record<string, string> = {};
          projects?.forEach((p) => (projectMap[p.id] = p.name));
 
-         // 6️⃣ Subtareas asignadas al usuario - excluyendo proyectos archivados
+         // 6️⃣ Subtareas asignadas al usuario (tasks/projects vienen del $lookup) - excluyendo proyectos archivados
          let subtaskDataQ = supabase
             .from("subtasks")
             .select(
@@ -737,19 +725,19 @@ export default function UserProjectView() {
          allSubtasksData?.forEach((s) => tasksWithSubs.add(s.task_id));
          const tasksWithoutSubs = taskData?.filter((t) => !tasksWithSubs.has(t.id)) || [];
 
-         // 8️⃣ Agrupar las subtareas del usuario por tarea padre
+         // 8️⃣ Agrupar las subtareas del usuario por tarea padre (tasks viene del $lookup)
          const grouped: Record<string, Subtask[]> = {};
          subtaskData?.forEach((s) => {
             if (!grouped[s.task_id]) grouped[s.task_id] = [];
-            const parentTask = parentTaskMap[s.task_id];
-            grouped[s.task_id].push({ ...s, task_title: parentTask?.title || s.tasks?.title || "—", tasks: parentTask ? { ...s.tasks, id: parentTask.id, title: parentTask.title, project_id: parentTask.project_id, is_sequential: parentTask.is_sequential } : s.tasks });
+            const taskInfo = s.tasks as { id?: string; title?: string; project_id?: string; is_sequential?: boolean } | undefined;
+            grouped[s.task_id].push({ ...s, task_title: taskInfo?.title || "—", tasks: s.tasks });
          });
 
          // 9️⃣ Seleccionar sólo las subtareas relevantes (siguiente si es secuencial, todas si no)
          const relevantSubs: Subtask[] = [];
          Object.entries(grouped).forEach(([taskId, subs]) => {
-            const parentTask = parentTaskMap[taskId];
-            const isSequential = parentTask?.is_sequential ?? subs[0].tasks?.is_sequential;
+            const taskInfo = subs[0].tasks as { is_sequential?: boolean } | undefined;
+            const isSequential = taskInfo?.is_sequential ?? subs[0].tasks?.is_sequential;
             if (isSequential) {
                const allForThis = allSubtasksData!.filter((x) => x.task_id === taskId).sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
 
@@ -820,7 +808,10 @@ export default function UserProjectView() {
          });
 
          // Resumen final
-         const sequentialSubs = relevantSubs.filter((s) => parentTaskMap[s.task_id]?.is_sequential ?? s.tasks?.is_sequential);
+         const sequentialSubs = relevantSubs.filter((s) => {
+            const t = s.tasks as { is_sequential?: boolean } | undefined;
+            return t?.is_sequential ?? s.tasks?.is_sequential;
+         });
          if (sequentialSubs.length > 0) {
             console.log(
                `[SECUENCIAL] Subtareas secuenciales relevantes para el usuario:`,
@@ -830,13 +821,13 @@ export default function UserProjectView() {
 
          // 🔟 Mapear subtareas a Task[]
          const subtasksAsTasks: Task[] = relevantSubs.map((s) => {
-            const parent = parentTaskMap[s.task_id];
-            const projectId = parent?.project_id ?? s.tasks?.project_id ?? "";
+            const taskInfo = s.tasks as { project_id?: string; title?: string } | undefined;
+            const projectId = taskInfo?.project_id ?? s.tasks?.project_id ?? "";
             return {
                id: `subtask-${s.id}`,
                original_id: s.id,
                title: s.title,
-               subtask_title: parent?.title ?? s.tasks?.title ?? "—",
+               subtask_title: taskInfo?.title ?? s.tasks?.title ?? "—",
                description: s.description,
                priority: "medium",
                estimated_duration: s.estimated_duration,

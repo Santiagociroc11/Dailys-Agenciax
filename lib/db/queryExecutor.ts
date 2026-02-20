@@ -1,6 +1,7 @@
 import type { QueryRequest, QueryResponse } from './types.js';
 import { getModel } from './models.js';
 import { buildMongoFilter, buildProjection } from './queryBuilder.js';
+import { hasJoinSyntax, buildAggregationPipeline } from './aggregationBuilder.js';
 
 const JOIN_RELATIONS: Record<string, Record<string, { table: string; localField: string; foreignField: string }>> = {
   tasks: { projects: { table: 'projects', localField: 'project_id', foreignField: 'id' } },
@@ -35,11 +36,21 @@ export async function executeQuery<T = unknown>(
         filters = { ...filters, ...resolved };
       }
     }
+    if (request.filters?.in) {
+      const resolved = await resolveJoinFiltersForIn(
+        request.table,
+        request.filters.in as Record<string, unknown[]>
+      );
+      if (Object.keys(resolved).length > 0) {
+        filters = { ...filters, ...resolved };
+      }
+    }
     const projection = buildProjection(request.select);
+    const useAggregation = hasJoinSyntax(request.select);
 
     switch (request.operation) {
       case 'select':
-        return (await executeSelect(model, request, filters, projection)) as QueryResponse<T>;
+        return (await executeSelect(model, request, filters, projection, useAggregation)) as QueryResponse<T>;
       case 'insert':
         return (await executeInsert(model, request)) as QueryResponse<T>;
       case 'update':
@@ -67,11 +78,25 @@ export async function executeQuery<T = unknown>(
 }
 
 async function executeSelect(
-  model: { find: Function; findOne: Function },
+  model: { find: Function; findOne: Function; aggregate: Function },
   request: QueryRequest,
   filters: Record<string, unknown>,
-  projection: Record<string, number> | null
+  projection: Record<string, number> | null,
+  useAggregation = false
 ): Promise<QueryResponse> {
+  if (useAggregation && !request.single) {
+    const pipeline = buildAggregationPipeline(
+      request.table,
+      request.select,
+      filters as import('mongoose').FilterQuery<unknown>,
+      request.order,
+      request.limit,
+      request.offset
+    );
+    const data = await model.aggregate(pipeline).exec();
+    return { data: Array.isArray(data) ? data : [], error: null };
+  }
+
   let query = request.single
     ? model.findOne(filters)
     : model.find(filters);
@@ -212,12 +237,21 @@ function getUniqueKeysFromConflict(onConflict?: string): string[] {
 }
 
 function stripJoinFilters(filters: NonNullable<QueryRequest['filters']>): typeof filters {
-  if (!filters.eq) return filters;
-  const eq = { ...filters.eq };
-  for (const key of Object.keys(eq)) {
-    if (key.includes('.')) delete eq[key];
+  let eq = filters.eq ? { ...filters.eq } : undefined;
+  let inFilter = filters.in ? { ...filters.in } : undefined;
+  if (eq) {
+    for (const key of Object.keys(eq)) {
+      if (key.includes('.')) delete eq[key];
+    }
+    eq = Object.keys(eq).length > 0 ? eq : undefined;
   }
-  return { ...filters, eq: Object.keys(eq).length > 0 ? eq : undefined };
+  if (inFilter) {
+    for (const key of Object.keys(inFilter)) {
+      if (key.includes('.')) delete inFilter[key];
+    }
+    inFilter = Object.keys(inFilter).length > 0 ? inFilter : undefined;
+  }
+  return { ...filters, eq, in: inFilter };
 }
 
 async function resolveJoinFilters(
@@ -256,6 +290,64 @@ async function resolveJoinFilters(
         if (projectModel && taskModel) {
           const projects = await projectModel
             .find({ [field]: value })
+            .select('id')
+            .lean()
+            .exec();
+          const projectIds = projects.map((p: Record<string, unknown>) => p.id).filter(Boolean);
+          if (projectIds.length > 0) {
+            const tasks = await taskModel
+              .find({ project_id: { $in: projectIds } })
+              .select('id')
+              .lean()
+              .exec();
+            const taskIds = tasks.map((t: Record<string, unknown>) => t.id).filter(Boolean);
+            result['task_id'] = taskIds.length > 0 ? { $in: taskIds } : { $in: [] };
+          } else {
+            result['task_id'] = { $in: [] };
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+async function resolveJoinFiltersForIn(
+  table: string,
+  inFilter: Record<string, unknown[]>
+): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, values] of Object.entries(inFilter)) {
+    if (!key.includes('.') || !Array.isArray(values) || values.length === 0) continue;
+
+    const parts = key.split('.');
+    if (parts.length === 2) {
+      const [relationName, field] = parts;
+      const relations = JOIN_RELATIONS[table];
+      const relation = relations?.[relationName];
+      if (relation) {
+        const relatedModel = getModel(relation.table);
+        if (relatedModel) {
+          const docs = await relatedModel
+            .find({ [field]: { $in: values } })
+            .select(relation.foreignField)
+            .lean()
+            .exec();
+          const ids = docs
+            .map((d: Record<string, unknown>) => d[relation.foreignField])
+            .filter(Boolean);
+          result[relation.localField] = ids.length > 0 ? { $in: ids } : { $in: [] };
+        }
+      }
+    } else if (parts.length === 3) {
+      const [rel1, rel2, field] = parts;
+      if (table === 'subtasks' && rel1 === 'tasks' && rel2 === 'projects') {
+        const projectModel = getModel('projects');
+        const taskModel = getModel('tasks');
+        if (projectModel && taskModel) {
+          const projects = await projectModel
+            .find({ [field]: { $in: values } })
             .select('id')
             .lean()
             .exec();
