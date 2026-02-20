@@ -1,7 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
-import { Database } from './database.types';
+/**
+ * Cliente de base de datos compatible con la API de Supabase.
+ * Usa MongoDB en el backend a través de /api/db/query.
+ */
+import { db } from './dbClient.js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+export const supabase = db;

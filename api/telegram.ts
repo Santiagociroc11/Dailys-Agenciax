@@ -70,20 +70,9 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
   blockedAt?: string;
 }> {
   try {
-    const { createClient } = await import('@supabase/supabase-js');
-    
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Variables de entorno de Supabase no configuradas');
-      return {};
-    }
+    const { db } = await import('../lib/db/serverDb.js');
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    // Obtener historial de estados
-    const { data: history, error } = await supabase
+    const { data: history, error } = await db
       .from('status_history')
       .select('*')
       .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
@@ -178,7 +167,7 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
     // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
     if (!timeInfo.assignedAt || !timeInfo.completedAt) {
       try {
-        const { data: workData, error: workError } = await supabase
+        const { data: workData, error: workError } = await db
           .from('task_work_assignments')
           .select('date, created_at, end_time, status, updated_at')
           .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
@@ -293,28 +282,16 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
 // Función para obtener el ID de chat de admin desde app_settings
 export async function getAdminTelegramId(): Promise<string | null> {
   try {
-    // Usando import dinámico para evitar problemas de dependencias circulares
-    const { createClient } = await import('@supabase/supabase-js');
-    
-    // En el servidor, usar las variables sin prefijo VITE_
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Variables de entorno de Supabase no configuradas');
-      return null;
-    }
+    const { db } = await import('../lib/db/serverDb.js');
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('app_settings')
       .select('value')
       .eq('key', 'admin_telegram_chat_id')
       .single();
 
     if (error) {
-      if (error.code !== 'PGRST116') { // Ignorar "no rows found"
+      if (error.message && !error.message.includes('no rows')) {
         console.error('Error al obtener ID de admin de Telegram:', error);
       }
       return null;
@@ -687,20 +664,9 @@ export async function notifyUsersTaskInReview(
   }
 
   try {
-    const { createClient } = await import('@supabase/supabase-js');
-    
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Variables de entorno de Supabase no configuradas');
-      return 0;
-    }
+    const { db } = await import('../lib/db/serverDb.js');
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    // Obtener usuarios con telegram_chat_id
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await db
       .from('users')
       .select('id, telegram_chat_id, name, email')
       .in('id', userIds)
@@ -753,20 +719,9 @@ export async function notifyTaskAvailable(
   parentTaskTitle?: string
 ): Promise<boolean> {
   try {
-    const { createClient } = await import('@supabase/supabase-js');
-    
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Variables de entorno de Supabase no configuradas');
-      return false;
-    }
+    const { db } = await import('../lib/db/serverDb.js');
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-    // Obtener telegram_chat_id del usuario
-    const { data: userData, error: userError } = await supabase
+    const { data: userData, error: userError } = await db
       .from('users')
       .select('telegram_chat_id, name, email')
       .eq('id', userId)

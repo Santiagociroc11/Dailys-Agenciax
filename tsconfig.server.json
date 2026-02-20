@@ -12,6 +12,6 @@
     "allowJs": true,
     "resolveJsonModule": true
   },
-  "include": ["server.ts", "api/**/*.ts"],
+  "include": ["server.ts", "api/**/*.ts", "lib/**/*.ts", "models/**/*.ts"],
   "exclude": ["node_modules", "dist", "src"]
 }

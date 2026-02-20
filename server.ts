@@ -1,6 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { connectDB } from './lib/mongoose.js';
+import { handleDbQuery, handleDbRpc } from './api/db.js';
 import { 
   handleTestNotification, 
   sendAdminNotification, 
@@ -24,6 +27,10 @@ app.use(express.json());
 // Obtener __dirname en módulos ES
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// API de base de datos (MongoDB)
+app.post('/api/db/query', handleDbQuery);
+app.post('/api/db/rpc', handleDbRpc);
 
 // Endpoint para notificaciones de prueba
 app.post('/api/telegram/test', handleTestNotification);
@@ -334,6 +341,13 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
-}); 
+connectDB()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ Error conectando a MongoDB:', err);
+    process.exit(1);
+  }); 
