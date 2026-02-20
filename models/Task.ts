@@ -15,6 +15,7 @@ const taskSchema = new mongoose.Schema(
     created_by: { type: String, required: true, ref: 'User' },
     assigned_users: { type: [String], default: [] },
     project_id: { type: String, default: null, ref: 'Project' },
+    phase_id: { type: String, default: null, ref: 'Phase' },
     status: { type: String, required: true, default: 'pending' },
     status_history: { type: mongoose.Schema.Types.Mixed, default: [] },
     review_comments: { type: String, default: null },
@@ -52,6 +53,7 @@ const taskSchema = new mongoose.Schema(
 );
 
 taskSchema.index({ project_id: 1 });
+taskSchema.index({ project_id: 1, phase_id: 1 });
 taskSchema.index({ status: 1 });
 
 registerTaskHooks(taskSchema);

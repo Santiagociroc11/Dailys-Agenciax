@@ -36,6 +36,7 @@ interface Task {
   created_at: string;
   created_by: string;
   project_id: string | null;
+  phase_id?: string | null;
   status?: string;
   assigned_to?: string;
   assigned_users?: string[];
@@ -75,6 +76,7 @@ interface NewTask {
   estimated_duration: number;
   priority: 'low' | 'medium' | 'high';
   is_sequential: boolean;
+  phase_id: string | null;
   assigned_to: string[];
   subtasks: {
     title: string;
@@ -104,6 +106,8 @@ function Tasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
+  const [filterPhases, setFilterPhases] = useState<{ id: string; name: string; order: number }[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
@@ -132,10 +136,13 @@ function Tasks() {
     estimated_duration: 30,
     priority: 'medium',
     is_sequential: false,
+    phase_id: null,
     assigned_to: [],
     subtasks: [],
     project_id: null,
   });
+  const [phases, setPhases] = useState<{ id: string; name: string; order: number }[]>([]);
+  const [editPhases, setEditPhases] = useState<{ id: string; name: string; order: number }[]>([]);
   const [error, setError] = useState('');
   const [showGenerateDailyModal, setShowGenerateDailyModal] = useState(false);
   const [dailySubtaskConfig, setDailySubtaskConfig] = useState({
@@ -222,6 +229,57 @@ function Tasks() {
   }, []);
 
   useEffect(() => {
+    async function fetchPhases() {
+      if (!newTask.project_id) {
+        setPhases([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('phases')
+        .select('id, name, order')
+        .eq('project_id', newTask.project_id)
+        .order('order', { ascending: true });
+      setPhases((data || []) as { id: string; name: string; order: number }[]);
+    }
+    fetchPhases();
+  }, [newTask.project_id]);
+
+  useEffect(() => {
+    async function loadFilterPhases() {
+      if (!selectedProject) {
+        setFilterPhases([]);
+        setSelectedPhase(null);
+        return;
+      }
+      const { data } = await supabase
+        .from('phases')
+        .select('id, name, order')
+        .eq('project_id', selectedProject)
+        .order('order', { ascending: true });
+      setFilterPhases((data || []) as { id: string; name: string; order: number }[]);
+      setSelectedPhase(null);
+    }
+    loadFilterPhases();
+  }, [selectedProject]);
+
+  useEffect(() => {
+    async function fetchEditPhases() {
+      const projectId = selectedTask?.project_id || editedTask?.project_id;
+      if (!projectId) {
+        setEditPhases([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('phases')
+        .select('id, name, order')
+        .eq('project_id', projectId)
+        .order('order', { ascending: true });
+      setEditPhases((data || []) as { id: string; name: string; order: number }[]);
+    }
+    fetchEditPhases();
+  }, [selectedTask?.project_id, editedTask?.project_id]);
+
+  useEffect(() => {
     if (showSelectTaskForDailyModal) {
       async function fetchForModal() {
         try {
@@ -248,7 +306,7 @@ function Tasks() {
 
   useEffect(() => {
     setCurrentPage(1); // Resetear a la primera página cuando cambie el filtro
-  }, [selectedProject, searchTerm, activeTab]);
+  }, [selectedProject, selectedPhase, searchTerm, activeTab]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -328,6 +386,9 @@ function Tasks() {
       if (selectedProject) {
         countQuery = countQuery.eq('project_id', selectedProject);
       }
+      if (selectedPhase) {
+        countQuery = countQuery.eq('phase_id', selectedPhase);
+      }
 
       if (searchTerm.trim()) {
         countQuery = countQuery.or(`title.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
@@ -350,6 +411,9 @@ function Tasks() {
       
       if (selectedProject) {
         allTasksQuery = allTasksQuery.eq('project_id', selectedProject);
+      }
+      if (selectedPhase) {
+        allTasksQuery = allTasksQuery.eq('phase_id', selectedPhase);
       }
 
       if (searchTerm.trim()) {
@@ -622,7 +686,8 @@ function Tasks() {
         is_sequential: taskToCreate.is_sequential,
         created_by: user.id,
         assigned_users: finalAssignedUsers, // Use the determined assignees
-        project_id: taskToCreate.project_id
+        project_id: taskToCreate.project_id,
+        phase_id: taskToCreate.phase_id || null,
       };
 
       console.log("Enviando datos de tarea:", taskData);
@@ -995,6 +1060,7 @@ function Tasks() {
           priority: editedTask.priority,
           is_sequential: editedTask.is_sequential,
           project_id: editedTask.project_id,
+          phase_id: editedTask.phase_id ?? null,
           assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
@@ -1393,6 +1459,7 @@ function Tasks() {
         estimated_duration: 30,
         priority: 'medium',
         is_sequential: false,
+        phase_id: null,
         assigned_to: [],
         subtasks: [],
         project_id: null,
@@ -1760,6 +1827,7 @@ function Tasks() {
           priority: editedTask.priority,
           is_sequential: editedTask.is_sequential,
           project_id: editedTask.project_id,
+          phase_id: editedTask.phase_id ?? null,
           assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
@@ -2079,9 +2147,25 @@ function Tasks() {
                   </option>
                 ))}
               </select>
+              {filterPhases.length > 0 && (
+                <>
+                  <label className="text-sm font-medium text-gray-700">Fase:</label>
+                  <select
+                    value={selectedPhase || ''}
+                    onChange={(e) => setSelectedPhase(e.target.value || null)}
+                    className="p-2 border rounded-md"
+                  >
+                    <option value="">Todas las fases</option>
+                    {filterPhases.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
               <button
                 onClick={() => {
                   setSelectedProject(null);
+                  setSelectedPhase(null);
                   fetchTasks();
                 }}
                 className="text-sm text-indigo-600 hover:text-indigo-800"
@@ -2148,7 +2232,34 @@ function Tasks() {
         {pageLoading && <SkeletonInline rows={3} />}
         
         {!pageLoading && tasks.length > 0 ? (
-          tasks.map((task) => (
+          (() => {
+            const phaseMap = new Map(filterPhases.map((p) => [p.id, { name: p.name, order: p.order }]));
+            const grouped = new Map<string, typeof tasks>();
+            const NO_PHASE = '__no_phase__';
+            tasks.forEach((task) => {
+              const key = task.phase_id || NO_PHASE;
+              if (!grouped.has(key)) grouped.set(key, []);
+              grouped.get(key)!.push(task);
+            });
+            const phaseOrder = [...filterPhases].sort((a, b) => a.order - b.order);
+            const sections = phaseOrder.map((p) => ({ key: p.id, label: p.name, tasks: grouped.get(p.id) || [] }))
+              .filter((s) => s.tasks.length > 0);
+            const noPhaseTasks = grouped.get(NO_PHASE) || [];
+            if (noPhaseTasks.length > 0) {
+              sections.push({ key: NO_PHASE, label: 'Sin fase', tasks: noPhaseTasks });
+            }
+            const toRender = filterPhases.length > 0 && sections.length > 0
+              ? sections
+              : [{ key: 'all', label: null, tasks }];
+            return toRender.map((section) => (
+              <div key={section.key}>
+                {section.label && (
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2 mt-4 first:mt-0 px-1 py-2 bg-indigo-50 rounded-md border-l-4 border-indigo-400">
+                    {section.label}
+                    <span className="ml-2 text-gray-500 font-normal">({section.tasks.length})</span>
+                  </h3>
+                )}
+                {section.tasks.map((task) => (
           <div
             key={task.id}
             className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow"
@@ -2168,6 +2279,7 @@ function Tasks() {
                         priority: task.priority,
                         is_sequential: task.is_sequential,
                         project_id: task.project_id || null,
+                        phase_id: task.phase_id ?? null,
                         status: task.status,
                         created_by: task.created_by,
                         created_at: task.created_at,
@@ -2493,7 +2605,10 @@ function Tasks() {
                 </div>
               )}
             </div>
-          ))
+          )))}
+              </div>
+            ));
+          })()
         ) : !pageLoading && (
           <div className="text-center py-12">
             <p className="text-gray-500">
@@ -2831,6 +2946,7 @@ function Tasks() {
                     estimated_duration: 30,
                     priority: 'medium',
                     is_sequential: false,
+                    phase_id: null,
                     assigned_to: [],
                     subtasks: [],
                     project_id: null,
@@ -2879,11 +2995,13 @@ function Tasks() {
                               setNewTask(prev => ({
                                 ...prev,
                                 start_date: projectStartDate.replace(" ", "T").substring(0, 16),
-                                deadline: projectEndDate.replace(" ", "T").substring(0, 16)
+                                deadline: projectEndDate.replace(" ", "T").substring(0, 16),
+                                phase_id: null,
                               }));
                             }
                           } else {
                             setSelectedProjectDates(null);
+                            setNewTask(prev => ({ ...prev, phase_id: null }));
                           }
                         }}
                         className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
@@ -2971,6 +3089,21 @@ function Tasks() {
                       </button>
                     </div>
                     
+                    {phases.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Fase</label>
+                        <select
+                          value={newTask.phase_id || ''}
+                          onChange={(e) => setNewTask({ ...newTask, phase_id: e.target.value || null })}
+                          className="w-full p-2 border rounded-md"
+                        >
+                          <option value="">Sin fase</option>
+                          {phases.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Título <span className="text-red-500">*</span>
@@ -3350,6 +3483,7 @@ function Tasks() {
                       estimated_duration: 30,
                       priority: 'medium',
                       is_sequential: false,
+                      phase_id: null,
                       assigned_to: [],
                       subtasks: [],
                       project_id: null,
@@ -4010,7 +4144,10 @@ function Tasks() {
                   {editMode ? (
                     <select
                       value={editedTask.project_id || ''}
-                      onChange={(e) => setEditedTask({ ...editedTask, project_id: e.target.value || null })}
+                      onChange={(e) => {
+                        const projectId = e.target.value || null;
+                        setEditedTask({ ...editedTask, project_id: projectId, phase_id: null });
+                      }}
                       className="w-full p-2 border rounded-md"
                       disabled={!isAdmin}
                     >
@@ -4029,6 +4166,30 @@ function Tasks() {
                     </p>
                   )}
                 </div>
+                {editPhases.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Fase</label>
+                    {editMode ? (
+                      <select
+                        value={editedTask.phase_id || ''}
+                        onChange={(e) => setEditedTask({ ...editedTask, phase_id: e.target.value || null })}
+                        className="w-full p-2 border rounded-md"
+                        disabled={!isAdmin}
+                      >
+                        <option value="">Sin fase</option>
+                        {editPhases.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="p-2 bg-gray-50 rounded-md">
+                        {selectedTask.phase_id 
+                          ? editPhases.find(p => p.id === selectedTask.phase_id)?.name
+                          : "Sin fase"}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="p-6 border-t mt-auto flex justify-between">
@@ -4058,6 +4219,7 @@ function Tasks() {
                           priority: selectedTask.priority,
                           is_sequential: selectedTask.is_sequential,
                           project_id: selectedTask.project_id || null,
+                          phase_id: selectedTask.phase_id ?? null,
                           status: selectedTask.status,
                           created_by: selectedTask.created_by,
                           created_at: selectedTask.created_at,

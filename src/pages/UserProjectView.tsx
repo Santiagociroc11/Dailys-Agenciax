@@ -31,6 +31,7 @@ interface Task {
    is_sequential: boolean;
    project_id: string;
    projectName?: string;
+   phase_id?: string | null;
    assigned_users?: string[];
    type?: "task" | "subtask";
    original_id?: string;
@@ -296,6 +297,8 @@ export default function UserProjectView() {
    const [activeGestionSubTab, setActiveGestionSubTab] = useState("en_proceso");
    const [sortBy, setSortBy] = useState<"deadline" | "priority" | "duration">("deadline");
    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+   const [selectedPhaseFilter, setSelectedPhaseFilter] = useState<string | null>(null);
+   const [phasesForProject, setPhasesForProject] = useState<{ id: string; name: string; order: number }[]>([]);
 
    // Estados para carga
    const [loading, setLoading] = useState(true);
@@ -681,7 +684,7 @@ export default function UserProjectView() {
                `
           *,
           tasks (
-            id, title, is_sequential, project_id,
+            id, title, is_sequential, project_id, phase_id,
             projects!inner(id, is_archived)
           )
         `
@@ -704,12 +707,28 @@ export default function UserProjectView() {
             if (pid) projectIds.add(pid);
          });
 
-         // 5️⃣ Cargar nombre de cada proyecto
+         // 5️⃣ Cargar nombre de cada proyecto y fases
          const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
          if (projectsError) console.error("Error cargando proyectos:", projectsError);
 
          const projectMap: Record<string, string> = {};
          projects?.forEach((p) => (projectMap[p.id] = p.name));
+
+         const phaseIds = new Set<string>();
+         allTasksData?.forEach((t) => { if (t.phase_id) phaseIds.add(t.phase_id); });
+         allSubtasksData?.forEach((s) => {
+            const phaseId = (s.tasks as { phase_id?: string })?.phase_id;
+            if (phaseId) phaseIds.add(phaseId);
+         });
+         const { data: phasesData } = phaseIds.size > 0
+            ? await supabase.from("phases").select("id, name, order, project_id").in("id", Array.from(phaseIds)).order("order", { ascending: true })
+            : { data: [] };
+         const phaseMap: Record<string, { name: string; order: number }> = {};
+         const phasesList = (phasesData || []).map((p: { id: string; name: string; order: number }) => {
+            phaseMap[p.id] = { name: p.name, order: p.order };
+            return { id: p.id, name: p.name, order: p.order };
+         }).sort((a, b) => a.order - b.order);
+         setPhasesForProject(phasesList);
 
          // 6️⃣ Subtareas asignadas al usuario (tasks/projects vienen del $lookup) - excluyendo proyectos archivados
          let subtaskDataQ = supabase
@@ -718,7 +737,7 @@ export default function UserProjectView() {
                `
           *,
           tasks!inner (
-            id, title, is_sequential, project_id,
+            id, title, is_sequential, project_id, phase_id,
             projects!inner(id, is_archived)
           )
         `
@@ -834,8 +853,9 @@ export default function UserProjectView() {
 
          // 🔟 Mapear subtareas a Task[]
          const subtasksAsTasks: Task[] = relevantSubs.map((s) => {
-            const taskInfo = s.tasks as { project_id?: string; title?: string } | undefined;
+            const taskInfo = s.tasks as { project_id?: string; title?: string; phase_id?: string } | undefined;
             const projectId = taskInfo?.project_id ?? s.tasks?.project_id ?? "";
+            const phaseId = taskInfo?.phase_id ?? (s.tasks as { phase_id?: string })?.phase_id ?? null;
             return {
                id: `subtask-${s.id}`,
                original_id: s.id,
@@ -850,6 +870,7 @@ export default function UserProjectView() {
                is_sequential: false,
                project_id: projectId,
                projectName: projectMap[projectId] || "Sin proyecto",
+               phase_id: phaseId,
                type: "subtask",
                checklist: (s.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
                comments: (s.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
@@ -870,13 +891,14 @@ export default function UserProjectView() {
             is_sequential: t.is_sequential,
             project_id: t.project_id || "",
             projectName: projectMap[t.project_id || ""] || "Sin proyecto",
+            phase_id: (t as { phase_id?: string }).phase_id ?? null,
             type: "task",
             checklist: (t.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
             comments: (t.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
          }));
 
          // 1️⃣2️⃣ Filtrar las ya asignadas hoy o solo mostrar las que están en estado 'pending'
-         const available = [...tasksAsTasks, ...subtasksAsTasks].filter((task) => {
+         let available = [...tasksAsTasks, ...subtasksAsTasks].filter((task) => {
             const key = task.type === "subtask" ? `subtask-${task.original_id}` : task.id;
             const already = dailyTasksIds?.includes(key);
             const isPending = task.status === "pending"; // Solo mostrar tareas pendientes
@@ -3888,8 +3910,26 @@ export default function UserProjectView() {
 
                {/* Opciones de ordenamiento */}
                <div className="mb-4 p-3 bg-white rounded-md shadow-sm border border-gray-200">
-                  <p className="text-sm font-medium text-gray-700 mb-2">Ordenar actividades por:</p>
-                  <div className="flex items-center flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-4">
+                     {phasesForProject.length > 0 && (
+                        <div>
+                           <p className="text-sm font-medium text-gray-700 mb-1">Filtrar por fase:</p>
+                           <select
+                              value={selectedPhaseFilter || ''}
+                              onChange={(e) => setSelectedPhaseFilter(e.target.value || null)}
+                              className="p-2 border rounded-md text-sm"
+                           >
+                              <option value="">Todas las fases</option>
+                              {phasesForProject.map((p) => (
+                                 <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                              <option value="__no_phase__">Sin fase</option>
+                           </select>
+                        </div>
+                     )}
+                     <div>
+                        <p className="text-sm font-medium text-gray-700 mb-2">Ordenar actividades por:</p>
+                        <div className="flex items-center flex-wrap gap-2">
                      <button className={`px-4 py-2 text-sm rounded-md flex items-center ${sortBy === "deadline" ? "bg-yellow-100 text-yellow-800 border border-yellow-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200"}`} onClick={() => handleSort("deadline")}>
                         Fecha límite
                         {sortBy === "deadline" && <span className="ml-1">{sortOrder === "asc" ? "↑" : "↓"}</span>}
@@ -3902,6 +3942,8 @@ export default function UserProjectView() {
                         Duración
                         {sortBy === "duration" && <span className="ml-1">{sortOrder === "asc" ? "↑" : "↓"}</span>}
                      </button>
+                        </div>
+                     </div>
                   </div>
                </div>
 
@@ -3926,7 +3968,14 @@ export default function UserProjectView() {
                            ))}
                         </div>
                      ) : isDataInitialized && taskItems.length > 0 ? (
-                        taskItems.map((task) => (
+                        (() => {
+                           const filtered = selectedPhaseFilter
+                              ? selectedPhaseFilter === "__no_phase__"
+                                 ? taskItems.filter((t) => !t.phase_id)
+                                 : taskItems.filter((t) => t.phase_id === selectedPhaseFilter)
+                              : taskItems;
+                           if (phasesForProject.length === 0) {
+                              return filtered.map((task) => (
                            <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
                               <div className="text-center">
                                  <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
@@ -3987,7 +4036,88 @@ export default function UserProjectView() {
                                  )}
                               </div>
                            </div>
-                        ))
+                        ));
+                           }
+                           const grouped = new Map<string | null, typeof filtered>();
+                           filtered.forEach((t) => {
+                              const key = t.phase_id ?? null;
+                              if (!grouped.has(key)) grouped.set(key, []);
+                              grouped.get(key)!.push(t);
+                           });
+                           const sections = phasesForProject
+                              .map((p) => ({ phase: p, tasks: grouped.get(p.id) || [] }))
+                              .filter((s) => s.tasks.length > 0);
+                           const noPhase = grouped.get(null) || [];
+                           if (noPhase.length > 0) sections.push({ phase: { id: "__no_phase__", name: "Sin fase", order: 999 }, tasks: noPhase });
+                           return sections.map((section) => (
+                              <div key={section.phase.id}>
+                                 <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-2 px-3 py-2 bg-indigo-50 rounded-md border-l-4 border-indigo-400 first:mt-0">
+                                    {section.phase.name}
+                                    <span className="ml-2 text-gray-500 font-normal">({section.tasks.length})</span>
+                                 </h3>
+                                 {section.tasks.map((task) => (
+                                    <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
+                                       <div className="text-center">
+                                          <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
+                                       </div>
+                                       <div className="text-sm text-gray-700 py-1">
+                                          {(() => {
+                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
+                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
+                                          })()}
+                                       </div>
+                                       <div className="font-medium">
+                                          {task.type === "subtask" ? (
+                                             <div>
+                                                <div className="text-sm text-gray-700 font-medium mb-1">
+                                                   <span className="inline-block mr-2">T.P:</span>
+                                                   {task.subtask_title || "Sin tarea principal"}
+                                                </div>
+                                                <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
+                                                   {task.title}
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                   <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
+                                                   {getPriorityBadge(task.priority)}
+                                                </div>
+                                             </div>
+                                          ) : (
+                                             <div>
+                                                <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
+                                                   {task.title}
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
+                                             </div>
+                                          )}
+                                       </div>
+                                       <div className="text-sm text-gray-600">
+                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
+                                       </div>
+                                       <div className="text-sm text-gray-700">
+                                          {task.start_date ? (
+                                             <>
+                                                <div>{format(new Date(task.start_date), "dd/MM/yyyy")}</div>
+                                                {getTimeIndicator(task.start_date, true).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>{getTimeIndicator(task.start_date, true).text}</div>}
+                                             </>
+                                          ) : (
+                                             <span className="text-gray-400">-</span>
+                                          )}
+                                       </div>
+                                       <div className="text-sm text-gray-700">
+                                          {task.deadline ? (
+                                             <>
+                                                <div>{format(new Date(task.deadline), "dd/MM/yyyy")}</div>
+                                                {getTimeIndicator(task.deadline, false).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>{getTimeIndicator(task.deadline, false).text}</div>}
+                                             </>
+                                          ) : (
+                                             <span className="text-gray-400">-</span>
+                                          )}
+                                       </div>
+                                    </div>
+                                 ))}
+                              </div>
+                           ));
+                        })()
                      ) : (
                         <div className="py-8 text-center bg-white">
                            <p className="text-gray-500 mb-2">No hay tareas disponibles para asignar.</p>

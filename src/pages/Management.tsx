@@ -30,6 +30,7 @@ interface Task {
   created_at: string;
   created_by: string;
   project_id: string | null;
+  phase_id?: string | null;
   status: 'pending' | 'assigned' | 'blocked' | 'completed' | 'in_review' | 'returned' | 'approved';
   feedback?: TaskFeedback | null;
   returned_at?: string;
@@ -267,8 +268,10 @@ function Management() {
   const [usersWithAreas, setUsersWithAreas] = useState<UserWithArea[]>([]);
   const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
   const [selectedPriority, setSelectedPriority] = useState<string | null>(null);
   const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
+  const [phases, setPhases] = useState<{ id: string; name: string; order: number; project_id: string }[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -276,6 +279,7 @@ function Management() {
   const [groupByPriority, setGroupByPriority] = useState(false);
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
+  const [groupByPhase, setGroupByPhase] = useState(false);
   const [view, setView] = useState<'subtasks' | 'main_tasks' | 'review'>('subtasks');
   const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { 
     main_task_status: string;
@@ -350,8 +354,26 @@ function Management() {
   }, []);
 
   useEffect(() => {
+    async function loadPhases() {
+      if (!selectedProject) {
+        setPhases([]);
+        setSelectedPhase(null);
+        return;
+      }
+      const { data } = await supabase
+        .from('phases')
+        .select('id, name, order, project_id')
+        .eq('project_id', selectedProject)
+        .order('order', { ascending: true });
+      setPhases((data || []) as { id: string; name: string; order: number; project_id: string }[]);
+      setSelectedPhase(null);
+    }
+    loadPhases();
+  }, [selectedProject]);
+
+  useEffect(() => {
     fetchData();
-  }, [selectedProject, selectedPriority, selectedAssignee]);
+  }, [selectedProject, selectedPhase, selectedPriority, selectedAssignee]);
   
   const { tasks: displayTasks, subtasks: displaySubtasks } = React.useMemo(() => {
     if (!searchTerm.trim()) return { tasks, subtasks };
@@ -494,6 +516,9 @@ function Management() {
       
       if (selectedProject) {
         query = query.eq('project_id', selectedProject);
+      }
+      if (selectedPhase) {
+        query = query.eq('phase_id', selectedPhase);
       }
       
       if (selectedPriority) {
@@ -2137,6 +2162,23 @@ function Management() {
         tasks: displayTasks.filter(task => !task.deadline),
         subtasks: displaySubtasks.filter(subtask => !subtask.deadline)
       };
+    } else if (groupByPhase && phases.length > 0) {
+      phases.forEach(phase => {
+        groupedItems[phase.id] = {
+          tasks: displayTasks.filter(task => task.phase_id === phase.id),
+          subtasks: displaySubtasks.filter(subtask => {
+            const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
+            return relatedTask && relatedTask.phase_id === phase.id;
+          })
+        };
+      });
+      groupedItems['no_phase'] = {
+        tasks: displayTasks.filter(task => !task.phase_id),
+        subtasks: displaySubtasks.filter(subtask => {
+          const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
+          return relatedTask && !relatedTask.phase_id;
+        })
+      };
     } else {
       // No grouping, just one group with all items
       groupedItems['all'] = {
@@ -2173,6 +2215,10 @@ function Management() {
         'no_deadline': 'Sin Fecha Límite'
       };
       return deadlineGroups[groupId] || 'Fecha Desconocida';
+    } else if (groupByPhase) {
+      if (groupId === 'no_phase') return 'Sin fase';
+      const phase = phases.find(p => p.id === groupId);
+      return phase ? phase.name : 'Fase';
     }
     return 'Todas las Tareas';
   };
@@ -3673,6 +3719,21 @@ function Management() {
                   </select>
                 </div>
                 
+                {phases.length > 0 && (
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1">Fase</label>
+                    <select
+                      value={selectedPhase || ''}
+                      onChange={(e) => setSelectedPhase(e.target.value || null)}
+                      className="w-full p-2 border rounded-md"
+                    >
+                      <option value="">Todas las fases</option>
+                      {phases.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm text-gray-700 mb-1">Prioridad</label>
                   <select
@@ -3717,6 +3778,7 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
+                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3733,6 +3795,7 @@ function Management() {
                       setGroupByPriority(true);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
+                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3749,6 +3812,7 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(true);
                       setGroupByDeadline(false);
+                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3765,22 +3829,41 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(true);
+                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
                   <label htmlFor="group-deadline">Agrupar por Fecha Límite</label>
                 </div>
-                
+                {phases.length > 0 && (
+                  <div className="flex items-center">
+                    <input
+                      type="radio"
+                      id="group-phase"
+                      checked={groupByPhase}
+                      onChange={() => {
+                        setGroupByProject(false);
+                        setGroupByPriority(false);
+                        setGroupByAssignee(false);
+                        setGroupByDeadline(false);
+                        setGroupByPhase(true);
+                      }}
+                      className="mr-2"
+                    />
+                    <label htmlFor="group-phase">Agrupar por Fase</label>
+                  </div>
+                )}
                 <div className="flex items-center">
                   <input
                     type="radio"
                     id="group-none"
-                    checked={!groupByProject && !groupByPriority && !groupByAssignee && !groupByDeadline}
+                    checked={!groupByProject && !groupByPriority && !groupByAssignee && !groupByDeadline && !groupByPhase}
                     onChange={() => {
                       setGroupByProject(false);
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
+                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />

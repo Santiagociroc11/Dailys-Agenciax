@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore, FileStack, Copy } from 'lucide-react';
+import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore, FileStack, Copy, GripVertical, Trash2 } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -82,12 +82,14 @@ function Projects() {
     budget_amount: null as number | null,
   });
   const [hoursConsumedByProject, setHoursConsumedByProject] = useState<Record<string, number>>({});
-  const [templates, setTemplates] = useState<{ id: string; name: string; description: string | null; tasks: unknown[] }[]>([]);
+  const [templates, setTemplates] = useState<{ id: string; name: string; description: string | null; tasks: unknown[]; phases?: { name: string; order: number }[] }[]>([]);
   const [useTemplateMode, setUseTemplateMode] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [error, setError] = useState('');
+  const [phases, setPhases] = useState<{ id: string; name: string; order: number }[]>([]);
+  const [newPhaseName, setNewPhaseName] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -103,7 +105,7 @@ function Projects() {
 
   useEffect(() => {
     async function loadTemplates() {
-      const { data } = await supabase.from('project_templates').select('id, name, description, tasks').order('name');
+      const { data } = await supabase.from('project_templates').select('id, name, description, tasks, phases').order('name');
       setTemplates(data || []);
     }
     loadTemplates();
@@ -112,6 +114,22 @@ function Projects() {
   useEffect(() => {
     fetchUsers();
   }, [isAdmin]);
+
+  useEffect(() => {
+    async function fetchPhases() {
+      if (!selectedProject?.id) {
+        setPhases([]);
+        return;
+      }
+      const { data } = await supabase
+        .from('phases')
+        .select('id, name, order')
+        .eq('project_id', selectedProject.id)
+        .order('order', { ascending: true });
+      setPhases((data || []) as { id: string; name: string; order: number }[]);
+    }
+    fetchPhases();
+  }, [selectedProject?.id]);
 
   async function fetchUsers() {
     if (!isAdmin) return;
@@ -174,6 +192,25 @@ function Projects() {
       console.error('Error al cargar los datos del proyecto:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleAddPhase() {
+    if (!selectedProject || !newPhaseName.trim()) return;
+    try {
+      const { data, error } = await supabase.rpc('create_phase', {
+        project_id: selectedProject.id,
+        name: newPhaseName.trim(),
+        order: phases.length,
+      });
+      if (error) throw error;
+      const created = data as { id: string; name: string; order: number };
+      setPhases([...phases, created]);
+      setNewPhaseName('');
+      toast.success('Fase añadida');
+    } catch (err) {
+      console.error('Error al crear fase:', err);
+      toast.error('Error al crear fase');
     }
   }
 
@@ -671,7 +708,16 @@ function Projects() {
         throw tasksQueryError;
       }
       
-      // 3. Si hay tareas, eliminar primero sus subtareas
+      // 3. Eliminar fases del proyecto
+      const { error: phasesError } = await supabase
+        .from('phases')
+        .delete()
+        .eq('project_id', selectedProject.id);
+      if (phasesError) {
+        console.error('Error al eliminar fases:', phasesError);
+      }
+
+      // 4. Si hay tareas, eliminar primero sus subtareas
       if (projectTasks && projectTasks.length > 0) {
         const taskIds = projectTasks.map(task => task.id);
         
@@ -686,7 +732,7 @@ function Projects() {
           throw subtasksError;
         }
         
-        // 4. Ahora eliminar las tareas
+        // 5. Ahora eliminar las tareas
         const { error: tasksError } = await supabase
           .from('tasks')
           .delete()
@@ -698,7 +744,7 @@ function Projects() {
         }
       }
       
-      // 5. Finalmente eliminar el proyecto
+      // 6. Finalmente eliminar el proyecto
       const { error } = await supabase
         .from('projects')
         .delete()
@@ -709,7 +755,7 @@ function Projects() {
         throw error;
       }
       
-      // 6. Actualizar asignaciones de usuario
+      // 7. Actualizar asignaciones de usuario
       for (const usr of users) {
         if (userProjectAssignments[usr.id]?.includes(selectedProject.id)) {
           const currentProjects = userProjectAssignments[usr.id] || [];
@@ -1416,6 +1462,18 @@ function Projects() {
                   </div>
                 </div>
                 
+                {phases.length > 0 && (
+                  <div className="mt-4 pt-4 border-t">
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Fases del proyecto</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {phases.map((p, i) => (
+                        <span key={p.id} className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-indigo-50 text-indigo-700 border border-indigo-100">
+                          {i + 1}. {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {isAdmin && !editMode && (
                   <div className="mt-4 pt-4 border-t">
                     <button
@@ -1429,6 +1487,68 @@ function Projects() {
                   </div>
                 )}
                 {isAdmin && editMode && (
+                  <>
+                  <div className="mt-3 border-t pt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Fases del proyecto</label>
+                    <p className="text-xs text-gray-500 mb-2">Define las fases (ej: Concepción, Captación, Calentamiento) para organizar las tareas.</p>
+                    <div className="space-y-2 mb-3">
+                      {phases.map((p, i) => (
+                        <div key={p.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md">
+                          <GripVertical className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          <span className="text-sm text-gray-500 w-6">{i + 1}.</span>
+                          <input
+                            type="text"
+                            value={p.name}
+                            onChange={(e) => {
+                              const updated = [...phases];
+                              updated[i] = { ...updated[i], name: e.target.value };
+                              setPhases(updated);
+                            }}
+                            onBlur={async () => {
+                              const { error: rpcError } = await supabase.rpc('update_phase', {
+                                phase_id: p.id,
+                                name: phases[i].name,
+                                order: p.order,
+                              });
+                              if (rpcError) toast.error('Error al actualizar fase');
+                            }}
+                            className="flex-1 p-1.5 text-sm border rounded"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm('¿Eliminar esta fase? Las tareas quedarán sin fase.')) return;
+                              const { error: rpcError } = await supabase.rpc('delete_phase', { phase_id: p.id });
+                              if (rpcError) toast.error('Error al eliminar fase');
+                              else setPhases(phases.filter((ph) => ph.id !== p.id));
+                            }}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Eliminar fase"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newPhaseName}
+                        onChange={(e) => setNewPhaseName(e.target.value)}
+                        placeholder="Nombre de la fase"
+                        className="flex-1 p-2 text-sm border rounded-md"
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddPhase())}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddPhase}
+                        disabled={!newPhaseName.trim()}
+                        className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Añadir fase
+                      </button>
+                    </div>
+                  </div>
                   <div className="mt-3 border-t pt-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
                       <span className="mr-1">Usuarios involucrados:</span>
@@ -1470,6 +1590,7 @@ function Projects() {
                       Nota: El creador del proyecto está incluido automáticamente como involucrado.
                     </p>
                   </div>
+                  </>
                 )}
                 
                 {!editMode && (

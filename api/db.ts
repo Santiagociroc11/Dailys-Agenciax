@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { executeQuery } from '../lib/db/queryExecutor.js';
 import type { QueryRequest } from '../lib/db/types.js';
-import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, ProjectTemplate, TaskTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
+import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, Phase, ProjectTemplate, TaskTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
 
 export async function handleDbQuery(req: Request, res: Response): Promise<void> {
   try {
@@ -435,6 +435,46 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           consistencyScore: 80,
         };
       }).filter(Boolean);
+    } else if (fn === 'create_phase') {
+      const projectId = params.project_id as string;
+      const name = (params.name as string) || '';
+      const order = (params.order as number) ?? 0;
+      if (!projectId || !name.trim()) {
+        res.status(400).json({ data: null, error: { message: 'Faltan project_id o name' } });
+        return;
+      }
+      const phase = await Phase.create({ project_id: projectId, name: name.trim(), order });
+      data = phase.toObject ? phase.toObject() : phase;
+    } else if (fn === 'update_phase') {
+      const phaseId = params.phase_id as string;
+      const name = params.name as string | undefined;
+      const order = params.order as number | undefined;
+      if (!phaseId) {
+        res.status(400).json({ data: null, error: { message: 'Falta phase_id' } });
+        return;
+      }
+      const update: Record<string, unknown> = {};
+      if (name !== undefined) update.name = name.trim();
+      if (order !== undefined) update.order = order;
+      const phase = await Phase.findOneAndUpdate({ id: phaseId }, { $set: update }, { new: true }).lean().exec();
+      if (!phase) {
+        res.status(404).json({ data: null, error: { message: 'Fase no encontrada' } });
+        return;
+      }
+      data = phase;
+    } else if (fn === 'delete_phase') {
+      const phaseId = params.phase_id as string;
+      if (!phaseId) {
+        res.status(400).json({ data: null, error: { message: 'Falta phase_id' } });
+        return;
+      }
+      await Task.updateMany({ phase_id: phaseId }, { $set: { phase_id: null } }).exec();
+      const deleted = await Phase.findOneAndDelete({ id: phaseId }).exec();
+      if (!deleted) {
+        res.status(404).json({ data: null, error: { message: 'Fase no encontrada' } });
+        return;
+      }
+      data = { id: phaseId };
     } else if (fn === 'create_template_from_project') {
       const projectId = params.project_id as string;
       const templateName = (params.template_name as string) || 'Plantilla';
@@ -448,6 +488,8 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         res.status(404).json({ data: null, error: { message: 'Proyecto no encontrado' } });
         return;
       }
+      const projectPhases = await Phase.find({ project_id: projectId }).sort({ order: 1 }).lean().exec();
+      const phaseMap = new Map(projectPhases.map((p: { id: string; name: string }) => [p.id, p.name]));
       const projectTasks = await Task.find({ project_id: projectId }).lean().exec();
       const taskIds = projectTasks.map((t: { id: string }) => t.id);
       const allSubtasks = await Subtask.find({ task_id: { $in: taskIds } }).lean().exec();
@@ -457,15 +499,18 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         list.push(st);
         subtasksByTask.set(st.task_id, list);
       }
-      const templateTasks = projectTasks.map((t: { id: string; title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean; checklist?: Array<{ id: string; title: string; checked?: boolean; order?: number }> }) => {
+      const templatePhases = projectPhases.map((p: { name: string; order: number }) => ({ name: p.name, order: p.order }));
+      const templateTasks = projectTasks.map((t: { id: string; title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean; phase_id?: string | null; checklist?: Array<{ id: string; title: string; checked?: boolean; order?: number }> }) => {
         const subs = (subtasksByTask.get(t.id) || []).sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0));
         const taskChecklist = (t.checklist || []).map((c: { id: string; title: string; order?: number }) => ({ id: c.id, title: c.title, order: c.order ?? 0 }));
+        const phaseName = t.phase_id ? phaseMap.get(t.phase_id) ?? null : null;
         return {
           title: t.title,
           description: t.description ?? null,
           estimated_duration: t.estimated_duration ?? 60,
           priority: t.priority ?? 'medium',
           is_sequential: t.is_sequential ?? false,
+          phase_name: phaseName,
           checklist: taskChecklist,
           subtasks: subs.map((s: { title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }) => {
             const subChecklist = (s.checklist || []).map((c: { id: string; title: string; order?: number }) => ({ id: c.id, title: c.title, order: c.order ?? 0 }));
@@ -484,6 +529,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         description: project.description ?? null,
         created_by: createdBy,
         source_project_id: projectId,
+        phases: templatePhases,
         tasks: templateTasks,
       });
       data = template.toObject ? template.toObject() : template;
@@ -526,8 +572,17 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           await User.updateOne({ id: uid }, { $set: { assigned_projects: [project.id] } }).exec();
         }
       }
+      const templatePhases = (template as { phases?: Array<{ name: string; order: number }> }).phases || [];
+      const phaseNameToId = new Map<string, string>();
+      for (let i = 0; i < templatePhases.length; i++) {
+        const p = templatePhases[i];
+        const phase = await Phase.create({ project_id: project.id, name: p.name, order: p.order ?? i });
+        phaseNameToId.set(p.name, phase.id);
+      }
       let userIndex = 0;
       for (const t of template.tasks || []) {
+        const tplTask = t as { phase_name?: string | null };
+        const phaseId = tplTask.phase_name ? phaseNameToId.get(tplTask.phase_name) ?? null : null;
         const taskChecklist = (t.checklist || []).map((c: { id: string; title: string; order?: number }) => ({
           id: c.id,
           title: c.title,
@@ -544,6 +599,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           is_sequential: t.is_sequential ?? false,
           created_by: createdBy,
           project_id: project.id,
+          phase_id: phaseId,
           assigned_users: [],
           status: 'pending',
           checklist: taskChecklist,

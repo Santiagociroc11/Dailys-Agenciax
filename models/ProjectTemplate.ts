@@ -21,6 +21,14 @@ const templateSubtaskSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const templatePhaseSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    order: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const templateTaskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
@@ -28,6 +36,7 @@ const templateTaskSchema = new mongoose.Schema(
     estimated_duration: { type: Number, required: true, default: 60 },
     priority: { type: String, default: 'medium' },
     is_sequential: { type: Boolean, default: false },
+    phase_name: { type: String, default: null },
     subtasks: { type: [templateSubtaskSchema], default: [] },
     checklist: { type: [checklistItemSchema], default: [] },
   },
@@ -41,6 +50,7 @@ const projectTemplateSchema = new mongoose.Schema(
     description: { type: String, default: null },
     created_by: { type: String, required: true, ref: 'User' },
     source_project_id: { type: String, default: null, ref: 'Project' },
+    phases: { type: [templatePhaseSchema], default: [] },
     tasks: { type: [templateTaskSchema], default: [] },
   },
   {
