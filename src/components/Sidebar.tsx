@@ -149,7 +149,7 @@ export default function Sidebar() {
               }
             >
               <PieChart className="w-5 h-5 mr-3" />
-              Capacidad
+              Carga del equipo
             </NavLink>
             <NavLink
               to="/settings"

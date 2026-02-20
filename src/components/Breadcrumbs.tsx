@@ -20,7 +20,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/tasks': 'Tareas',
   '/users': 'Usuarios',
   '/areas': 'Áreas',
-  '/reports': 'Reportes',
+  '/reports': 'Centro de mando',
   '/capacity': 'Capacidad',
   '/audits': 'Auditoría',
   '/activity': 'Reporte de actividad',

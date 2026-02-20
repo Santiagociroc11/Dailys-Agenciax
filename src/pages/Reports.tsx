@@ -15,8 +15,11 @@ import {
   Layers,
   CheckCircle,
   AlertTriangle,
-  DollarSign
+  DollarSign,
+  LayoutDashboard,
+  ArrowRight
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { 
   getAllUsersMetrics,
   getProjectMetrics,
@@ -27,6 +30,7 @@ import {
   exportUtilizationToCSV,
   getHoursForBilling,
   getCostByUser,
+  getCapacityByUser,
   getDateRangeForPeriod,
   type UserMetrics,
   type ProjectMetrics as ProjectMetricsType,
@@ -67,7 +71,7 @@ interface ProjectMetrics {
   daysUntilDeadline: number;
 }
 
-type TabType = 'users' | 'projects' | 'areas' | 'utilization' | 'cost';
+type TabType = 'overview' | 'projects' | 'users' | 'areas' | 'utilization' | 'cost';
 
 const PERIOD_OPTIONS: { value: PeriodType; label: string }[] = [
   { value: 'week', label: 'Esta semana' },
@@ -78,7 +82,8 @@ const PERIOD_OPTIONS: { value: PeriodType; label: string }[] = [
 
 export default function Reports() {
   const { isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabType>('users');
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [period, setPeriod] = useState<PeriodType>('month');
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date();
@@ -90,6 +95,8 @@ export default function Reports() {
   const [areaMetrics, setAreaMetrics] = useState<AreaMetrics[]>([]);
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
   const [costMetrics, setCostMetrics] = useState<CostByUserRow[]>([]);
+  const [capacityData, setCapacityData] = useState<Awaited<ReturnType<typeof getCapacityByUser>>>([]);
+  const [billingHours, setBillingHours] = useState<HoursForBillingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportingHours, setExportingHours] = useState(false);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
@@ -109,20 +116,32 @@ export default function Reports() {
     setLoading(true);
     try {
       switch (activeTab) {
+        case 'overview':
+          const [projects, capacity, hours, cost] = await Promise.all([
+            getProjectMetrics(),
+            getCapacityByUser(8, 5),
+            getHoursForBilling(dateRange.startDate, dateRange.endDate),
+            getCostByUser(dateRange.startDate, dateRange.endDate),
+          ]);
+          setProjectMetrics(projects);
+          setCapacityData(capacity);
+          setBillingHours(hours);
+          setCostMetrics(cost);
+          break;
         case 'users':
           const users = await getAllUsersMetrics();
           setUserMetrics(users);
           break;
         case 'projects':
-          const projects = await getProjectMetrics();
-          setProjectMetrics(projects);
+          const proj = await getProjectMetrics();
+          setProjectMetrics(proj);
           break;
         case 'areas':
           const areas = await getAreaMetrics();
           setAreaMetrics(areas);
           break;
         case 'utilization':
-          const utilization = await getAllUsersUtilizationMetrics(8); // 8 horas estándar
+          const utilization = await getAllUsersUtilizationMetrics(8);
           setUtilizationMetrics(utilization);
           break;
         case 'cost':
@@ -183,7 +202,30 @@ export default function Reports() {
       case 'utilization':
         exportUtilizationToCSV(utilizationMetrics, filename);
         break;
+      case 'cost':
+        exportCostToCSV(costMetrics, filename);
+        break;
     }
+  }
+
+  function exportCostToCSV(data: CostByUserRow[], filename: string) {
+    const headers = ['Usuario', 'Email', 'Horas', 'Tarifa/h', 'Coste', 'Moneda'];
+    const rows = data.map((m) => [
+      m.user_name,
+      m.user_email,
+      m.total_hours.toFixed(2),
+      m.hourly_rate ?? '—',
+      m.total_cost ?? '—',
+      m.currency,
+    ]);
+    const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function exportProjectsToCSV(data: ProjectMetricsType[], filename: string) {
@@ -248,11 +290,12 @@ export default function Reports() {
   }
 
   const tabs = [
-    { id: 'users' as TabType, label: 'Usuarios', icon: Users },
+    { id: 'overview' as TabType, label: 'Resumen', icon: LayoutDashboard },
     { id: 'projects' as TabType, label: 'Proyectos', icon: FolderOpen },
-    { id: 'areas' as TabType, label: 'Áreas', icon: Layers },
+    { id: 'users' as TabType, label: 'Equipo', icon: Users },
     { id: 'utilization' as TabType, label: 'Utilización', icon: Clock },
-    { id: 'cost' as TabType, label: 'Costes', icon: DollarSign }
+    { id: 'cost' as TabType, label: 'Facturación', icon: DollarSign },
+    { id: 'areas' as TabType, label: 'Áreas', icon: Layers },
   ];
 
   if (!isAdmin) {
@@ -291,19 +334,21 @@ export default function Reports() {
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Estadísticas</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Centro de mando</h1>
           <p className="text-gray-600">
-            Análisis detallado de rendimiento y productividad del equipo
+            Estado de proyectos, equipo y facturación. Todo lo que necesitas para dirigir el día a día.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={exportCurrentData}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Exportar CSV
-          </button>
+          {activeTab !== 'overview' && (
+            <button
+              onClick={exportCurrentData}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Exportar CSV
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <select
               value={exportClientFilter}
@@ -388,11 +433,186 @@ export default function Reports() {
       </div>
 
       {/* Content */}
+      {activeTab === 'overview' && (
+        <OverviewSummary
+          projects={projectMetrics}
+          capacity={capacityData}
+          billingHours={billingHours}
+          cost={costMetrics}
+          dateRange={dateRange}
+          onNavigateProjects={() => setActiveTab('projects')}
+          onNavigateCapacity={() => navigate('/capacity')}
+          onNavigateCost={() => setActiveTab('cost')}
+        />
+      )}
       {activeTab === 'users' && <UsersMetrics metrics={userMetrics} />}
       {activeTab === 'projects' && <ProjectsMetrics metrics={projectMetrics} />}
       {activeTab === 'areas' && <AreasMetrics metrics={areaMetrics} />}
       {activeTab === 'utilization' && <UtilizationReport metrics={utilizationMetrics} />}
       {activeTab === 'cost' && <CostReport metrics={costMetrics} />}
+    </div>
+  );
+}
+
+function OverviewSummary({
+  projects,
+  capacity,
+  billingHours,
+  cost,
+  dateRange,
+  onNavigateProjects,
+  onNavigateCapacity,
+  onNavigateCost,
+}: {
+  projects: ProjectMetricsType[];
+  capacity: Awaited<ReturnType<typeof getCapacityByUser>>;
+  billingHours: HoursForBillingRow[];
+  cost: CostByUserRow[];
+  dateRange: { startDate: string; endDate: string };
+  onNavigateProjects: () => void;
+  onNavigateCapacity: () => void;
+  onNavigateCost: () => void;
+}) {
+  const projectsAtRisk = projects.filter((p) => !p.onSchedule || p.daysUntilDeadline < 7);
+  const overloaded = capacity.filter((r) => r.utilization_percent > 100);
+  const totalHours = billingHours.reduce((acc, r) => acc + r.total_hours, 0);
+  const totalCost = cost.reduce((acc, m) => acc + (m.total_cost ?? 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <p className="text-gray-600">
+        Período: <strong>{dateRange.startDate}</strong> — <strong>{dateRange.endDate}</strong>
+      </p>
+
+      {/* KPIs principales */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-blue-300 transition-colors">
+          <p className="text-sm font-medium text-gray-600">Proyectos en riesgo</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{projectsAtRisk.length}</p>
+          <p className="text-xs text-gray-500 mt-1">Atrasados o con &lt;7 días</p>
+          <button
+            onClick={onNavigateProjects}
+            className="mt-3 flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Ver proyectos <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div
+          className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-amber-300 transition-colors cursor-pointer"
+          onClick={onNavigateCapacity}
+        >
+          <p className="text-sm font-medium text-gray-600">Personas sobrecargadas</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{overloaded.length}</p>
+          <p className="text-xs text-gray-500 mt-1">Más de 100% de capacidad</p>
+          <p className="mt-3 flex items-center gap-1 text-sm text-amber-600 font-medium">
+            Ver carga del equipo <ArrowRight className="w-4 h-4" />
+          </p>
+        </div>
+
+        <div
+          className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-emerald-300 transition-colors cursor-pointer"
+          onClick={onNavigateCost}
+        >
+          <p className="text-sm font-medium text-gray-600">Horas facturables</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{totalHours.toFixed(1)}h</p>
+          <p className="text-xs text-gray-500 mt-1">En el período seleccionado</p>
+          <p className="mt-3 flex items-center gap-1 text-sm text-emerald-600 font-medium">
+            Ver facturación <ArrowRight className="w-4 h-4" />
+          </p>
+        </div>
+
+        <div
+          className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-indigo-300 transition-colors cursor-pointer"
+          onClick={onNavigateCost}
+        >
+          <p className="text-sm font-medium text-gray-600">Coste del período</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">
+            {totalCost > 0 ? totalCost.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">Según tarifas configuradas</p>
+          <p className="mt-3 flex items-center gap-1 text-sm text-indigo-600 font-medium">
+            Ver detalle <ArrowRight className="w-4 h-4" />
+          </p>
+        </div>
+      </div>
+
+      {/* Proyectos en riesgo */}
+      {projectsAtRisk.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b bg-red-50 flex justify-between items-center">
+            <h3 className="font-medium text-red-900">Proyectos que requieren atención</h3>
+            <button
+              onClick={onNavigateProjects}
+              className="text-sm text-red-700 hover:text-red-800 font-medium"
+            >
+              Ver todos →
+            </button>
+          </div>
+          <div className="divide-y">
+            {projectsAtRisk.slice(0, 5).map((p) => (
+              <div key={p.projectId} className="px-6 py-4 hover:bg-gray-50 flex justify-between items-center">
+                <div>
+                  <p className="font-medium text-gray-900">{p.projectName}</p>
+                  <p className="text-sm text-gray-600">
+                    {p.completionRate.toFixed(0)}% completado · {p.completedTasks}/{p.totalTasks} tareas
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`px-2 py-1 rounded text-xs font-medium ${
+                      p.daysUntilDeadline < 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    {p.daysUntilDeadline < 0
+                      ? `${Math.abs(p.daysUntilDeadline)} días atrasado`
+                      : `${p.daysUntilDeadline} días restantes`}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Personas sobrecargadas */}
+      {overloaded.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b bg-amber-50 flex justify-between items-center">
+            <h3 className="font-medium text-amber-900">Personas sobrecargadas</h3>
+            <button
+              onClick={onNavigateCapacity}
+              className="text-sm text-amber-700 hover:text-amber-800 font-medium"
+            >
+              Ver carga completa →
+            </button>
+          </div>
+          <div className="divide-y">
+            {overloaded.slice(0, 5).map((r) => (
+              <div key={r.user_id} className="px-6 py-4 hover:bg-gray-50 flex justify-between items-center">
+                <div>
+                  <p className="font-medium text-gray-900">{r.user_name}</p>
+                  <p className="text-sm text-gray-600">{r.user_email}</p>
+                </div>
+                <div className="text-right">
+                  <span className="font-medium text-amber-700">{r.assigned_hours.toFixed(1)}h</span>
+                  <span className="text-gray-500 text-sm ml-1">({r.utilization_percent}% de capacidad)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {projectsAtRisk.length === 0 && overloaded.length === 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
+          <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
+          <p className="font-medium text-emerald-800">Todo bajo control</p>
+          <p className="text-sm text-emerald-700 mt-1">
+            No hay proyectos en riesgo ni personas sobrecargadas. Revisa los otros tabs para más detalle.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -404,6 +624,9 @@ function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
 
   return (
     <div className="space-y-6">
+      <p className="text-gray-600 text-sm">
+        Horas trabajadas × tarifa por usuario. Configura la tarifa en cada usuario para ver el coste real.
+      </p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-emerald-50 rounded-lg p-4">
           <p className="text-sm text-emerald-600 font-medium">Total horas</p>
@@ -572,7 +795,7 @@ function UtilizationReport({ metrics }: { metrics: UtilizationMetrics[] }) {
                   Este Mes
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Hora Productiva
+                  Pico actividad
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Consistencia
