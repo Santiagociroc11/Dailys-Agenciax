@@ -457,20 +457,26 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         list.push(st);
         subtasksByTask.set(st.task_id, list);
       }
-      const templateTasks = projectTasks.map((t: { id: string; title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean }) => {
+      const templateTasks = projectTasks.map((t: { id: string; title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean; checklist?: Array<{ id: string; title: string; checked?: boolean; order?: number }> }) => {
         const subs = (subtasksByTask.get(t.id) || []).sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0));
+        const taskChecklist = (t.checklist || []).map((c: { id: string; title: string; order?: number }) => ({ id: c.id, title: c.title, order: c.order ?? 0 }));
         return {
           title: t.title,
           description: t.description ?? null,
           estimated_duration: t.estimated_duration ?? 60,
           priority: t.priority ?? 'medium',
           is_sequential: t.is_sequential ?? false,
-          subtasks: subs.map((s: { title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null }) => ({
-            title: s.title,
-            description: s.description ?? null,
-            estimated_duration: s.estimated_duration ?? 30,
-            sequence_order: s.sequence_order ?? null,
-          })),
+          checklist: taskChecklist,
+          subtasks: subs.map((s: { title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }) => {
+            const subChecklist = (s.checklist || []).map((c: { id: string; title: string; order?: number }) => ({ id: c.id, title: c.title, order: c.order ?? 0 }));
+            return {
+              title: s.title,
+              description: s.description ?? null,
+              estimated_duration: s.estimated_duration ?? 30,
+              sequence_order: s.sequence_order ?? null,
+              checklist: subChecklist,
+            };
+          }),
         };
       });
       const template = await ProjectTemplate.create({
@@ -522,6 +528,12 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       }
       let userIndex = 0;
       for (const t of template.tasks || []) {
+        const taskChecklist = (t.checklist || []).map((c: { id: string; title: string; order?: number }) => ({
+          id: c.id,
+          title: c.title,
+          checked: false,
+          order: c.order ?? 0,
+        }));
         const task = await Task.create({
           title: t.title,
           description: t.description ?? null,
@@ -534,13 +546,20 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           project_id: project.id,
           assigned_users: [],
           status: 'pending',
+          checklist: taskChecklist,
         });
-        const subs: Array<{ title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null }> = t.subtasks || [];
+        const subs: Array<{ title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null; checklist?: Array<{ id: string; title: string; order?: number }> }> = t.subtasks || [];
         if (subs.length > 0) {
           for (let i = 0; i < subs.length; i++) {
             const s = subs[i];
             const assignee = uniqueUsers[userIndex % uniqueUsers.length];
             userIndex++;
+            const subChecklist = (s.checklist || []).map((c: { id: string; title: string; order?: number }) => ({
+              id: c.id,
+              title: c.title,
+              checked: false,
+              order: c.order ?? 0,
+            }));
             await Subtask.create({
               title: s.title,
               description: s.description ?? null,
@@ -551,6 +570,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
               start_date: new Date(startDate),
               deadline: new Date(deadline),
               status: 'pending',
+              checklist: subChecklist,
             });
           }
         } else {

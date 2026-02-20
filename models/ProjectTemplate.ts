@@ -1,12 +1,22 @@
 import mongoose, { InferSchemaType } from 'mongoose';
 import { idField } from './schemas/base.js';
 
+const checklistItemSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    title: { type: String, required: true },
+    order: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const templateSubtaskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     description: { type: String, default: null },
     estimated_duration: { type: Number, required: true, default: 30 },
     sequence_order: { type: Number, default: null },
+    checklist: { type: [checklistItemSchema], default: [] },
   },
   { _id: false }
 );
@@ -19,6 +29,7 @@ const templateTaskSchema = new mongoose.Schema(
     priority: { type: String, default: 'medium' },
     is_sequential: { type: Boolean, default: false },
     subtasks: { type: [templateSubtaskSchema], default: [] },
+    checklist: { type: [checklistItemSchema], default: [] },
   },
   { _id: false }
 );

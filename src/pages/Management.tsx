@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
+import { ActivityChecklist } from '../components/ActivityChecklist';
+import { TaskComments } from '../components/TaskComments';
 import { Area, AreaUserAssignment } from '../types/Area';
 
 interface TaskFeedback {
@@ -34,6 +36,15 @@ interface Task {
   assigned_users?: string[];
   razon_bloqueo?: string;
   notes?: string | { [key: string]: any };
+  checklist?: ChecklistItem[];
+  comments?: { id: string; user_id: string; content: string; created_at: string }[];
+}
+
+interface ChecklistItem {
+  id: string;
+  title: string;
+  checked: boolean;
+  order?: number;
 }
 
 interface Subtask {
@@ -50,6 +61,8 @@ interface Subtask {
   feedback?: TaskFeedback | null;
   returned_at?: string;
   notes?: string | { [key: string]: any };
+  checklist?: ChecklistItem[];
+  comments?: { id: string; user_id: string; content: string; created_at: string }[];
 }
 
 interface Project {
@@ -4045,6 +4058,59 @@ function Management() {
                         ) : (
                           <span className="italic text-gray-500">Sin descripción disponible</span>
                         )}
+                      </div>
+                    </div>
+
+                    {/* Comentarios */}
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                      <div className="p-4">
+                        <TaskComments
+                          key={`comments-${taskDetails.id}`}
+                          comments={(taskDetails.comments || []).map((c) => ({ ...c, created_at: c.created_at }))}
+                          users={users.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
+                          currentUserId={user?.id}
+                          onAdd={async (content) => {
+                            const table = detailsItem?.type === 'subtask' ? 'subtasks' : 'tasks';
+                            const newComment = {
+                              id: crypto.randomUUID(),
+                              user_id: user!.id,
+                              content,
+                              created_at: new Date().toISOString(),
+                            };
+                            const updated = [...(taskDetails.comments || []), newComment];
+                            const { error } = await supabase.from(table).update({ comments: updated }).eq('id', taskDetails.id);
+                            if (error) throw error;
+                            setTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
+                            fetchData();
+                          }}
+                          onDelete={async (commentId) => {
+                            const table = detailsItem?.type === 'subtask' ? 'subtasks' : 'tasks';
+                            const updated = (taskDetails.comments || []).filter((c) => c.id !== commentId);
+                            const { error } = await supabase.from(table).update({ comments: updated }).eq('id', taskDetails.id);
+                            if (error) throw error;
+                            setTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
+                            fetchData();
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Checklist del responsable */}
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                      <div className="p-4">
+                        <ActivityChecklist
+                          key={`checklist-${taskDetails.id}`}
+                          items={(taskDetails.checklist || []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
+                          onUpdate={async (updated) => {
+                            const table = detailsItem?.type === 'subtask' ? 'subtasks' : 'tasks';
+                            const { error } = await supabase.from(table).update({ checklist: updated }).eq('id', taskDetails.id);
+                            if (error) throw error;
+                            setTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
+                            fetchData();
+                          }}
+                          placeholder="Añadir paso o verificación..."
+                          emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
+                        />
                       </div>
                     </div>
 

@@ -8,6 +8,15 @@ import { toast } from "sonner";
 import TaskStatusDisplay from "../components/TaskStatusDisplay";
 import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
+import { ActivityChecklist } from "../components/ActivityChecklist";
+import { TaskComments } from "../components/TaskComments";
+
+interface ChecklistItem {
+   id: string;
+   title: string;
+   checked: boolean;
+   order?: number;
+}
 
 interface Task {
    id: string;
@@ -27,6 +36,8 @@ interface Task {
    subtask_title?: string;
    assignment_date?: string;
    notes?: string | TaskNotes;
+   checklist?: ChecklistItem[];
+   comments?: { id: string; user_id: string; content: string; created_at: string }[];
 }
 
 // Interfaz para los metadatos de las notas de las tareas
@@ -838,6 +849,8 @@ export default function UserProjectView() {
                project_id: projectId,
                projectName: projectMap[projectId] || "Sin proyecto",
                type: "subtask",
+               checklist: (s.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+               comments: (s.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
             };
          });
 
@@ -856,6 +869,8 @@ export default function UserProjectView() {
             project_id: t.project_id || "",
             projectName: projectMap[t.project_id || ""] || "Sin proyecto",
             type: "task",
+            checklist: (t.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+            comments: (t.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
          }));
 
          // 1️⃣2️⃣ Filtrar las ya asignadas hoy o solo mostrar las que están en estado 'pending'
@@ -920,6 +935,20 @@ export default function UserProjectView() {
       setNextSubtask(null);
       setSubtaskUsers({});
 
+      // Fetch users for comments display (task assignees + comment authors)
+      const userIds = new Set<string>();
+      (task.assigned_users || []).forEach((id) => userIds.add(id));
+      (task.comments || []).forEach((c) => userIds.add(c.user_id));
+      if (task.type === "subtask" && task.assigned_users?.[0]) userIds.add(task.assigned_users[0]);
+      if (userIds.size > 0) {
+         try {
+            const { data: u } = await supabase.from("users").select("id, name, email").in("id", Array.from(userIds));
+            const userMap: Record<string, string> = {};
+            (u || []).forEach((x) => { userMap[x.id] = x.name || x.email || "Usuario"; });
+            setSubtaskUsers((prev) => ({ ...prev, ...userMap }));
+         } catch (_) {}
+      }
+
       // If it's a subtask, fetch related subtasks info
       if (task.type === "subtask" && task.original_id) {
          try {
@@ -983,7 +1012,7 @@ export default function UserProjectView() {
                         // Use a simple format that shows part of the ID for identification
                         userMap[id] = `Usuario ${id.substring(0, 6)}`;
                      });
-                     setSubtaskUsers(userMap);
+                     setSubtaskUsers((prev) => ({ ...prev, ...userMap }));
 
                      // Optionally, try to fetch at least basic user info if the table exists
                      try {
@@ -995,7 +1024,7 @@ export default function UserProjectView() {
                                  userMap[user.id] = user.name;
                               }
                            });
-                           setSubtaskUsers({ ...userMap });
+                           setSubtaskUsers((prev) => ({ ...prev, ...userMap }));
                         }
                      } catch (error) {}
                   }
@@ -2008,6 +2037,8 @@ export default function UserProjectView() {
                      type: "task",
                      assignment_date: assignment?.date || today,
                      notes: isActuallyReturned ? returnedInfo?.notes || task.notes : assignment?.notes || task.notes,
+                     checklist: (task.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+                     comments: (task.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
                   };
 
                   // Calcular duración estimada en horas
@@ -2092,6 +2123,8 @@ export default function UserProjectView() {
                      projectName: projectMap[subtask.tasks?.project_id || ""] || "Sin proyecto",
                      type: "subtask",
                      assignment_date: assignment?.date || today,
+                     checklist: (subtask.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+                     comments: (subtask.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
                      notes: isActuallyReturned ? returnedInfo?.notes || subtask.notes : assignment?.notes || subtask.notes,
                   };
 
@@ -6074,6 +6107,59 @@ export default function UserProjectView() {
                         <div className="text-gray-600">
                            <RichTextDisplay text={selectedTaskDetails.description || "Sin descripción"} />
                         </div>
+                     </div>
+
+                     {/* Comentarios */}
+                     <div className="mb-4">
+                        <TaskComments
+                           key={`comments-${selectedTaskDetails.type}-${selectedTaskDetails.original_id || selectedTaskDetails.id}`}
+                           comments={(selectedTaskDetails.comments || []).map((c) => ({ ...c, created_at: c.created_at }))}
+                           users={Object.entries(subtaskUsers).map(([id, name]) => ({ id, name }))}
+                           currentUserId={user?.id}
+                           onAdd={async (content) => {
+                              const table = selectedTaskDetails.type === "subtask" ? "subtasks" : "tasks";
+                              const id = selectedTaskDetails.type === "subtask" ? selectedTaskDetails.original_id : selectedTaskDetails.id;
+                              const newComment = {
+                                 id: crypto.randomUUID(),
+                                 user_id: user!.id,
+                                 content,
+                                 created_at: new Date().toISOString(),
+                              };
+                              const updated = [...(selectedTaskDetails.comments || []), newComment];
+                              const { error } = await supabase.from(table).update({ comments: updated }).eq("id", id);
+                              if (error) throw error;
+                              setSelectedTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
+                              fetchAssignedTasks();
+                           }}
+                           onDelete={async (commentId) => {
+                              const table = selectedTaskDetails.type === "subtask" ? "subtasks" : "tasks";
+                              const id = selectedTaskDetails.type === "subtask" ? selectedTaskDetails.original_id : selectedTaskDetails.id;
+                              const updated = (selectedTaskDetails.comments || []).filter((c) => c.id !== commentId);
+                              const { error } = await supabase.from(table).update({ comments: updated }).eq("id", id);
+                              if (error) throw error;
+                              setSelectedTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
+                              fetchAssignedTasks();
+                           }}
+                        />
+                     </div>
+
+                     {/* Checklist personal del usuario */}
+                     <div className="mb-4">
+                        <ActivityChecklist
+                           key={`checklist-${selectedTaskDetails.type}-${selectedTaskDetails.original_id || selectedTaskDetails.id}`}
+                           items={selectedTaskDetails.checklist || []}
+                           onUpdate={async (updated) => {
+                              const table = selectedTaskDetails.type === "subtask" ? "subtasks" : "tasks";
+                              const id = selectedTaskDetails.type === "subtask" ? selectedTaskDetails.original_id : selectedTaskDetails.id;
+                              const { error } = await supabase.from(table).update({ checklist: updated }).eq("id", id);
+                              if (error) throw error;
+                              setSelectedTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
+                              fetchAssignedTasks();
+                           }}
+                           disabled={false}
+                           placeholder="Ej: Revisar analytics, enviar reporte..."
+                           emptyMessage="Crea tu checklist para llevar el control de esta actividad. Se incluirá en la plantilla del proyecto."
+                        />
                      </div>
 
                      {/* Fechas con indicadores */}

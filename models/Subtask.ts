@@ -17,9 +17,31 @@ const subtaskSchema = new mongoose.Schema(
     status_history: { type: mongoose.Schema.Types.Mixed, default: [] },
     review_comments: { type: String, default: null },
     notes: { type: mongoose.Schema.Types.Mixed, default: {} },
+    checklist: {
+      type: [
+        {
+          id: { type: String, required: true },
+          title: { type: String, required: true },
+          checked: { type: Boolean, default: false },
+          order: { type: Number, default: 0 },
+        },
+      ],
+      default: [],
+    },
     feedback: { type: mongoose.Schema.Types.Mixed, default: null },
     returned_at: { type: Date, default: null },
     is_billable: { type: Boolean, default: true },
+    comments: {
+      type: [
+        {
+          id: { type: String, required: true },
+          user_id: { type: String, required: true },
+          content: { type: String, required: true },
+          created_at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
   },
   {
     timestamps: true,

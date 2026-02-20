@@ -2,14 +2,24 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search } from 'lucide-react';
-import { format } from 'date-fns';
+import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles } from 'lucide-react';
+import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
+import { ActivityChecklist } from '../components/ActivityChecklist';
 import RichTextSummary from '../components/RichTextSummary';
 import QuillEditor from '../components/QuillEditor';
 import { SkeletonTaskList, SkeletonInline } from '../components/Skeleton';
 
+
+interface ChecklistItem {
+  id: string;
+  title: string;
+  checked: boolean;
+  order?: number;
+}
 
 interface Task {
   id: string;
@@ -26,6 +36,8 @@ interface Task {
   status?: string;
   assigned_to?: string;
   assigned_users?: string[];
+  checklist?: ChecklistItem[];
+  comments?: { id: string; user_id: string; content: string; created_at: string }[];
 }
 
 interface Subtask {
@@ -41,6 +53,8 @@ interface Subtask {
   deadline: string | null;
   created_by?: string;
   created_at?: string;
+  checklist?: ChecklistItem[];
+  comments?: { id: string; user_id: string; content: string; created_at: string }[];
 }
 
 interface User {
@@ -120,6 +134,16 @@ function Tasks() {
     project_id: null,
   });
   const [error, setError] = useState('');
+  const [showGenerateDailyModal, setShowGenerateDailyModal] = useState(false);
+  const [dailySubtaskConfig, setDailySubtaskConfig] = useState({
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(addDays(new Date(), 6), 'yyyy-MM-dd'),
+    titlePrefix: '',
+    assignee: '',
+    duration: 15,
+    includeWeekends: false,
+  });
+  const [generatingDaily, setGeneratingDaily] = useState(false);
   const [projectSelected, setProjectSelected] = useState(false);
   const [selectedProjectDates, setSelectedProjectDates] = useState<{
     start_date: string;
@@ -305,6 +329,8 @@ function Tasks() {
             status: ((raw.status as string) ?? 'pending') as Subtask['status'],
             start_date: (raw.start_date as string) ?? null,
             deadline: (raw.deadline as string) ?? null,
+            checklist: (raw.checklist as ChecklistItem[]) || [],
+            comments: (raw.comments as { id: string; user_id: string; content: string; created_at: string }[]) || [],
           };
           acc[taskId] = [...(acc[taskId] || []), subtask];
           return acc;
@@ -618,6 +644,56 @@ function Tasks() {
       await fetchSubtasks();
     } catch (error) {
       console.error('Error al actualizar el estado:', error);
+    }
+  }
+
+  /** Genera las fechas diarias para subtareas según el rango y si incluir fines de semana */
+  function getDailyDates(startStr: string, endStr: string, includeWeekends: boolean): Date[] {
+    const start = parseISO(startStr);
+    const end = parseISO(endStr);
+    if (start > end) return [];
+    const days = eachDayOfInterval({ start, end });
+    return includeWeekends ? days : days.filter(d => !isWeekend(d));
+  }
+
+  async function handleGenerateDailySubtasks() {
+    if (!selectedTask || !user) return;
+    const { startDate, endDate, titlePrefix, assignee, duration, includeWeekends } = dailySubtaskConfig;
+    const dates = getDailyDates(startDate, endDate, includeWeekends);
+    if (dates.length === 0) {
+      toast.error('No hay días en el rango seleccionado. Revisa las fechas o activa "Incluir fines de semana".');
+      return;
+    }
+    if (dates.length > 90) {
+      toast.error('Máximo 90 días por generación. Reduce el rango.');
+      return;
+    }
+    const prefix = (titlePrefix || selectedTask.title).trim().slice(0, 40);
+    const currentCount = subtasks[selectedTask.id]?.length || 0;
+    setGeneratingDaily(true);
+    try {
+      const subtasksToInsert = dates.map((date, i) => ({
+        task_id: selectedTask.id,
+        title: `${prefix} – ${format(date, 'd MMM', { locale: es })}`,
+        description: '',
+        estimated_duration: duration,
+        sequence_order: currentCount + i + 1,
+        assigned_to: assignee || user.id,
+        status: 'pending',
+        start_date: format(date, "yyyy-MM-dd'T'09:00:00"),
+        deadline: format(date, "yyyy-MM-dd'T'18:00:00"),
+      }));
+      const { error } = await supabase.from('subtasks').insert(subtasksToInsert);
+      if (error) throw error;
+      toast.success(`${dates.length} subtareas diarias creadas correctamente`);
+      setShowGenerateDailyModal(false);
+      await fetchSubtasks();
+      setEditedSubtasks({});
+    } catch (err) {
+      console.error('Error generando subtareas diarias:', err);
+      toast.error('Error al crear las subtareas. Inténtalo de nuevo.');
+    } finally {
+      setGeneratingDaily(false);
     }
   }
 
@@ -1445,7 +1521,9 @@ function Tasks() {
                         created_by: task.created_by,
                         created_at: task.created_at,
                         assigned_to: task.assigned_to,
-                        assigned_users: task.assigned_users
+                        assigned_users: task.assigned_users,
+                        checklist: task.checklist || [],
+                        comments: task.comments || [],
                       });
                       setShowTaskDetailModal(true);
                     }}
@@ -1566,7 +1644,9 @@ function Tasks() {
                                         deadline: subtask.deadline ? subtask.deadline.replace(" ", "T").substring(0, 16) : null,
                                         task_id: subtask.task_id,
                                         created_by: subtask.created_by,
-                                        created_at: subtask.created_at
+                                        created_at: subtask.created_at,
+                                        checklist: subtask.checklist || [],
+                                        comments: subtask.comments || [],
                                       });
                                       setShowSubtaskDetailModal(true);
                                     }}
@@ -2424,6 +2504,21 @@ function Tasks() {
                     </div>
                   )}
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Checklist</label>
+                  <ActivityChecklist
+                    key={`checklist-task-${selectedTask.id}`}
+                    items={(editedTask?.checklist ?? selectedTask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
+                    onUpdate={async (updated) => {
+                      const { error } = await supabase.from('tasks').update({ checklist: updated }).eq('id', selectedTask.id);
+                      if (error) throw error;
+                      setEditedTask((prev) => (prev ? { ...prev, checklist: updated } : null));
+                      setTasks((prev) => prev.map((t) => (t.id === selectedTask.id ? { ...t, checklist: updated } : t)));
+                    }}
+                    placeholder="Añadir paso o verificación..."
+                    emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
+                  />
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2884,8 +2979,24 @@ function Tasks() {
                               </div>
                             )}
                             
-                            {/* Botón para agregar nueva subtarea */}
-                            <div className="mt-4 pt-4 border-t border-gray-200">
+                            {/* Botones para agregar subtareas */}
+                            <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDailySubtaskConfig(prev => ({
+                                    ...prev,
+                                    startDate: editedTask.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
+                                    endDate: editedTask.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
+                                    titlePrefix: editedTask.title?.slice(0, 40) || '',
+                                  }));
+                                  setShowGenerateDailyModal(true);
+                                }}
+                                className="flex items-center text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-md transition-colors border border-emerald-200"
+                              >
+                                <CalendarDays className="w-4 h-4 mr-1.5" />
+                                Generar subtareas diarias
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2936,7 +3047,27 @@ function Tasks() {
                         )}
                       </div>
                     ) : (
-                      <p className="text-gray-500">Esta tarea no tiene subtareas asociadas.</p>
+                      <div className="space-y-2">
+                        <p className="text-gray-500">Esta tarea no tiene subtareas asociadas.</p>
+                        {editMode && isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDailySubtaskConfig(prev => ({
+                                ...prev,
+                                startDate: editedTask?.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
+                                endDate: editedTask?.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
+                                titlePrefix: editedTask?.title?.slice(0, 40) || '',
+                              }));
+                              setShowGenerateDailyModal(true);
+                            }}
+                            className="flex items-center text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-md transition-colors border border-emerald-200"
+                          >
+                            <CalendarDays className="w-4 h-4 mr-1.5" />
+                            Generar subtareas diarias
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -3045,6 +3176,131 @@ function Tasks() {
         </div>
       )}
 
+      {/* Modal Generar subtareas diarias */}
+      {showGenerateDailyModal && selectedTask && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4">
+              <div className="flex items-center gap-2 text-white">
+                <Sparkles className="w-6 h-6" />
+                <h2 className="text-lg font-semibold">Generar subtareas diarias</h2>
+              </div>
+              <p className="text-emerald-100 text-sm mt-1">
+                Crea una subtarea por cada día del rango. Ideal para revisiones diarias, supervisión de embudo, etc.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha inicio</label>
+                  <input
+                    type="date"
+                    value={dailySubtaskConfig.startDate}
+                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha fin</label>
+                  <input
+                    type="date"
+                    value={dailySubtaskConfig.endDate}
+                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, endDate: e.target.value }))}
+                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prefijo del título</label>
+                <input
+                  type="text"
+                  value={dailySubtaskConfig.titlePrefix}
+                  onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, titlePrefix: e.target.value }))}
+                  placeholder={selectedTask.title || 'Ej: Revisión embudo'}
+                  className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Se añadirá la fecha a cada subtarea (ej: "Revisión embudo – 3 feb")</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Asignar a</label>
+                  <select
+                    value={dailySubtaskConfig.assignee}
+                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, assignee: e.target.value }))}
+                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Yo (actual)</option>
+                    {getAvailableUsers(selectedTask.project_id || null).map((u) => (
+                      <option key={u.id} value={u.id}>{u.name || u.email}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duración (min)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={480}
+                    value={dailySubtaskConfig.duration}
+                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, duration: Number(e.target.value) || 15 }))}
+                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dailySubtaskConfig.includeWeekends}
+                  onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, includeWeekends: e.target.checked }))}
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-gray-700">Incluir fines de semana</span>
+              </label>
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <p className="font-medium text-gray-700 mb-1">Vista previa</p>
+                {(() => {
+                  const dates = getDailyDates(dailySubtaskConfig.startDate, dailySubtaskConfig.endDate, dailySubtaskConfig.includeWeekends);
+                  const prefix = (dailySubtaskConfig.titlePrefix || selectedTask.title || 'Día').trim().slice(0, 40);
+                  const sample = dates.slice(0, 3).map(d => `${prefix} – ${format(d, 'd MMM', { locale: es })}`);
+                  return (
+                    <p className="text-gray-600">
+                      Se crearán <strong>{dates.length}</strong> subtareas
+                      {dates.length > 0 && (
+                        <>: {sample.join(', ')}{dates.length > 3 ? '...' : ''}</>
+                      )}
+                    </p>
+                  );
+                })()}
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowGenerateDailyModal(false)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateDailySubtasks}
+                disabled={generatingDaily}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {generatingDaily ? (
+                  <>Generando...</>
+                ) : (
+                  <>
+                    <CalendarDays className="w-4 h-4" />
+                    Generar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSubtaskDetailModal && selectedSubtask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -3105,6 +3361,68 @@ function Tasks() {
                       />
                     </div>
                   )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Comentarios</label>
+                  <TaskComments
+                    key={`comments-subtask-${selectedSubtask.id}`}
+                    comments={(editedSubtask?.comments ?? selectedSubtask.comments ?? []).map((c) => ({ ...c, created_at: c.created_at }))}
+                    users={users.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
+                    currentUserId={user?.id}
+                    onAdd={async (content) => {
+                      const newComment = {
+                        id: crypto.randomUUID(),
+                        user_id: user!.id,
+                        content,
+                        created_at: new Date().toISOString(),
+                      };
+                      const updated = [...(editedSubtask?.comments ?? selectedSubtask.comments ?? []), newComment];
+                      const { error } = await supabase.from('subtasks').update({ comments: updated }).eq('id', selectedSubtask.id);
+                      if (error) throw error;
+                      setEditedSubtask((prev) => (prev ? { ...prev, comments: updated } : null));
+                      setSubtasks((prev) => {
+                        const next = { ...prev };
+                        const list = next[selectedSubtask.task_id] || [];
+                        next[selectedSubtask.task_id] = list.map((s) => (s.id === selectedSubtask.id ? { ...s, comments: updated } : s));
+                        return next;
+                      });
+                    }}
+                    onDelete={async (commentId) => {
+                      const updated = (editedSubtask?.comments ?? selectedSubtask.comments ?? []).filter((c) => c.id !== commentId);
+                      const { error } = await supabase.from('subtasks').update({ comments: updated }).eq('id', selectedSubtask.id);
+                      if (error) throw error;
+                      setEditedSubtask((prev) => (prev ? { ...prev, comments: updated } : null));
+                      setSubtasks((prev) => {
+                        const next = { ...prev };
+                        const list = next[selectedSubtask.task_id] || [];
+                        next[selectedSubtask.task_id] = list.map((s) => (s.id === selectedSubtask.id ? { ...s, comments: updated } : s));
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Checklist</label>
+                  <ActivityChecklist
+                    key={`checklist-subtask-${selectedSubtask.id}`}
+                    items={(editedSubtask?.checklist ?? selectedSubtask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
+                    onUpdate={async (updated) => {
+                      const { error } = await supabase.from('subtasks').update({ checklist: updated }).eq('id', selectedSubtask.id);
+                      if (error) throw error;
+                      setEditedSubtask((prev) => (prev ? { ...prev, checklist: updated } : null));
+                      setSubtasks((prev) => {
+                        const next = { ...prev };
+                        const list = next[selectedSubtask.task_id] || [];
+                        const idx = list.findIndex((s) => s.id === selectedSubtask.id);
+                        if (idx >= 0) {
+                          next[selectedSubtask.task_id] = list.map((s) => (s.id === selectedSubtask.id ? { ...s, checklist: updated } : s));
+                        }
+                        return next;
+                      });
+                    }}
+                    placeholder="Añadir paso o verificación..."
+                    emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
+                  />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
