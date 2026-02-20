@@ -881,6 +881,82 @@ export async function sendNotificationRobust(
   return false;
 }
 
+// Función para crear mensaje de recordatorio de vencimiento
+export function createDeadlineReminderMessage(
+  taskTitle: string,
+  projectName: string,
+  deadlineDate: string,
+  daysUntil: number,
+  isSubtask: boolean = false,
+  parentTaskTitle?: string
+): string {
+  const safeTaskTitle = taskTitle || 'Tarea sin título';
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const taskType = isSubtask ? 'subtarea' : 'tarea';
+  const parentInfo = isSubtask && parentTaskTitle ? `\n📋 <b>Tarea principal:</b> ${escapeHtml(parentTaskTitle)}` : '';
+  const daysText = daysUntil === 0 ? 'hoy' : daysUntil === 1 ? 'mañana' : `en ${daysUntil} días`;
+  return `⏰ <b>RECORDATORIO DE VENCIMIENTO</b>
+
+${isSubtask ? '🔸' : '📋'} <b>${taskType.charAt(0).toUpperCase() + taskType.slice(1)}:</b> ${escapeHtml(safeTaskTitle)}${parentInfo}
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+📅 <b>Vence:</b> ${escapeHtml(deadlineDate)} (${daysText})
+
+No olvides completar esta ${taskType} antes del vencimiento.`;
+}
+
+// Función para crear mensaje de resumen diario (tareas que vencen hoy)
+export function createDailySummaryMessage(
+  userName: string,
+  tasksDueToday: number,
+  taskList: string[]
+): string {
+  const safeName = userName || 'Usuario';
+  if (tasksDueToday === 0) {
+    return `📋 <b>BUENOS DÍAS, ${escapeHtml(safeName)}</b>
+
+✅ No tienes tareas que vencen hoy.`;
+  }
+  const listText = taskList.length > 0
+    ? '\n\n' + taskList.map((t, i) => `${i + 1}. ${escapeHtml(t)}`).join('\n')
+    : '';
+  return `📋 <b>BUENOS DÍAS, ${escapeHtml(safeName)}</b>
+
+⏰ Tienes <b>${tasksDueToday}</b> tarea${tasksDueToday > 1 ? 's' : ''} que vence${tasksDueToday > 1 ? 'n' : ''} hoy:${listText}
+
+¡Que tengas un buen día!`;
+}
+
+// Función para crear mensaje de alerta de presupuesto
+export function createBudgetAlertMessage(
+  projectName: string,
+  hoursConsumed: number,
+  budgetHours: number,
+  percentConsumed: number
+): string {
+  const safeProjectName = projectName || 'Proyecto sin nombre';
+  const status = percentConsumed >= 100 ? 'superado' : 'cerca del límite';
+  const icon = percentConsumed >= 100 ? '🚨' : '⚠️';
+  return `${icon} <b>ALERTA DE PRESUPUESTO</b>
+
+🏢 <b>Proyecto:</b> ${escapeHtml(safeProjectName)}
+⏱️ <b>Horas consumidas:</b> ${hoursConsumed.toFixed(1)}h
+📊 <b>Presupuesto:</b> ${budgetHours}h
+📈 <b>Porcentaje:</b> ${percentConsumed}%
+
+El presupuesto de horas está ${status}.`;
+}
+
+// Función para enviar alerta de presupuesto a administradores
+export async function sendBudgetAlert(
+  projectName: string,
+  hoursConsumed: number,
+  budgetHours: number,
+  percentConsumed: number
+): Promise<boolean> {
+  const message = createBudgetAlertMessage(projectName, hoursConsumed, budgetHours, percentConsumed);
+  return sendAdminNotification(message);
+}
+
 export async function handleTestNotification(req: any, res: any) {
     const { chatId, message } = req.body;
   

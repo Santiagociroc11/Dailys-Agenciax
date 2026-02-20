@@ -6,6 +6,7 @@
   "scripts": {
     "migrate:supabase-to-mongodb": "npx tsx scripts/migrate-supabase-to-mongodb.ts",
     "migrate:add-restricted-access": "npx tsx scripts/add-restricted-access-to-projects.ts",
+    "migrate:add-client-id": "npx tsx scripts/add-client-id-to-projects.ts",
     "dev": "vite",
     "dev:server": "tsx watch server.ts",
     "build:frontend": "vite build",

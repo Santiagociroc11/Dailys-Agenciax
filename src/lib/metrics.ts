@@ -1165,12 +1165,30 @@ export function getDateRangeForPeriod(
 export interface HoursForBillingRow {
   project_id: string | null;
   project_name: string;
+  client_id: string | null;
+  client_name: string | null;
   user_id: string | null;
   user_name: string | null;
   user_email: string | null;
   total_minutes: number;
   total_hours: number;
   task_count: number;
+}
+
+/** Obtiene horas consumidas por proyecto (para indicadores de presupuesto) */
+export async function getProjectHoursConsumed(): Promise<Record<string, number>> {
+  try {
+    const { data, error } = await supabase.rpc('get_project_hours_consumed', {});
+    if (error) throw error;
+    const map: Record<string, number> = {};
+    (data as { project_id: string; hours_consumed: number }[] || []).forEach((r) => {
+      map[r.project_id] = r.hours_consumed;
+    });
+    return map;
+  } catch (error) {
+    console.error('Error getting project hours consumed:', error);
+    return {};
+  }
 }
 
 /** Obtiene horas trabajadas para facturación (por proyecto y usuario) */
@@ -1190,6 +1208,33 @@ export async function getHoursForBilling(
     return (data as HoursForBillingRow[]) || [];
   } catch (error) {
     console.error('Error getting hours for billing:', error);
+    return [];
+  }
+}
+
+export interface CapacityRow {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  assigned_hours: number;
+  available_hours: number;
+  utilization_percent: number;
+}
+
+/** Obtiene capacidad por usuario (horas asignadas vs disponibles por semana) */
+export async function getCapacityByUser(
+  workingHoursPerDay: number = 8,
+  workingDaysPerWeek: number = 5
+): Promise<CapacityRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_capacity_by_user', {
+      working_hours_per_day: workingHoursPerDay,
+      working_days_per_week: workingDaysPerWeek,
+    });
+    if (error) throw error;
+    return (data as CapacityRow[]) || [];
+  } catch (error) {
+    console.error('Error getting capacity by user:', error);
     return [];
   }
 }

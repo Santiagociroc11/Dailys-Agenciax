@@ -10,8 +10,10 @@ import {
   Calendar,
   BarChart3,
   Users,
-  Briefcase
+  Briefcase,
+  DollarSign
 } from 'lucide-react';
+import { getProjectHoursConsumed } from '../lib/metrics';
 
 interface PerformanceMetrics {
   tasksPending: number;
@@ -41,10 +43,20 @@ interface UserStats {
   metrics: PerformanceMetrics;
 }
 
+interface BudgetAlert {
+  projectId: string;
+  projectName: string;
+  hoursConsumed: number;
+  budgetHours: number;
+  percentConsumed: number;
+  status: 'over' | 'warning';
+}
+
 const Dashboard = () => {
   const { user, isAdmin } = useAuth();
   const [userMetrics, setUserMetrics] = useState<PerformanceMetrics | null>(null);
   const [teamMetrics, setTeamMetrics] = useState<UserStats[]>([]);
+  const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -94,9 +106,39 @@ const Dashboard = () => {
     return individualMetrics;
   }
 
+  async function fetchBudgetAlerts() {
+    try {
+      const [hoursMap, { data: projects }] = await Promise.all([
+        getProjectHoursConsumed(),
+        supabase.from('projects').select('id, name, budget_hours').eq('is_archived', false),
+      ]);
+      const alerts: BudgetAlert[] = [];
+      (projects || []).forEach((p: { id: string; name: string; budget_hours?: number | null }) => {
+        if (p.budget_hours == null || p.budget_hours <= 0) return;
+        const consumed = hoursMap[p.id] ?? 0;
+        const percent = Math.round((consumed / p.budget_hours) * 100);
+        if (percent >= 80) {
+          alerts.push({
+            projectId: p.id,
+            projectName: p.name,
+            hoursConsumed: consumed,
+            budgetHours: p.budget_hours,
+            percentConsumed: percent,
+            status: percent >= 100 ? 'over' : 'warning',
+          });
+        }
+      });
+      setBudgetAlerts(alerts.sort((a, b) => b.percentConsumed - a.percentConsumed));
+    } catch (e) {
+      console.error('Error fetching budget alerts:', e);
+      setBudgetAlerts([]);
+    }
+  }
+
   async function fetchTeamMetrics() {
     setLoading(true);
     try {
+      await fetchBudgetAlerts();
       // 1. Obtener todos los datos necesarios en paralelo
       const [
         { data: users, error: usersError },
@@ -532,6 +574,32 @@ const Dashboard = () => {
             </div>
           </div>
         </>
+      )}
+
+      {isAdmin && budgetAlerts.length > 0 && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center">
+            <DollarSign className="w-6 h-6 mr-2 text-amber-600" />
+            Alertas de Presupuesto
+          </h2>
+          <div className="space-y-2">
+            {budgetAlerts.map((a) => (
+              <div
+                key={a.projectId}
+                className={`flex items-center justify-between p-3 rounded-lg border ${
+                  a.status === 'over' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+                }`}
+              >
+                <span className="font-medium text-gray-900">{a.projectName}</span>
+                <span className={`text-sm font-semibold ${
+                  a.status === 'over' ? 'text-red-700' : 'text-amber-700'
+                }`}>
+                  {a.hoursConsumed.toFixed(1)}h / {a.budgetHours}h ({a.percentConsumed}%)
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {isAdmin && (

@@ -1,7 +1,9 @@
 import type { Model } from 'mongoose';
 import {
   User,
+  Client,
   Project,
+  ProjectTemplate,
   Task,
   Subtask,
   Area,
@@ -15,7 +17,9 @@ import {
 
 export const MODEL_MAP: Record<string, Model<unknown>> = {
   users: User as Model<unknown>,
+  clients: Client as Model<unknown>,
   projects: Project as Model<unknown>,
+  project_templates: ProjectTemplate as Model<unknown>,
   tasks: Task as Model<unknown>,
   subtasks: Subtask as Model<unknown>,
   areas: Area as Model<unknown>,

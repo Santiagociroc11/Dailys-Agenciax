@@ -88,8 +88,14 @@ export default function Reports() {
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportingHours, setExportingHours] = useState(false);
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+  const [exportClientFilter, setExportClientFilter] = useState<string>('');
 
   const dateRange = getDateRangeForPeriod(period, customStart, customEnd);
+
+  useEffect(() => {
+    supabase.from('clients').select('id, name').order('name').then(({ data }) => setClients(data || []));
+  }, []);
 
   useEffect(() => {
     fetchMetrics();
@@ -123,12 +129,14 @@ export default function Reports() {
     }
   }
 
-  async function exportHoursForBilling() {
+  async function exportHoursForBilling(clientId?: string) {
     setExportingHours(true);
     try {
       const rows = await getHoursForBilling(dateRange.startDate, dateRange.endDate);
-      const headers = ['Proyecto', 'Usuario', 'Email', 'Horas', 'Minutos', 'Tareas'];
-      const csvRows = rows.map((r: HoursForBillingRow) => [
+      const filtered = clientId ? rows.filter((r: HoursForBillingRow) => r.client_id === clientId) : rows;
+      const headers = ['Cliente', 'Proyecto', 'Usuario', 'Email', 'Horas', 'Minutos', 'Tareas'];
+      const csvRows = filtered.map((r: HoursForBillingRow) => [
+        r.client_name || '—',
         r.project_name,
         r.user_name || '—',
         r.user_email || '—',
@@ -141,7 +149,7 @@ export default function Reports() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `horas_facturacion_${dateRange.startDate}_${dateRange.endDate}.csv`;
+      a.download = `horas_facturacion_${clientId ? `cliente_${clientId}_` : ''}${dateRange.startDate}_${dateRange.endDate}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -287,14 +295,26 @@ export default function Reports() {
             <Download className="w-4 h-4 mr-2" />
             Exportar CSV
           </button>
-          <button
-            onClick={exportHoursForBilling}
-            disabled={exportingHours}
-            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-          >
-            <Clock className="w-4 h-4 mr-2" />
-            {exportingHours ? 'Exportando...' : 'Horas para facturar'}
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={exportClientFilter}
+              onChange={(e) => setExportClientFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="">Todos los clientes</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => exportHoursForBilling(exportClientFilter || undefined)}
+              disabled={exportingHours}
+              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+            >
+              <Clock className="w-4 h-4 mr-2" />
+              {exportingHours ? 'Exportando...' : 'Horas para facturar'}
+            </button>
+          </div>
         </div>
       </div>
 

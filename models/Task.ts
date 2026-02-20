@@ -21,6 +21,7 @@ const taskSchema = new mongoose.Schema(
     notes: { type: String, default: null },
     feedback: { type: mongoose.Schema.Types.Mixed, default: null },
     returned_at: { type: Date, default: null },
+    is_billable: { type: Boolean, default: true },
   },
   {
     timestamps: true,

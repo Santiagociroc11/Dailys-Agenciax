@@ -7,6 +7,10 @@ import { handleDbQuery, handleDbRpc } from './api/db.js';
 import { 
   handleTestNotification, 
   sendAdminNotification, 
+  sendBudgetAlert,
+  sendTelegramMessage,
+  createDeadlineReminderMessage,
+  createDailySummaryMessage,
     createTaskCompletedMessage,
     createTaskBlockedMessage,
     createTaskInReviewMessage,
@@ -275,6 +279,190 @@ app.post('/api/telegram/user-task-in-review', async (req, res) => {
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 
+    });
+  }
+});
+
+// Endpoint para recordatorios de vencimiento (para cron)
+app.post('/api/telegram/deadline-reminders', async (req, res) => {
+  try {
+    const { Task, Subtask, Project, User } = await import('./models/index.js');
+    const days = (req.body?.days as number) ?? 1;
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + days);
+    const targetStr = targetDate.toISOString().split('T')[0];
+
+    const tasksDue = await Task.find({
+      status: { $nin: ['approved'] },
+      deadline: { $gte: new Date(targetStr + 'T00:00:00'), $lt: new Date(targetStr + 'T23:59:59') },
+    })
+      .select('id title deadline project_id')
+      .lean()
+      .exec();
+
+    const subtasksDue = await Subtask.find({
+      status: { $nin: ['approved'] },
+      deadline: { $gte: new Date(targetStr + 'T00:00:00'), $lt: new Date(targetStr + 'T23:59:59') },
+    })
+      .select('id title deadline task_id')
+      .lean()
+      .exec();
+
+    const taskIdsForSubs = subtasksDue.map((s: { task_id: string }) => s.task_id);
+    const parentTasksForSubs = await Task.find({ id: { $in: taskIdsForSubs } }).select('id title project_id').lean().exec();
+    const parentTaskMap = new Map(parentTasksForSubs.map((t: { id: string; title: string; project_id: string }) => [t.id, t]));
+    const projectIds = [...new Set([...tasksDue.map((t: { project_id: string }) => t.project_id), ...parentTasksForSubs.map((t: { project_id: string }) => t.project_id)])].filter(Boolean);
+    const projects = await Project.find({ id: { $in: projectIds } }).select('id name').lean().exec();
+    const projectMap = new Map(projects.map((p: { id: string; name: string }) => [p.id, p.name]));
+
+    let sentCount = 0;
+    for (const t of tasksDue) {
+      const userIds = (t as { assigned_users?: string[] }).assigned_users || [];
+      const projectName = projectMap.get(t.project_id) || 'Sin proyecto';
+      const deadlineStr = new Date(t.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+      const msg = createDeadlineReminderMessage(t.title, projectName, deadlineStr, days, false);
+      for (const uid of userIds) {
+        const u = await User.findOne({ id: uid, telegram_chat_id: { $ne: null } }).select('telegram_chat_id').lean().exec();
+        if (u?.telegram_chat_id) {
+          const ok = await sendTelegramMessage(u.telegram_chat_id, msg);
+          if (ok) sentCount++;
+        }
+      }
+    }
+    for (const s of subtasksDue) {
+      const userId = (s as { assigned_to?: string }).assigned_to;
+      if (!userId) continue;
+      const parentTask = parentTaskMap.get(s.task_id);
+      const projectName = parentTask?.project_id ? projectMap.get(parentTask.project_id) || 'Sin proyecto' : 'Sin proyecto';
+      const deadlineStr = new Date(s.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+      const msg = createDeadlineReminderMessage(s.title, projectName, deadlineStr, days, true, parentTask?.title);
+      const u = await User.findOne({ id: userId, telegram_chat_id: { $ne: null } }).select('telegram_chat_id').lean().exec();
+      if (u?.telegram_chat_id) {
+        const ok = await sendTelegramMessage(u.telegram_chat_id, msg);
+        if (ok) sentCount++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Recordatorios enviados.`,
+      remindersSent: sentCount,
+      tasksChecked: tasksDue.length + subtasksDue.length,
+    });
+  } catch (error) {
+    console.error('Error en deadline-reminders:', error);
+    return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  }
+});
+
+// Endpoint para resumen diario (tareas que vencen hoy) - para cron
+app.post('/api/telegram/daily-summary', async (req, res) => {
+  try {
+    const { Task, Subtask, Project, User } = await import('./models/index.js');
+    const today = new Date().toISOString().split('T')[0];
+    const todayStart = new Date(today + 'T00:00:00');
+    const todayEnd = new Date(today + 'T23:59:59');
+
+    const usersWithTelegram = await User.find({ telegram_chat_id: { $ne: null } })
+      .select('id name telegram_chat_id')
+      .lean()
+      .exec();
+
+    let sentCount = 0;
+    for (const user of usersWithTelegram) {
+      const tasksDue = await Task.find({
+        assigned_users: user.id,
+        status: { $nin: ['approved'] },
+        deadline: { $gte: todayStart, $lte: todayEnd },
+      })
+        .select('title project_id')
+        .lean()
+        .exec();
+
+      const subtasksDue = await Subtask.find({
+        assigned_to: user.id,
+        status: { $nin: ['approved'] },
+        deadline: { $gte: todayStart, $lte: todayEnd },
+      })
+        .select('title task_id')
+        .lean()
+        .exec();
+
+      const projectIds = [...new Set(tasksDue.map((t: { project_id: string }) => t.project_id).filter(Boolean))];
+      const projects = await Project.find({ id: { $in: projectIds } }).select('id name').lean().exec();
+      const projectMap = new Map(projects.map((p: { id: string; name: string }) => [p.id, p.name]));
+
+      const taskList: string[] = [];
+      tasksDue.forEach((t: { title: string; project_id: string }) => {
+        taskList.push(`${t.title} (${projectMap.get(t.project_id) || 'Proyecto'})`);
+      });
+      subtasksDue.forEach((s: { title: string }) => {
+        taskList.push(s.title);
+      });
+
+      const total = taskList.length;
+      const msg = createDailySummaryMessage(user.name || user.email || 'Usuario', total, taskList.slice(0, 10));
+      const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
+      if (ok) sentCount++;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Resumen diario enviado.',
+      usersNotified: sentCount,
+      totalUsers: usersWithTelegram.length,
+    });
+  } catch (error) {
+    console.error('Error en daily-summary:', error);
+    return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  }
+});
+
+// Endpoint para verificar presupuestos y enviar alertas por Telegram (para cron)
+app.post('/api/telegram/budget-check', async (req, res) => {
+  try {
+    const { Project, TaskWorkAssignment } = await import('./models/index.js');
+    const threshold = (req.body?.threshold as number) ?? 80; // % a partir del cual alertar (default 80)
+
+    const projects = await Project.find({
+      is_archived: false,
+      budget_hours: { $exists: true, $ne: null, $gt: 0 },
+    })
+      .select('id name budget_hours')
+      .lean()
+      .exec();
+
+    const pipeline = [
+      { $match: { project_id: { $ne: null }, actual_duration: { $exists: true, $gt: 0 } } },
+      { $group: { _id: '$project_id', total_minutes: { $sum: '$actual_duration' } } },
+    ];
+    const hoursResults = await TaskWorkAssignment.aggregate(pipeline).exec();
+    const hoursMap = new Map<string, number>();
+    hoursResults.forEach((r: { _id: string; total_minutes: number }) => {
+      hoursMap.set(r._id, Math.round((r.total_minutes / 60) * 100) / 100);
+    });
+
+    let sentCount = 0;
+    for (const p of projects) {
+      const consumed = hoursMap.get(p.id) ?? 0;
+      const percent = Math.round((consumed / (p.budget_hours as number)) * 100);
+      if (percent >= threshold) {
+        const ok = await sendBudgetAlert(p.name, consumed, p.budget_hours as number, percent);
+        if (ok) sentCount++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Verificación de presupuestos completada.`,
+      alertsSent: sentCount,
+      projectsChecked: projects.length,
+    });
+  } catch (error) {
+    console.error('Error en budget-check endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Error interno del servidor.',
     });
   }
 });

@@ -2,11 +2,12 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore, FileStack, Copy } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import { getProjectHoursConsumed } from '../lib/metrics';
 
 interface Project {
   id: string;
@@ -19,6 +20,14 @@ interface Project {
   restricted_access?: boolean;
   is_archived?: boolean;
   archived_at?: string;
+  client_id?: string | null;
+  budget_hours?: number | null;
+  budget_amount?: number | null;
+}
+
+interface Client {
+  id: string;
+  name: string;
 }
 
 interface Task {
@@ -60,19 +69,45 @@ function Projects() {
   const [editedProject, setEditedProject] = useState<any>(null);
   const [editMode, setEditMode] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
     start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-    involved_users: [] as string[]
+    involved_users: [] as string[],
+    client_id: null as string | null,
+    budget_hours: null as number | null,
+    budget_amount: null as number | null,
   });
+  const [hoursConsumedByProject, setHoursConsumedByProject] = useState<Record<string, number>>({});
+  const [templates, setTemplates] = useState<{ id: string; name: string; description: string | null; tasks: unknown[] }[]>([]);
+  const [useTemplateMode, setUseTemplateMode] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     fetchData();
   }, []);
-  
+
+  useEffect(() => {
+    async function loadClients() {
+      const { data } = await supabase.from('clients').select('id, name').order('name');
+      setClients(data || []);
+    }
+    loadClients();
+  }, []);
+
+  useEffect(() => {
+    async function loadTemplates() {
+      const { data } = await supabase.from('project_templates').select('id, name, description, tasks').order('name');
+      setTemplates(data || []);
+    }
+    loadTemplates();
+  }, []);
+
   useEffect(() => {
     fetchUsers();
   }, [isAdmin]);
@@ -119,6 +154,9 @@ function Projects() {
         subtasksPromise,
       ]);
 
+      const hoursMap = await getProjectHoursConsumed();
+      setHoursConsumedByProject(hoursMap);
+
       if (projectsError) throw projectsError;
       setProjects(projectsData || []);
       
@@ -147,6 +185,28 @@ function Projects() {
   }
 
   // Función para archivar un proyecto
+  async function handleCreateTemplateFromProject() {
+    if (!selectedProject || !user) return;
+    const name = newTemplateName.trim() || selectedProject.name + ' (plantilla)';
+    try {
+      const { data, error } = await supabase.rpc('create_template_from_project', {
+        project_id: selectedProject.id,
+        template_name: name,
+        created_by: user.id,
+      });
+      if (error) throw error;
+      setShowCreateTemplateModal(false);
+      setNewTemplateName('');
+      setShowDetailModal(false);
+      const { data: updated } = await supabase.from('project_templates').select('id, name, description, tasks').order('name');
+      setTemplates(updated || []);
+      toast.success('Plantilla creada correctamente');
+    } catch (err) {
+      console.error('Error al crear plantilla:', err);
+      toast.error('Error al crear la plantilla');
+    }
+  }
+
   async function handleArchiveProject(projectId: string) {
     try {
       const { error } = await supabase
@@ -201,6 +261,37 @@ function Projects() {
       return;
     }
 
+    // Crear desde plantilla
+    if (useTemplateMode && selectedTemplateId) {
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('create_project_from_template', {
+          template_id: selectedTemplateId,
+          project_name: newProject.name,
+          description: newProject.description,
+          start_date: newProject.start_date,
+          deadline: newProject.deadline,
+          created_by: user.id,
+          involved_users: newProject.involved_users,
+          client_id: newProject.client_id,
+          budget_hours: newProject.budget_hours,
+          budget_amount: newProject.budget_amount,
+        });
+        if (rpcError) throw rpcError;
+        if (!rpcData) throw new Error('No se creó el proyecto');
+        await fetchData();
+        await fetchUsers();
+        setShowModal(false);
+        setUseTemplateMode(false);
+        setSelectedTemplateId(null);
+        setNewProject({ name: '', description: '', start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"), deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"), involved_users: [], client_id: null, budget_hours: null, budget_amount: null });
+        toast.success('Proyecto creado desde plantilla correctamente');
+      } catch (err) {
+        console.error('Error al crear proyecto desde plantilla:', err);
+        setError('Error al crear el proyecto desde la plantilla. Por favor, inténtalo de nuevo.');
+      }
+      return;
+    }
+
     try {
       // Create the project
       const { data, error } = await supabase
@@ -212,6 +303,9 @@ function Projects() {
             start_date: newProject.start_date,
             deadline: newProject.deadline,
             created_by: user.id,
+            client_id: newProject.client_id || null,
+            budget_hours: newProject.budget_hours ?? null,
+            budget_amount: newProject.budget_amount ?? null,
           },
         ])
         .select();
@@ -381,7 +475,10 @@ function Projects() {
         description: '',
         start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
         deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        involved_users: []
+        involved_users: [],
+        client_id: null,
+        budget_hours: null,
+        budget_amount: null,
       });
     } catch (error) {
       console.error('Error al crear el proyecto:', error);
@@ -406,7 +503,10 @@ function Projects() {
           name: editedProject.name,
           description: editedProject.description,
           start_date: editedProject.start_date,
-          deadline: editedProject.deadline
+          deadline: editedProject.deadline,
+          client_id: editedProject.client_id ?? null,
+          budget_hours: editedProject.budget_hours ?? null,
+          budget_amount: editedProject.budget_amount ?? null,
         })
         .eq('id', selectedProject.id);
       
@@ -670,7 +770,10 @@ function Projects() {
                         start_date: project.start_date ? project.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                         deadline: project.deadline ? project.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                         restricted_access: project.restricted_access || false,
-                        involved_users: getUsersWithAccessToProject(project.id).map(u => u.id)
+                        involved_users: getUsersWithAccessToProject(project.id).map(u => u.id),
+                        client_id: project.client_id ?? null,
+                        budget_hours: project.budget_hours ?? null,
+                        budget_amount: project.budget_amount ?? null,
                       });
                       setShowDetailModal(true);
                     }}
@@ -683,6 +786,26 @@ function Projects() {
                   <p className="text-gray-600 mb-4 line-clamp-2">{project.description}</p>
                 )}
                 
+                {(project.budget_hours != null && project.budget_hours > 0) && (() => {
+                  const hoursConsumed = hoursConsumedByProject[project.id] ?? 0;
+                  const percentConsumed = Math.round((hoursConsumed / project.budget_hours!) * 100);
+                  const status = percentConsumed >= 100 ? 'over' : percentConsumed >= 80 ? 'warning' : 'ok';
+                  return (
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="text-sm text-gray-600 flex items-center">
+                        <Clock className="w-4 h-4 mr-1" />
+                        Presupuesto: {hoursConsumed.toFixed(1)}h / {project.budget_hours}h
+                      </span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                        status === 'over' ? 'bg-red-100 text-red-700' :
+                        status === 'warning' ? 'bg-amber-100 text-amber-700' :
+                        'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {percentConsumed}% consumido
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="mb-4">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-sm font-medium text-gray-700">Progreso (Aprobado)</span>
@@ -850,7 +973,7 @@ function Projects() {
             <div className="flex justify-between items-center p-6 border-b">
               <h2 className="text-xl font-semibold">Crear Nuevo Proyecto</h2>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); setUseTemplateMode(false); setSelectedTemplateId(null); }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-6 h-6" />
@@ -862,6 +985,30 @@ function Projects() {
                   {error}
                 </div>
               )}
+              <div className="mb-4 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setUseTemplateMode(!useTemplateMode); if (!useTemplateMode) setSelectedTemplateId(null); }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm ${useTemplateMode ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}
+                >
+                  <FileStack className="w-4 h-4" />
+                  Usar plantilla
+                </button>
+                {useTemplateMode && templates.length > 0 && (
+                  <select
+                    value={selectedTemplateId || ''}
+                    onChange={(e) => setSelectedTemplateId(e.target.value || null)}
+                    className="flex-1 p-2 border rounded-md text-sm"
+                  >
+                    <option value="">Seleccionar plantilla...</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({(t.tasks || []).length} tareas)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -885,6 +1032,51 @@ function Projects() {
                     className="w-full p-2 border rounded-md"
                     rows={3}
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cliente
+                  </label>
+                  <select
+                    value={newProject.client_id || ''}
+                    onChange={(e) => setNewProject({ ...newProject, client_id: e.target.value || null })}
+                    className="w-full p-2 border rounded-md"
+                  >
+                    <option value="">Sin cliente</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Presupuesto (horas)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      placeholder="Opcional"
+                      value={newProject.budget_hours ?? ''}
+                      onChange={(e) => setNewProject({ ...newProject, budget_hours: e.target.value ? parseFloat(e.target.value) : null })}
+                      className="w-full p-2 border rounded-md"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Presupuesto (monto €)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Opcional"
+                      value={newProject.budget_amount ?? ''}
+                      onChange={(e) => setNewProject({ ...newProject, budget_amount: e.target.value ? parseFloat(e.target.value) : null })}
+                      className="w-full p-2 border rounded-md"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -1028,6 +1220,74 @@ function Projects() {
                     </p>
                   )}
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cliente
+                  </label>
+                  {editMode ? (
+                    <select
+                      value={editedProject.client_id || ''}
+                      onChange={(e) => setEditedProject({ ...editedProject, client_id: e.target.value || null })}
+                      className="w-full p-2 border rounded-md"
+                      disabled={!isAdmin}
+                    >
+                      <option value="">Sin cliente</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="p-2 bg-gray-50 rounded-md">
+                      {selectedProject.client_id
+                        ? clients.find((c) => c.id === selectedProject.client_id)?.name || 'Cliente'
+                        : 'Sin cliente'}
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Presupuesto (horas)
+                    </label>
+                    {editMode ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="Opcional"
+                        value={editedProject.budget_hours ?? ''}
+                        onChange={(e) => setEditedProject({ ...editedProject, budget_hours: e.target.value ? parseFloat(e.target.value) : null })}
+                        className="w-full p-2 border rounded-md"
+                        disabled={!isAdmin}
+                      />
+                    ) : (
+                      <p className="p-2 bg-gray-50 rounded-md">
+                        {selectedProject.budget_hours != null ? `${selectedProject.budget_hours} h` : 'Sin definir'}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Presupuesto (monto €)
+                    </label>
+                    {editMode ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Opcional"
+                        value={editedProject.budget_amount ?? ''}
+                        onChange={(e) => setEditedProject({ ...editedProject, budget_amount: e.target.value ? parseFloat(e.target.value) : null })}
+                        className="w-full p-2 border rounded-md"
+                        disabled={!isAdmin}
+                      />
+                    ) : (
+                      <p className="p-2 bg-gray-50 rounded-md">
+                        {selectedProject.budget_amount != null ? `€${selectedProject.budget_amount.toLocaleString()}` : 'Sin definir'}
+                      </p>
+                    )}
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1080,6 +1340,18 @@ function Projects() {
                   </div>
                 </div>
                 
+                {isAdmin && !editMode && (
+                  <div className="mt-4 pt-4 border-t">
+                    <button
+                      type="button"
+                      onClick={() => { setNewTemplateName(selectedProject.name); setShowCreateTemplateModal(true); }}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Crear plantilla desde este proyecto
+                    </button>
+                  </div>
+                )}
                 {isAdmin && editMode && (
                   <div className="mt-3 border-t pt-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
@@ -1340,6 +1612,43 @@ function Projects() {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateTemplateModal && selectedProject && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-lg w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold mb-4">Crear plantilla desde proyecto</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Se guardará la estructura de tareas y subtareas de &quot;{selectedProject.name}&quot; como plantilla reutilizable.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre de la plantilla</label>
+              <input
+                type="text"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                placeholder={selectedProject.name + ' (plantilla)'}
+                className="w-full p-2 border rounded-md"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowCreateTemplateModal(false); setNewTemplateName(''); }}
+                className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateTemplateFromProject}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700"
+              >
+                Crear plantilla
+              </button>
             </div>
           </div>
         </div>

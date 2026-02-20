@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2 } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
@@ -255,6 +255,7 @@ function Management() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedPriority, setSelectedPriority] = useState<string | null>(null);
   const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(true);
   const [groupByProject, setGroupByProject] = useState(true);
@@ -338,11 +339,43 @@ function Management() {
     fetchData();
   }, [selectedProject, selectedPriority, selectedAssignee]);
   
+  const { tasks: displayTasks, subtasks: displaySubtasks } = React.useMemo(() => {
+    if (!searchTerm.trim()) return { tasks, subtasks };
+    const term = searchTerm.toLowerCase().trim();
+    const taskIdsMatching = new Set<string>();
+    const filteredTasks = tasks.filter(t => {
+      const matchTitle = t.title?.toLowerCase().includes(term);
+      const projectName = projects.find(p => p.id === t.project_id)?.name?.toLowerCase() || '';
+      const matchProject = projectName.includes(term);
+      const assigneeStr = (t.assigned_users || []).map(uid => {
+        const u = users.find(us => us.id === uid);
+        return (u?.name || u?.email || '').toLowerCase();
+      }).join(' ');
+      const matchAssignee = assigneeStr.includes(term);
+      if (matchTitle || matchProject || matchAssignee) {
+        taskIdsMatching.add(t.id);
+        return true;
+      }
+      return false;
+    });
+    const filteredSubtasks = subtasks.filter(st => {
+      const matchTitle = st.title?.toLowerCase().includes(term);
+      const assigneeName = (users.find(u => u.id === st.assigned_to)?.name || users.find(u => u.id === st.assigned_to)?.email || '').toLowerCase();
+      const matchAssignee = assigneeName.includes(term);
+      const parentTask = tasks.find(t => t.id === st.task_id);
+      const matchParent = parentTask?.title?.toLowerCase().includes(term);
+      return matchTitle || matchAssignee || matchParent || taskIdsMatching.has(st.task_id);
+    });
+    return { tasks: filteredTasks, subtasks: filteredSubtasks };
+  }, [tasks, subtasks, searchTerm, projects, users]);
+
   useEffect(() => {
-    if (tasks.length > 0 || subtasks.length > 0) {
-        processMainTasks(tasks, subtasks);
+    if (displayTasks.length > 0 || displaySubtasks.length > 0) {
+        processMainTasks(displayTasks, displaySubtasks);
+    } else {
+        setProcessedMainTasks([]);
     }
-  }, [tasks, subtasks, processMainTasks]);
+  }, [displayTasks, displaySubtasks, processMainTasks]);
 
   useEffect(() => {
     // Solo configurar el intervalo si autoRefresh está activado
@@ -1995,9 +2028,9 @@ function Management() {
       // Group by project
       projects.forEach(project => {
         groupedItems[project.id] = {
-          tasks: tasks.filter(task => task.project_id === project.id),
-          subtasks: subtasks.filter(subtask => {
-            const relatedTask = tasks.find(task => task.id === subtask.task_id);
+          tasks: displayTasks.filter(task => task.project_id === project.id),
+          subtasks: displaySubtasks.filter(subtask => {
+            const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
             return relatedTask && relatedTask.project_id === project.id;
           })
         };
@@ -2005,9 +2038,9 @@ function Management() {
       
       // Add "No Project" group
       groupedItems['no_project'] = {
-        tasks: tasks.filter(task => !task.project_id),
-        subtasks: subtasks.filter(subtask => {
-          const relatedTask = tasks.find(task => task.id === subtask.task_id);
+        tasks: displayTasks.filter(task => !task.project_id),
+        subtasks: displaySubtasks.filter(subtask => {
+          const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
           return relatedTask && !relatedTask.project_id;
         })
       };
@@ -2016,9 +2049,9 @@ function Management() {
       const priorities = ['high', 'medium', 'low'];
       priorities.forEach(priority => {
         groupedItems[priority] = {
-          tasks: tasks.filter(task => task.priority === priority),
-          subtasks: subtasks.filter(subtask => {
-            const relatedTask = tasks.find(task => task.id === subtask.task_id);
+          tasks: displayTasks.filter(task => task.priority === priority),
+          subtasks: displaySubtasks.filter(subtask => {
+            const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
             return relatedTask && relatedTask.priority === priority;
           })
         };
@@ -2026,11 +2059,11 @@ function Management() {
     } else if (groupByAssignee) {
       // Group by assignee (for subtasks)
       users.forEach(user => {
-        const userSubtasks = subtasks.filter(subtask => subtask.assigned_to === user.id);
+        const userSubtasks = displaySubtasks.filter(subtask => subtask.assigned_to === user.id);
         const relatedTaskIds = new Set(userSubtasks.map(subtask => subtask.task_id));
         
         groupedItems[user.id] = {
-          tasks: tasks.filter(task => relatedTaskIds.has(task.id)),
+          tasks: displayTasks.filter(task => relatedTaskIds.has(task.id)),
           subtasks: userSubtasks
         };
       });
@@ -2038,7 +2071,7 @@ function Management() {
       // Add "Unassigned" group
       groupedItems['unassigned'] = {
         tasks: [],
-        subtasks: subtasks.filter(subtask => !subtask.assigned_to)
+        subtasks: displaySubtasks.filter(subtask => !subtask.assigned_to)
       };
     } else if (groupByDeadline) {
       // Group by deadline (today, this week, this month, later)
@@ -2055,46 +2088,46 @@ function Management() {
       
       // Today's tasks
       groupedItems['today'] = {
-        tasks: tasks.filter(task => task.deadline.startsWith(todayStr)),
-        subtasks: subtasks.filter(subtask => subtask.deadline && subtask.deadline.startsWith(todayStr))
+        tasks: displayTasks.filter(task => task.deadline.startsWith(todayStr)),
+        subtasks: displaySubtasks.filter(subtask => subtask.deadline && subtask.deadline.startsWith(todayStr))
       };
       
       // This week's tasks
       groupedItems['this_week'] = {
-        tasks: tasks.filter(task => 
+        tasks: displayTasks.filter(task => 
           task.deadline > todayStr && task.deadline <= nextWeekStr
         ),
-        subtasks: subtasks.filter(subtask => 
+        subtasks: displaySubtasks.filter(subtask => 
           subtask.deadline && subtask.deadline > todayStr && subtask.deadline <= nextWeekStr
         )
       };
       
       // This month's tasks
       groupedItems['this_month'] = {
-        tasks: tasks.filter(task => 
+        tasks: displayTasks.filter(task => 
           task.deadline > nextWeekStr && task.deadline <= nextMonthStr
         ),
-        subtasks: subtasks.filter(subtask => 
+        subtasks: displaySubtasks.filter(subtask => 
           subtask.deadline && subtask.deadline > nextWeekStr && subtask.deadline <= nextMonthStr
         )
       };
       
       // Later tasks
       groupedItems['later'] = {
-        tasks: tasks.filter(task => task.deadline > nextMonthStr),
-        subtasks: subtasks.filter(subtask => subtask.deadline && subtask.deadline > nextMonthStr)
+        tasks: displayTasks.filter(task => task.deadline > nextMonthStr),
+        subtasks: displaySubtasks.filter(subtask => subtask.deadline && subtask.deadline > nextMonthStr)
       };
       
       // No deadline
       groupedItems['no_deadline'] = {
-        tasks: tasks.filter(task => !task.deadline),
-        subtasks: subtasks.filter(subtask => !subtask.deadline)
+        tasks: displayTasks.filter(task => !task.deadline),
+        subtasks: displaySubtasks.filter(subtask => !subtask.deadline)
       };
     } else {
       // No grouping, just one group with all items
       groupedItems['all'] = {
-        tasks,
-        subtasks
+        tasks: displayTasks,
+        subtasks: displaySubtasks
       };
     }
     
@@ -3548,8 +3581,8 @@ function Management() {
             </span>
           </div>
         </div>
-        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
-          <div className="inline-flex rounded-md shadow-sm mr-4">
+        <div className="mt-4 sm:mt-0 sm:ml-16 flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-md shadow-sm">
               <button
                 onClick={() => setView('subtasks')}
                 className={`px-4 py-2 text-sm font-medium border rounded-l-md ${view === 'subtasks' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
@@ -3568,6 +3601,25 @@ function Management() {
               >
                 Revisión
               </button>
+          </div>
+          <div className="flex items-center gap-2 flex-1 max-w-xs">
+            <Search className="w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por título, proyecto, asignado..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="flex-1 p-2 border rounded-md text-sm"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}

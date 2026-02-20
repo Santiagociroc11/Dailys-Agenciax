@@ -116,6 +116,7 @@ async function main() {
               is_archived: r.is_archived ?? false,
               archived_at: toDate(r.archived_at),
               restricted_access: r.restricted_access ?? false,
+              client_id: r.client_id ?? null,
             },
           },
           { upsert: true, new: true }

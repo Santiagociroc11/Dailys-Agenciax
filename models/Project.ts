@@ -12,6 +12,9 @@ const projectSchema = new mongoose.Schema(
     is_archived: { type: Boolean, default: false },
     archived_at: { type: Date, default: null },
     restricted_access: { type: Boolean, default: false },
+    client_id: { type: String, default: null, ref: 'Client' },
+    budget_hours: { type: Number, default: null },
+    budget_amount: { type: Number, default: null },
   },
   {
     timestamps: true,

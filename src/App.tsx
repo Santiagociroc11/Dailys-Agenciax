@@ -10,9 +10,11 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Users = lazy(() => import('./pages/Users'));
 const Projects = lazy(() => import('./pages/Projects'));
+const Clients = lazy(() => import('./pages/Clients'));
 const Areas = lazy(() => import('./pages/Areas'));
 const Management = lazy(() => import('./pages/Management'));
 const Reports = lazy(() => import('./pages/Reports'));
+const CapacityView = lazy(() => import('./pages/CapacityView'));
 const UserProjectView = lazy(() => import('./pages/UserProjectView'));
 const MiDiaView = lazy(() => import('./pages/MiDiaView'));
 const Login = lazy(() => import('./pages/Login'));
@@ -73,10 +75,12 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="management" element={<Management />} />
               <Route path="projects" element={<Projects />} />
+              <Route path="clients" element={<Clients />} />
               <Route path="tasks" element={<Tasks />} />
               <Route path="users" element={<Users />} />
               <Route path="areas" element={<Areas />} />
               <Route path="reports" element={<Reports />} />
+              <Route path="capacity" element={<CapacityView />} />
               <Route path="settings" element={<Settings />} />
             </Route>
 
