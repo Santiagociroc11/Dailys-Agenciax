@@ -2,10 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { DollarSign, Plus, Edit, Trash2, X, Calendar } from 'lucide-react';
+import { getPayrollBeneficiaries, type PayrollBeneficiaryRow } from '../lib/metrics';
+import { DollarSign, Plus, Edit, Trash2, X, Calendar, CreditCard, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+
+/** Fecha de pago por defecto: 1 del mes siguiente al fin del período */
+function getDefaultPaidAt(periodEnd: string): string {
+  if (!periodEnd) return new Date().toISOString().split('T')[0];
+  const end = new Date(periodEnd);
+  const next = new Date(end.getFullYear(), end.getMonth() + 1, 1);
+  return next.toISOString().split('T')[0];
+}
 
 interface PayrollRecord {
   id: string;
@@ -29,14 +38,36 @@ export default function Payroll() {
     period_end: '',
     total_amount: 0,
     currency: 'COP',
-    paid_at: new Date().toISOString().split('T')[0],
+    paid_at: getDefaultPaidAt(''),
     notes: null,
   });
   const [error, setError] = useState('');
+  const [detailRecord, setDetailRecord] = useState<PayrollRecord | null>(null);
+  const [beneficiaries, setBeneficiaries] = useState<PayrollBeneficiaryRow[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
     fetchRecords();
   }, []);
+
+  async function openDetail(rec: PayrollRecord) {
+    setDetailRecord(rec);
+    setLoadingDetail(true);
+    try {
+      const data = await getPayrollBeneficiaries(rec.period_start, rec.period_end);
+      setBeneficiaries(data);
+    } catch (err) {
+      console.error('Error loading beneficiaries:', err);
+      toast.error('Error al cargar cuentas');
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
+
+  function copyAccount(text: string) {
+    navigator.clipboard.writeText(text);
+    toast.success('Cuenta copiada');
+  }
 
   async function fetchRecords() {
     setLoading(true);
@@ -87,11 +118,13 @@ export default function Payroll() {
           .select();
 
         if (err) throw err;
-        if (currentUser?.id && created?.[0]) {
+        const createdRecord = Array.isArray(created) ? created[0] : created;
+        const recordId = createdRecord && typeof createdRecord === 'object' && 'id' in createdRecord ? (createdRecord as { id: string }).id : null;
+        if (currentUser?.id && recordId) {
           await logAudit({
             user_id: currentUser.id,
             entity_type: 'payroll',
-            entity_id: (created[0] as { id: string }).id,
+            entity_id: recordId,
             action: 'create',
             summary: `Pago nómina: ${current.period_start} - ${current.period_end} · ${Number(current.total_amount).toLocaleString('es-CO')} ${current.currency}`,
           });
@@ -124,7 +157,7 @@ export default function Payroll() {
       }
 
       setShowModal(false);
-      setCurrent({ id: '', period_start: '', period_end: '', total_amount: 0, currency: 'COP', paid_at: new Date().toISOString().split('T')[0], notes: null });
+      setCurrent({ id: '', period_start: '', period_end: '', total_amount: 0, currency: 'COP', paid_at: getDefaultPaidAt(''), notes: null });
       fetchRecords();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al guardar';
@@ -187,7 +220,8 @@ export default function Payroll() {
         </div>
         <button
           onClick={() => {
-            setCurrent({ id: '', period_start: '', period_end: '', total_amount: 0, currency: 'COP', paid_at: new Date().toISOString().split('T')[0], notes: null });
+            const defaultPaid = getDefaultPaidAt(new Date().toISOString().split('T')[0]);
+            setCurrent({ id: '', period_start: '', period_end: '', total_amount: 0, currency: 'COP', paid_at: defaultPaid, notes: null });
             setModalMode('create');
             setShowModal(true);
           }}
@@ -245,6 +279,13 @@ export default function Payroll() {
                   <td className="px-6 py-4 text-gray-600 max-w-xs truncate">{r.notes || '—'}</td>
                   <td className="px-6 py-4 text-right">
                     <button
+                      onClick={() => openDetail(r)}
+                      className="text-gray-500 hover:text-indigo-600 mr-2"
+                      title="Ver cuentas de pago"
+                    >
+                      <CreditCard className="w-4 h-4 inline" />
+                    </button>
+                    <button
                       onClick={() => {
                         setCurrent({
                           id: r.id,
@@ -252,7 +293,7 @@ export default function Payroll() {
                           period_end: r.period_end.split('T')[0],
                           total_amount: r.total_amount,
                           currency: r.currency,
-                          paid_at: r.paid_at ? r.paid_at.split('T')[0] : new Date().toISOString().split('T')[0],
+                          paid_at: r.paid_at ? r.paid_at.split('T')[0] : getDefaultPaidAt(r.period_end),
                           notes: r.notes,
                         });
                         setModalMode('edit');
@@ -299,7 +340,14 @@ export default function Payroll() {
                 <input
                   type="date"
                   value={current.period_end}
-                  onChange={(e) => setCurrent({ ...current, period_end: e.target.value })}
+                  onChange={(e) => {
+                    const periodEnd = e.target.value;
+                    const next = { ...current, period_end: periodEnd };
+                    if (modalMode === 'create' && periodEnd) {
+                      next.paid_at = getDefaultPaidAt(periodEnd);
+                    }
+                    setCurrent(next);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg"
                   required
                 />
@@ -329,7 +377,7 @@ export default function Payroll() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de pago</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de pago (por defecto: 1 del mes siguiente)</label>
                 <input
                   type="date"
                   value={current.paid_at || ''}
@@ -356,6 +404,82 @@ export default function Payroll() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal detalle: cuentas de pago */}
+      {detailRecord && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <div>
+                <h3 className="text-lg font-semibold">Cuentas de pago — {detailRecord.period_start.split('T')[0]} a {detailRecord.period_end.split('T')[0]}</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Fecha de pago: {detailRecord.paid_at ? format(new Date(detailRecord.paid_at), "d 'de' MMMM yyyy", { locale: es }) : '—'}
+                </p>
+              </div>
+              <button onClick={() => setDetailRecord(null)} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              {loadingDetail ? (
+                <div className="animate-pulse space-y-3">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="h-12 bg-gray-200 rounded" />
+                  ))}
+                </div>
+              ) : beneficiaries.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No hay usuarios con sueldo o tarifa configurada. Configúralos en Usuarios.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium text-gray-700">Usuario</th>
+                      <th className="px-4 py-2 text-right font-medium text-gray-700">Monto</th>
+                      <th className="px-4 py-2 text-left font-medium text-gray-700">Cuenta de pago</th>
+                      <th className="px-4 py-2 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {beneficiaries.map((b) => (
+                      <tr key={b.user_id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-gray-900">{b.user_name}</p>
+                          <p className="text-xs text-gray-500">{b.user_email}</p>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {b.amount != null ? (
+                            <span>{b.amount.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {b.currency}</span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {b.payment_account ? (
+                            <span className="font-mono text-xs">{b.payment_account}</span>
+                          ) : (
+                            <span className="text-amber-600 text-xs">Sin cuenta configurada</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {b.payment_account && (
+                            <button
+                              onClick={() => copyAccount(b.payment_account!)}
+                              className="text-gray-400 hover:text-indigo-600"
+                              title="Copiar cuenta"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}

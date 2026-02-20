@@ -1031,6 +1031,7 @@ export interface CostByUserRow {
   monthly_salary?: number | null;
   rate_source?: 'hourly' | 'salary' | null;
   currency: string;
+  payment_account?: string | null;
   total_cost: number | null;
   effective_cost_per_hour: number | null;
 }
@@ -1041,6 +1042,35 @@ export interface CostByAreaRow {
   total_hours: number;
   total_cost: number;
   currency: string;
+}
+
+export interface PayrollBeneficiaryRow {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  payment_account: string | null;
+  amount: number | null;
+  currency: string;
+  source: 'salary' | 'hourly' | null;
+  hours_worked: number | null;
+}
+
+/** Obtiene beneficiarios de nómina con cuentas de pago para un período */
+export async function getPayrollBeneficiaries(
+  startDate: string,
+  endDate: string
+): Promise<PayrollBeneficiaryRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_payroll_beneficiaries', {
+      start_date: startDate,
+      end_date: endDate,
+    });
+    if (error) throw error;
+    return (data as PayrollBeneficiaryRow[]) || [];
+  } catch (error) {
+    console.error('Error getting payroll beneficiaries:', error);
+    return [];
+  }
 }
 
 /** Obtiene coste por área (horas trabajadas × tarifa de usuarios del área) */

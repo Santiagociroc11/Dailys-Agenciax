@@ -14,6 +14,7 @@ const ENTITY_LABELS: Record<string, string> = {
   area: 'Área',
   payroll: 'Nómina',
   assignment: 'Asignación',
+};
 
 const ACTION_LABELS: Record<string, string> = {
   create: 'Crear',

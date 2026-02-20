@@ -640,11 +640,11 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
 
       const results = await TaskWorkAssignment.aggregate(pipeline).exec();
       const userIds = results.map((r: { _id: string }) => r._id);
-      const users = await User.find({ id: { $in: userIds } }).select('id name email hourly_rate monthly_salary currency').lean().exec();
-      const userMap = new Map(users.map((u: { id: string; name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string }) => [u.id, u]));
+      const users = await User.find({ id: { $in: userIds } }).select('id name email hourly_rate monthly_salary currency payment_account').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string; payment_account?: string | null }) => [u.id, u]));
 
       data = results.map((r: { _id: string; total_minutes: number; task_count: number }) => {
-        const u = userMap.get(r._id) as { name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string } | undefined;
+        const u = userMap.get(r._id) as { name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string; payment_account?: string | null } | undefined;
         const hours = r.total_minutes / 60;
         const fromSalary = (u?.hourly_rate == null || u.hourly_rate <= 0) && (u?.monthly_salary != null && u.monthly_salary > 0);
         const isFreelancer = u?.hourly_rate != null && u.hourly_rate > 0;
@@ -668,6 +668,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           monthly_salary: u?.monthly_salary ?? null,
           rate_source: totalCost != null ? (fromSalary ? 'salary' : 'hourly') : null,
           currency: u?.currency || 'COP',
+          payment_account: u?.payment_account ?? null,
           total_cost: totalCost != null ? Math.round(totalCost * 100) / 100 : null,
           effective_cost_per_hour: effectiveCostPerHour != null ? Math.round(effectiveCostPerHour * 100) / 100 : null,
         };
@@ -676,6 +677,55 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         const bh = b.effective_cost_per_hour ?? 0;
         return bh - ah;
       });
+    } else if (fn === 'get_payroll_beneficiaries') {
+      const startDate = params.start_date as string;
+      const endDate = params.end_date as string;
+      if (!startDate || !endDate) {
+        res.status(400).json({ data: null, error: { message: 'Faltan start_date y end_date' } });
+        return;
+      }
+      const users = await User.find({
+        $or: [{ monthly_salary: { $gt: 0 } }, { hourly_rate: { $gt: 0 } }],
+      })
+        .select('id name email monthly_salary hourly_rate payment_account currency')
+        .lean()
+        .exec();
+      const userIds = (users as { id: string }[]).map((u) => u.id);
+      const hoursAgg = await TaskWorkAssignment.aggregate([
+        {
+          $match: {
+            date: { $gte: startDate, $lte: endDate },
+            actual_duration: { $exists: true, $ne: null, $gt: 0 } as Record<string, unknown>,
+          },
+        },
+        { $group: { _id: '$user_id', total_minutes: { $sum: '$actual_duration' } } },
+      ]).exec();
+      const hoursMap = new Map(
+        (hoursAgg as { _id: string; total_minutes: number }[]).map((h) => [h._id, h.total_minutes / 60])
+      );
+      data = (users as { id: string; name: string; email: string; monthly_salary?: number | null; hourly_rate?: number | null; payment_account?: string | null; currency?: string }[]).map(
+        (u) => {
+          const hasSalary = u.monthly_salary != null && u.monthly_salary > 0;
+          const hasHourly = u.hourly_rate != null && u.hourly_rate > 0;
+          const hours = hoursMap.get(u.id) ?? 0;
+          const amount =
+            hasSalary && u.monthly_salary
+              ? u.monthly_salary
+              : hasHourly && u.hourly_rate
+                ? Math.round(hours * u.hourly_rate * 100) / 100
+                : null;
+          return {
+            user_id: u.id,
+            user_name: u.name,
+            user_email: u.email,
+            payment_account: u.payment_account ?? null,
+            amount: amount,
+            currency: u.currency || 'COP',
+            source: hasSalary ? 'salary' : hasHourly ? 'hourly' : null,
+            hours_worked: hasHourly ? Math.round(hours * 100) / 100 : null,
+          };
+        }
+      );
     } else if (fn === 'get_cost_by_area') {
       const startDate = params.start_date as string;
       const endDate = params.end_date as string;
