@@ -23,6 +23,16 @@ export function buildMongoFilter(filters: QueryFilter): FilterQuery<unknown> {
     }
   }
 
+  // contains: array field contains value(s) - MongoDB: { key: value } o { key: { $all: values } }
+  if (filters.contains) {
+    for (const [key, values] of Object.entries(filters.contains)) {
+      if (Array.isArray(values) && values.length > 0) {
+        (query as Record<string, unknown>)[key] =
+          values.length === 1 ? values[0] : { $all: values };
+      }
+    }
+  }
+
   if (filters.not) {
     for (const [key, { op, value }] of Object.entries(filters.not)) {
       if (op === 'in' && Array.isArray(value)) {

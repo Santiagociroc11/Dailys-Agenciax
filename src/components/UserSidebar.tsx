@@ -32,7 +32,7 @@ export default function UserSidebar() {
       navigate('/dashboard');
     } else {
       // If currently in admin view, switch to user view
-      navigate('/user');
+      navigate('/user/mi-dia');
     }
   };
 
@@ -48,14 +48,17 @@ export default function UserSidebar() {
       if (userError) throw userError;
       
       if (userData?.assigned_projects && userData.assigned_projects.length > 0) {
-        // Fetch project details for assigned projects
+        // Fetch project details for assigned projects (solo no archivados)
         const { data: projectsData, error: projectsError } = await supabase
           .from('projects')
           .select('id, name')
-          .in('id', userData.assigned_projects);
+          .in('id', userData.assigned_projects)
+          .eq('is_archived', false);
 
         if (projectsError) throw projectsError;
-        setProjects(projectsData || []);
+        setProjects((projectsData || []).sort((a, b) => a.name.localeCompare(b.name)));
+      } else {
+        setProjects([]);
       }
     } catch (error) {
       console.error('Error fetching user projects:', error);
@@ -77,6 +80,16 @@ export default function UserSidebar() {
           </div>
           <div className="mt-2 pl-8 space-y-1">
             <NavLink
+              to="/user/mi-dia"
+              className={({ isActive }) =>
+                `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 ${
+                  isActive ? 'bg-gray-100 font-medium' : ''
+                }`
+              }
+            >
+              Mi día
+            </NavLink>
+            <NavLink
               to="/user/projects/all"
               className={({ isActive }) =>
                 `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 ${
@@ -86,6 +99,19 @@ export default function UserSidebar() {
             >
               Todos los proyectos
             </NavLink>
+            {projects.map((project) => (
+              <NavLink
+                key={project.id}
+                to={`/user/projects/${project.id}`}
+                className={({ isActive }) =>
+                  `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 truncate ${
+                    isActive ? 'bg-gray-100 font-medium' : ''
+                  }`
+                }
+              >
+                {project.name}
+              </NavLink>
+            ))}
             <NavLink to="/user/settings" className={({ isActive }) =>
               `block py-1 px-2 text-sm text-gray-700 rounded hover:bg-gray-100 ${
                 isActive ? 'bg-gray-100 font-medium' : ''

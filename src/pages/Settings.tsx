@@ -42,6 +42,7 @@ const Settings = () => {
       console.error('Error saving admin Telegram ID:', error);
     } else {
       toast.success('¡Configuración guardada correctamente!');
+      await fetch('/api/settings/invalidate-cache', { method: 'POST' }).catch(() => {});
     }
     setIsLoading(false);
   };

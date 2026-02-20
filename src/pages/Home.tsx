@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Loading from '../components/Loading';
 
 export default function Home() {
   const { user, isAdmin, loading } = useAuth();
@@ -13,17 +14,14 @@ export default function Home() {
       } else if (isAdmin) {
         navigate('/dashboard');
       } else {
-        navigate('/user');
+        navigate('/user/mi-dia');
       }
     }
   }, [user, isAdmin, loading, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">Cargando...</h1>
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-800 mx-auto"></div>
-      </div>
+      <Loading message="Cargando..." size="lg" />
     </div>
   );
 } 

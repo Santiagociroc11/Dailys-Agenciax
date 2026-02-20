@@ -32,6 +32,17 @@ const __dirname = path.dirname(__filename);
 app.post('/api/db/query', handleDbQuery);
 app.post('/api/db/rpc', handleDbRpc);
 
+// Invalidar caché de app_settings tras actualizar configuración
+app.post('/api/settings/invalidate-cache', async (_req, res) => {
+  try {
+    const { invalidateSetting } = await import('./lib/db/appSettingsCache.js');
+    invalidateSetting('admin_telegram_chat_id');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Error al invalidar caché' });
+  }
+});
+
 // Endpoint para notificaciones de prueba
 app.post('/api/telegram/test', handleTestNotification);
 

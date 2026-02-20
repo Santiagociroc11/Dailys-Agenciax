@@ -1111,25 +1111,102 @@ export async function getAreaMetrics(workingHoursPerDay: number = 8): Promise<Ar
   }
 }
 
+/** Tipo de período para filtros en reportes */
+export type PeriodType = 'week' | 'month' | 'last_month' | 'custom';
+
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+}
+
+/** Calcula el rango de fechas según el tipo de período */
+export function getDateRangeForPeriod(
+  period: PeriodType,
+  customStart?: string,
+  customEnd?: string
+): DateRange {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+
+  switch (period) {
+    case 'week': {
+      const start = new Date(now);
+      start.setDate(start.getDate() - start.getDay());
+      return {
+        startDate: start.toISOString().split('T')[0],
+        endDate: today,
+      };
+    }
+    case 'month': {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return {
+        startDate: start.toISOString().split('T')[0],
+        endDate: today,
+      };
+    }
+    case 'last_month': {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      return {
+        startDate: start.toISOString().split('T')[0],
+        endDate: end.toISOString().split('T')[0],
+      };
+    }
+    case 'custom':
+      return {
+        startDate: customStart || today,
+        endDate: customEnd || today,
+      };
+    default:
+      return { startDate: today, endDate: today };
+  }
+}
+
+export interface HoursForBillingRow {
+  project_id: string | null;
+  project_name: string;
+  user_id: string | null;
+  user_name: string | null;
+  user_email: string | null;
+  total_minutes: number;
+  total_hours: number;
+  task_count: number;
+}
+
+/** Obtiene horas trabajadas para facturación (por proyecto y usuario) */
+export async function getHoursForBilling(
+  startDate: string,
+  endDate: string,
+  projectId?: string
+): Promise<HoursForBillingRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_hours_for_billing', {
+      start_date: startDate,
+      end_date: endDate,
+      project_id: projectId ?? null,
+    });
+
+    if (error) throw error;
+    return (data as HoursForBillingRow[]) || [];
+  } catch (error) {
+    console.error('Error getting hours for billing:', error);
+    return [];
+  }
+}
+
 /**
- * Obtiene el resumen de la vista daily_work_statistics existente
+ * Obtiene el resumen de estadísticas diarias de trabajo (equivalente a daily_work_statistics).
+ * Implementado como agregación MongoDB vía RPC.
  */
 export async function getDailyWorkStatistics(userId?: string, days: number = 30) {
   try {
-    let query = supabase
-      .from('daily_work_statistics')
-      .select('*')
-      .order('date', { ascending: false })
-      .limit(days);
-
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
-
-    const { data, error } = await query;
+    const { data, error } = await supabase.rpc('get_daily_work_statistics', {
+      user_id: userId ?? null,
+      days,
+    });
 
     if (error) throw error;
-    return data || [];
+    return (data as unknown[]) || [];
   } catch (error) {
     console.error('Error getting daily work statistics:', error);
     return [];

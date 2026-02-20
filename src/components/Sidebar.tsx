@@ -15,7 +15,7 @@ export default function Sidebar() {
     // Navigate to appropriate route based on the view
     if (isAdminView) {
       // If currently in admin view, switch to user view
-      navigate('/user');
+      navigate('/user/mi-dia');
     } else {
       // If currently in user view, switch to admin view
       navigate('/dashboard');

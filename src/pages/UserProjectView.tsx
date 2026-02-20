@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter, addDays } from "date-fns";
 import { es } from "date-fns/locale";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 import TaskStatusDisplay from "../components/TaskStatusDisplay";
 import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
@@ -257,9 +257,14 @@ function getProjectColor(projectName: string, projectId: string): { bg: string; 
 }
 
 export default function UserProjectView() {
-   const { user } = useAuth();
+   const { user, isAdmin } = useAuth();
    const { projectId } = useParams();
    const navigate = useNavigate();
+
+   // Proyectos permitidos para usuarios no-admin (filtrar por assigned_projects)
+   const allowedProjectIds = !isAdmin && user?.assigned_projects?.length
+      ? user.assigned_projects
+      : null;
 
    // Estados para datos principales
    const [project, setProject] = useState<Project | null>(null);
@@ -372,7 +377,16 @@ export default function UserProjectView() {
    const [error, setError] = useState<string | null>(null);
 
    useEffect(() => {
-      if (projectId) {
+      if (projectId && user) {
+         // Validar permisos: usuarios no-admin solo pueden ver proyectos asignados
+         if (!isAdmin && projectId !== "all") {
+            const allowed = user.assigned_projects ?? [];
+            if (allowed.length > 0 && !allowed.includes(projectId)) {
+               navigate("/user/projects/all", { replace: true });
+               return;
+            }
+         }
+
          // Resetear estados importantes al cambiar de proyecto
          setLoading(true);
          setError(null);
@@ -398,7 +412,7 @@ export default function UserProjectView() {
          };
          loadData();
       }
-   }, [projectId]);
+   }, [projectId, user, isAdmin, navigate]);
 
    useEffect(() => {
       if (activeTab === "gestion" && activeGestionSubTab === "en_proceso") {
@@ -603,6 +617,16 @@ export default function UserProjectView() {
          setError(null);
 
          const isAll = projectId === "all";
+         const projectFilter = !isAll ? [projectId!] : allowedProjectIds;
+
+         // Usuario no-admin sin proyectos asignados: no hay datos que mostrar
+         if (projectFilter && projectFilter.length === 0) {
+            setTaskItems([]);
+            setLoading(false);
+            setIsFiltering(false);
+            setIsDataInitialized(true);
+            return;
+         }
 
          // 1️⃣ Todas las tareas (sin importar si están asignadas al usuario) - excluyendo proyectos archivados
          let allTasksQ = supabase
@@ -614,8 +638,8 @@ export default function UserProjectView() {
             .not("status", "in", "(approved, assigned)")
             .eq("projects.is_archived", false)
             .order("deadline", { ascending: true });
-         if (!isAll) {
-            allTasksQ = allTasksQ.in("project_id", [projectId!]);
+         if (projectFilter && projectFilter.length > 0) {
+            allTasksQ = allTasksQ.in("project_id", projectFilter);
          }
          const { data: allTasksData, error: allTasksError } = await allTasksQ;
          if (allTasksError) throw allTasksError;
@@ -631,8 +655,8 @@ export default function UserProjectView() {
             .not("status", "in", "(approved, completed, in_review, returned, assigned, in_progress, blocked)")
             .eq("projects.is_archived", false)
             .order("deadline", { ascending: true });
-         if (!isAll) {
-            taskDataQ = taskDataQ.in("project_id", [projectId!]);
+         if (projectFilter && projectFilter.length > 0) {
+            taskDataQ = taskDataQ.in("project_id", projectFilter);
          }
          const { data: taskData, error: taskError } = await taskDataQ;
          if (taskError) throw taskError;
@@ -651,8 +675,8 @@ export default function UserProjectView() {
             )
             .eq("tasks.projects.is_archived", false)
             .order("sequence_order", { ascending: true });
-         if (!isAll) {
-            allSubtasksQ = allSubtasksQ.in("tasks.project_id", [projectId!]);
+         if (projectFilter && projectFilter.length > 0) {
+            allSubtasksQ = allSubtasksQ.in("tasks.project_id", projectFilter);
          }
          const { data: allSubtasksData, error: allSubtasksError } = await allSubtasksQ;
          if (allSubtasksError) throw allSubtasksError;
@@ -690,8 +714,8 @@ export default function UserProjectView() {
             .not("status", "in", "(approved, completed, in_review, returned, assigned, in_progress, blocked)")
             .eq("tasks.projects.is_archived", false)
             .order("sequence_order", { ascending: true });
-         if (!isAll) {
-            subtaskDataQ = subtaskDataQ.in("tasks.project_id", [projectId!]);
+         if (projectFilter && projectFilter.length > 0) {
+            subtaskDataQ = subtaskDataQ.in("tasks.project_id", projectFilter);
          }
          const { data: subtaskData, error: subtaskError } = await subtaskDataQ;
          if (subtaskError) throw subtaskError;
@@ -1803,9 +1827,10 @@ export default function UserProjectView() {
          // 1. Primero, obtener todas las asignaciones de trabajo desde task_work_assignments
          let assignmentsQ = supabase.from("task_work_assignments").select("*").eq("user_id", user.id).not("status", "in", "('completed', 'in_review', 'approved')");
 
-         // Solo aplicar filtro de proyecto si no estamos en "all"
-         if (projectId !== "all") {
-            assignmentsQ = assignmentsQ.in("project_id", [projectId]);
+         // Filtrar por proyecto: específico o lista de permitidos (assigned_projects)
+         const assignProjectFilter = projectId !== "all" ? [projectId] : allowedProjectIds;
+         if (assignProjectFilter && assignProjectFilter.length > 0) {
+            assignmentsQ = assignmentsQ.in("project_id", assignProjectFilter);
          }
 
          const { data: assignments, error: assignmentsError } = await assignmentsQ;
@@ -2655,9 +2680,10 @@ export default function UserProjectView() {
 
          let completedTaskAssignmentsQuery = supabase.from("task_work_assignments").select("*").eq("user_id", user.id).in("status", ["completed", "in_review", "approved"]);
 
-         // Solo aplicar filtro de proyecto si no estamos en "all"
-         if (projectId !== "all") {
-            completedTaskAssignmentsQuery = completedTaskAssignmentsQuery.eq("project_id", projectId);
+         // Filtrar por proyecto: específico o lista de permitidos (assigned_projects)
+         const completedProjectFilter = projectId !== "all" ? [projectId] : allowedProjectIds;
+         if (completedProjectFilter && completedProjectFilter.length > 0) {
+            completedTaskAssignmentsQuery = completedTaskAssignmentsQuery.in("project_id", completedProjectFilter);
          }
 
          const { data: completedTaskAssignments, error: assignmentsError } = await completedTaskAssignmentsQuery;

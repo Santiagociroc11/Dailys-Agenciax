@@ -283,34 +283,40 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
   }
 }
 
-// Función para obtener el ID de chat de admin desde app_settings
+const ADMIN_TELEGRAM_KEY = 'admin_telegram_chat_id';
+
+// Función para obtener el ID de chat de admin desde app_settings (con caché TTL)
 export async function getAdminTelegramId(): Promise<string | null> {
-  try {
-    const { db } = await import('../lib/db/serverDb.js');
+  const { getCachedSetting } = await import('../lib/db/appSettingsCache.js');
 
-    const { data, error } = await db
-      .from('app_settings')
-      .select('value')
-      .eq('key', 'admin_telegram_chat_id')
-      .single();
+  return getCachedSetting<string>(ADMIN_TELEGRAM_KEY, async () => {
+    try {
+      const { db } = await import('../lib/db/serverDb.js');
 
-    if (error) {
-      if (error.message && !error.message.includes('no rows')) {
-        console.error('Error al obtener ID de admin de Telegram:', error);
+      const { data, error } = await db
+        .from('app_settings')
+        .select('value')
+        .eq('key', ADMIN_TELEGRAM_KEY)
+        .single();
+
+      if (error) {
+        if (error.message && !error.message.includes('no rows')) {
+          console.error('Error al obtener ID de admin de Telegram:', error);
+        }
+        return null;
       }
+
+      const settingsData = data as { value?: { id?: string } } | null;
+      if (settingsData?.value && typeof settingsData.value === 'object' && settingsData.value.id) {
+        return settingsData.value.id;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error al conectar con la base de datos para obtener admin ID:', error);
       return null;
     }
-
-    const settingsData = data as { value?: { id?: string } } | null;
-    if (settingsData?.value && typeof settingsData.value === 'object' && settingsData.value.id) {
-      return settingsData.value.id;
-    }
-
-    return null;
-  } catch (error) {
-    console.error('Error al conectar con la base de datos para obtener admin ID:', error);
-    return null;
-  }
+  });
 }
 
 // Función para enviar notificaciones a administradores

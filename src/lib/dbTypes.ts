@@ -3,6 +3,7 @@ export type QueryOperation = 'select' | 'insert' | 'update' | 'delete' | 'upsert
 export interface QueryFilter {
   eq?: Record<string, unknown>;
   in?: Record<string, unknown[]>;
+  contains?: Record<string, unknown[]>;
   not?: Record<string, { op: string; value: unknown }>;
   or?: Array<Record<string, unknown>>;
 }

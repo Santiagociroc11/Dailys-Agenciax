@@ -1,35 +1,38 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import UserLayout from './components/UserLayout';
-import Dashboard from './pages/Dashboard';
-import Tasks from './pages/Tasks';
-import Users from './pages/Users';
-import Projects from './pages/Projects';
-import Areas from './pages/Areas';
-import Management from './pages/Management';
-import Reports from './pages/Reports';
-import UserProjectView from './pages/UserProjectView';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Home from './pages/Home';
-import Settings from './pages/Settings';
-import UserSettings from './pages/UserSettings';
+import Loading from './components/Loading';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const Users = lazy(() => import('./pages/Users'));
+const Projects = lazy(() => import('./pages/Projects'));
+const Areas = lazy(() => import('./pages/Areas'));
+const Management = lazy(() => import('./pages/Management'));
+const Reports = lazy(() => import('./pages/Reports'));
+const UserProjectView = lazy(() => import('./pages/UserProjectView'));
+const MiDiaView = lazy(() => import('./pages/MiDiaView'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Home = lazy(() => import('./pages/Home'));
+const Settings = lazy(() => import('./pages/Settings'));
+const UserSettings = lazy(() => import('./pages/UserSettings'));
 
 // Route guard for admin routes
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAdmin, loading } = useAuth();
-  if (loading) return <div>Loading...</div>;
-  if (!isAdmin) return <Navigate to="/user" replace />;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loading size="lg" /></div>;
+  if (!isAdmin) return <Navigate to="/user/mi-dia" replace />;
   return <>{children}</>;
 };
 
 // Route guard for user routes
 const UserRoute = ({ children }: { children: React.ReactNode }) => {
   const { loading } = useAuth();
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loading size="lg" /></div>;
   return <>{children}</>;
 };
 
@@ -51,37 +54,45 @@ function App() {
           }}
         />
 
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+        <Suspense fallback={
+          <div className="min-h-screen flex items-center justify-center">
+            <Loading message="Cargando..." size="lg" />
+          </div>
+        }>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-          {/* Admin routes */}
-          <Route path="/" element={
-            <AdminRoute>
-              <Layout />
-            </AdminRoute>
-          }>
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="management" element={<Management />} />
-            <Route path="projects" element={<Projects />} />
-            <Route path="tasks" element={<Tasks />} />
-            <Route path="users" element={<Users />} />
-            <Route path="areas" element={<Areas />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
+            {/* Admin routes */}
+            <Route path="/" element={
+              <AdminRoute>
+                <Layout />
+              </AdminRoute>
+            }>
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="management" element={<Management />} />
+              <Route path="projects" element={<Projects />} />
+              <Route path="tasks" element={<Tasks />} />
+              <Route path="users" element={<Users />} />
+              <Route path="areas" element={<Areas />} />
+              <Route path="reports" element={<Reports />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
 
-          {/* User routes */}
-          <Route path="/user" element={
-            <UserRoute>
-              <UserLayout />
-            </UserRoute>
-          }>
-            <Route path="projects/:projectId" element={<UserProjectView />} />
-            <Route path="settings" element={<UserSettings />} />
-          </Route>
-        </Routes>
+            {/* User routes */}
+            <Route path="/user" element={
+              <UserRoute>
+                <UserLayout />
+              </UserRoute>
+            }>
+              <Route index element={<Navigate to="/user/mi-dia" replace />} />
+              <Route path="mi-dia" element={<MiDiaView />} />
+              <Route path="projects/:projectId" element={<UserProjectView />} />
+              <Route path="settings" element={<UserSettings />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </Router>
   );

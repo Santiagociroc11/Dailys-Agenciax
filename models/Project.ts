@@ -11,6 +11,7 @@ const projectSchema = new mongoose.Schema(
     created_by: { type: String, required: true, ref: 'User' },
     is_archived: { type: Boolean, default: false },
     archived_at: { type: Date, default: null },
+    restricted_access: { type: Boolean, default: false },
   },
   {
     timestamps: true,

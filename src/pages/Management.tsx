@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
-import toast, { Toaster } from 'react-hot-toast';
+import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
@@ -3868,10 +3868,6 @@ function Management() {
           </div>
         </div>
       )}
-
-      {/* Toaster para notificaciones */}
-      <Toaster position="top-right" />
-
       {/* Modal para ver detalles de retroalimentación */}
       {showFeedbackDetailsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

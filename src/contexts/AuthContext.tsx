@@ -7,6 +7,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  assigned_projects?: string[];
 }
 
 interface AuthContextType {
@@ -54,7 +55,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       id: data.id,
       name: data.name,
       email: data.email,
-      role: data.role
+      role: data.role,
+      assigned_projects: data.assigned_projects ?? [],
     };
 
     setUser(userData);
@@ -64,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (userData.role === 'admin') {
       navigate('/dashboard');
     } else {
-      navigate('/user');
+      navigate('/user/mi-dia');
     }
   };
 
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsImpersonating(true);
     localStorage.setItem('impersonating_user', 'true');
     
-    navigate('/user');
+    navigate('/user/mi-dia');
   };
 
   const stopImpersonating = () => {
@@ -122,12 +124,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         id: data.id,
         name: data.name,
         email: data.email,
-        role: data.role
+        role: data.role,
+        assigned_projects: data.assigned_projects ?? [],
       };
 
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      navigate('/user');
+      navigate('/user/mi-dia');
     }
   };
 

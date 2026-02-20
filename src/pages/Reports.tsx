@@ -24,10 +24,14 @@ import {
   getAllUsersUtilizationMetrics,
   getTeamUtilizationStatistics,
   exportUtilizationToCSV,
-  UserMetrics,
-  ProjectMetrics as ProjectMetricsType,
-  AreaMetrics,
-  UtilizationMetrics
+  getHoursForBilling,
+  getDateRangeForPeriod,
+  type UserMetrics,
+  type ProjectMetrics as ProjectMetricsType,
+  type AreaMetrics,
+  type UtilizationMetrics,
+  type PeriodType,
+  type HoursForBillingRow
 } from '../lib/metrics';
 
 interface DetailedMetrics {
@@ -62,14 +66,30 @@ interface ProjectMetrics {
 
 type TabType = 'users' | 'projects' | 'areas' | 'utilization';
 
+const PERIOD_OPTIONS: { value: PeriodType; label: string }[] = [
+  { value: 'week', label: 'Esta semana' },
+  { value: 'month', label: 'Este mes' },
+  { value: 'last_month', label: 'Mes pasado' },
+  { value: 'custom', label: 'Rango personalizado' },
+];
+
 export default function Reports() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('users');
+  const [period, setPeriod] = useState<PeriodType>('month');
+  const [customStart, setCustomStart] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().split('T')[0]);
   const [userMetrics, setUserMetrics] = useState<UserMetrics[]>([]);
   const [projectMetrics, setProjectMetrics] = useState<ProjectMetricsType[]>([]);
   const [areaMetrics, setAreaMetrics] = useState<AreaMetrics[]>([]);
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exportingHours, setExportingHours] = useState(false);
+
+  const dateRange = getDateRangeForPeriod(period, customStart, customEnd);
 
   useEffect(() => {
     fetchMetrics();
@@ -100,6 +120,34 @@ export default function Reports() {
       console.error('Error fetching metrics:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function exportHoursForBilling() {
+    setExportingHours(true);
+    try {
+      const rows = await getHoursForBilling(dateRange.startDate, dateRange.endDate);
+      const headers = ['Proyecto', 'Usuario', 'Email', 'Horas', 'Minutos', 'Tareas'];
+      const csvRows = rows.map((r: HoursForBillingRow) => [
+        r.project_name,
+        r.user_name || '—',
+        r.user_email || '—',
+        r.total_hours.toFixed(2),
+        r.total_minutes,
+        r.task_count,
+      ]);
+      const csvContent = [headers, ...csvRows].map((row) => row.join(',')).join('\n');
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `horas_facturacion_${dateRange.startDate}_${dateRange.endDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting hours:', error);
+    } finally {
+      setExportingHours(false);
     }
   }
 
@@ -224,21 +272,69 @@ export default function Reports() {
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-start mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Estadísticas</h1>
           <p className="text-gray-600">
             Análisis detallado de rendimiento y productividad del equipo
           </p>
         </div>
-        
-        <button
-          onClick={exportCurrentData}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={exportCurrentData}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Exportar CSV
+          </button>
+          <button
+            onClick={exportHoursForBilling}
+            disabled={exportingHours}
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+          >
+            <Clock className="w-4 h-4 mr-2" />
+            {exportingHours ? 'Exportando...' : 'Horas para facturar'}
+          </button>
+        </div>
+      </div>
+
+      {/* Filtro por período */}
+      <div className="flex flex-wrap items-center gap-4 mb-6 p-4 bg-white rounded-lg shadow-sm border border-gray-100">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-5 h-5 text-gray-500" />
+          <span className="font-medium text-gray-700">Período:</span>
+        </div>
+        <select
+          value={period}
+          onChange={(e) => setPeriod(e.target.value as PeriodType)}
+          className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
-          <Download className="w-4 h-4 mr-2" />
-          Exportar CSV
-        </button>
+          {PERIOD_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {period === 'custom' && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-gray-500">a</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        )}
+        <span className="text-sm text-gray-500">
+          {dateRange.startDate} — {dateRange.endDate}
+        </span>
       </div>
 
       {/* Tabs */}

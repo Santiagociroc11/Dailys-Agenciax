@@ -41,6 +41,12 @@ class QueryBuilder {
     return this;
   }
 
+  contains(column: string, values: unknown[]) {
+    this.pending.filters.contains = this.pending.filters.contains ?? {};
+    (this.pending.filters.contains as Record<string, unknown[]>)[column] = values;
+    return this;
+  }
+
   not(column: string, op: string, value: unknown) {
     this.pending.filters.not = this.pending.filters.not ?? {};
     (this.pending.filters.not as Record<string, { op: string; value: unknown }>)[column] = { op, value };

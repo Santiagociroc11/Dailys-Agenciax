@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import Breadcrumbs from './Breadcrumbs';
 import { useAuth } from '../contexts/AuthContext';
 import { AlertTriangle, Home } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export default function Layout() {
           </div>
         )}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6">
+          <Breadcrumbs />
           <Outlet />
         </main>
       </div>
