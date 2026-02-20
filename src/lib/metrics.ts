@@ -1028,9 +1028,34 @@ export interface CostByUserRow {
   user_email: string;
   total_hours: number;
   task_count: number;
-  hourly_rate: number | null;
+  monthly_salary?: number | null;
+  rate_source?: 'hourly' | 'salary' | null;
   currency: string;
   total_cost: number | null;
+  effective_cost_per_hour: number | null;
+}
+
+export interface CostByAreaRow {
+  area_id: string;
+  area_name: string;
+  total_hours: number;
+  total_cost: number;
+  currency: string;
+}
+
+/** Obtiene coste por área (horas trabajadas × tarifa de usuarios del área) */
+export async function getCostByArea(startDate: string, endDate: string): Promise<CostByAreaRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_cost_by_area', {
+      start_date: startDate,
+      end_date: endDate,
+    });
+    if (error) throw error;
+    return (data as CostByAreaRow[]) || [];
+  } catch (error) {
+    console.error('Error getting cost by area:', error);
+    return [];
+  }
 }
 
 /** Obtiene coste por usuario (horas × tarifa) en un período */

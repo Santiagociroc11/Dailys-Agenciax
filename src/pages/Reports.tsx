@@ -30,6 +30,7 @@ import {
   exportUtilizationToCSV,
   getHoursForBilling,
   getCostByUser,
+  getCostByArea,
   getCapacityByUser,
   getDateRangeForPeriod,
   type UserMetrics,
@@ -38,7 +39,8 @@ import {
   type UtilizationMetrics,
   type PeriodType,
   type HoursForBillingRow,
-  type CostByUserRow
+  type CostByUserRow,
+  type CostByAreaRow
 } from '../lib/metrics';
 
 interface DetailedMetrics {
@@ -93,6 +95,7 @@ export default function Reports() {
   const [userMetrics, setUserMetrics] = useState<UserMetrics[]>([]);
   const [projectMetrics, setProjectMetrics] = useState<ProjectMetricsType[]>([]);
   const [areaMetrics, setAreaMetrics] = useState<AreaMetrics[]>([]);
+  const [areaCosts, setAreaCosts] = useState<CostByAreaRow[]>([]);
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
   const [costMetrics, setCostMetrics] = useState<CostByUserRow[]>([]);
   const [capacityData, setCapacityData] = useState<Awaited<ReturnType<typeof getCapacityByUser>>>([]);
@@ -105,7 +108,10 @@ export default function Reports() {
   const dateRange = getDateRangeForPeriod(period, customStart, customEnd);
 
   useEffect(() => {
-    supabase.from('clients').select('id, name').order('name').then(({ data }) => setClients(data || []));
+    supabase.from('clients').select('id, name').order('name').then((res) => {
+      const r = res as { data?: { id: string; name: string }[] | null };
+      setClients(Array.isArray(r.data) ? r.data : []);
+    });
   }, []);
 
   useEffect(() => {
@@ -137,16 +143,20 @@ export default function Reports() {
           setProjectMetrics(proj);
           break;
         case 'areas':
-          const areas = await getAreaMetrics();
+          const [areas, costs] = await Promise.all([
+            getAreaMetrics(),
+            getCostByArea(dateRange.startDate, dateRange.endDate),
+          ]);
           setAreaMetrics(areas);
+          setAreaCosts(costs);
           break;
         case 'utilization':
           const utilization = await getAllUsersUtilizationMetrics(8);
           setUtilizationMetrics(utilization);
           break;
         case 'cost':
-          const cost = await getCostByUser(dateRange.startDate, dateRange.endDate);
-          setCostMetrics(cost);
+          const costData = await getCostByUser(dateRange.startDate, dateRange.endDate);
+          setCostMetrics(costData);
           break;
       }
     } catch (error) {
@@ -209,13 +219,13 @@ export default function Reports() {
   }
 
   function exportCostToCSV(data: CostByUserRow[], filename: string) {
-    const headers = ['Usuario', 'Email', 'Horas', 'Tarifa/h', 'Coste', 'Moneda'];
+    const headers = ['Usuario', 'Email', 'Horas', 'Coste (real)', 'Coste/h efectiva', 'Moneda'];
     const rows = data.map((m) => [
       m.user_name,
       m.user_email,
       m.total_hours.toFixed(2),
-      m.hourly_rate ?? '—',
       m.total_cost ?? '—',
+      m.effective_cost_per_hour ?? '—',
       m.currency,
     ]);
     const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
@@ -447,7 +457,7 @@ export default function Reports() {
       )}
       {activeTab === 'users' && <UsersMetrics metrics={userMetrics} />}
       {activeTab === 'projects' && <ProjectsMetrics metrics={projectMetrics} />}
-      {activeTab === 'areas' && <AreasMetrics metrics={areaMetrics} />}
+      {activeTab === 'areas' && <AreasMetrics metrics={areaMetrics} costs={areaCosts} />}
       {activeTab === 'utilization' && <UtilizationReport metrics={utilizationMetrics} />}
       {activeTab === 'cost' && <CostReport metrics={costMetrics} />}
     </div>
@@ -620,27 +630,34 @@ function OverviewSummary({
 function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
   const totalHours = metrics.reduce((acc, m) => acc + m.total_hours, 0);
   const totalCost = metrics.reduce((acc, m) => acc + (m.total_cost ?? 0), 0);
-  const withRate = metrics.filter(m => m.hourly_rate && m.hourly_rate > 0).length;
+  const withRate = metrics.filter(m => m.total_cost != null && m.total_cost > 0).length;
+  const avgCostPerHour = totalHours > 0 && totalCost > 0 ? totalCost / totalHours : null;
 
   return (
     <div className="space-y-6">
       <p className="text-gray-600 text-sm">
-        Horas trabajadas × tarifa por usuario. Configura la tarifa en cada usuario para ver el coste real.
+        <strong>Coste real:</strong> suma de sueldos mensuales (empleados) o horas × tarifa (freelancers). <strong>Coste/h efectiva:</strong> sueldo ÷ horas trabajadas — más alto = menos eficiente (trabajan menos horas por el mismo sueldo).
       </p>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-emerald-50 rounded-lg p-4">
           <p className="text-sm text-emerald-600 font-medium">Total horas</p>
           <p className="text-2xl font-bold text-emerald-900">{totalHours.toFixed(1)}h</p>
         </div>
-        <div className="bg-amber-50 rounded-lg p-4">
-          <p className="text-sm text-amber-600 font-medium">Usuarios con tarifa</p>
-          <p className="text-2xl font-bold text-amber-900">{withRate} / {metrics.length}</p>
-        </div>
         <div className="bg-indigo-50 rounded-lg p-4">
-          <p className="text-sm text-indigo-600 font-medium">Coste total</p>
+          <p className="text-sm text-indigo-600 font-medium">Coste total (real)</p>
           <p className="text-2xl font-bold text-indigo-900">
             {totalCost > 0 ? totalCost.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'}
           </p>
+        </div>
+        <div className="bg-amber-50 rounded-lg p-4">
+          <p className="text-sm text-amber-600 font-medium">Coste/h promedio</p>
+          <p className="text-2xl font-bold text-amber-900">
+            {avgCostPerHour != null ? avgCostPerHour.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'}
+          </p>
+        </div>
+        <div className="bg-amber-50 rounded-lg p-4">
+          <p className="text-sm text-amber-600 font-medium">Usuarios con sueldo/tarifa</p>
+          <p className="text-2xl font-bold text-amber-900">{withRate} / {metrics.length}</p>
         </div>
       </div>
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -649,32 +666,44 @@ function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Usuario</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Horas</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tarifa/h</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Coste</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Coste (real)</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Coste/h efectiva</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {metrics.map((m) => (
-              <tr key={m.user_id} className="hover:bg-gray-50">
-                <td className="px-6 py-4">
-                  <div>
-                    <p className="font-medium text-gray-900">{m.user_name}</p>
-                    <p className="text-xs text-gray-500">{m.user_email}</p>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-right text-gray-700">{m.total_hours.toFixed(1)}h</td>
-                <td className="px-6 py-4 text-right text-gray-600">
-                  {m.hourly_rate != null && m.hourly_rate > 0
-                    ? `${m.hourly_rate.toLocaleString('es-CO')} ${m.currency}`
-                    : '—'}
-                </td>
-                <td className="px-6 py-4 text-right font-medium">
-                  {m.total_cost != null
-                    ? `${m.total_cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} ${m.currency}`
-                    : '—'}
-                </td>
-              </tr>
-            ))}
+            {metrics.map((m) => {
+              const isHighCostPerHour = m.effective_cost_per_hour != null && avgCostPerHour != null && m.effective_cost_per_hour > avgCostPerHour * 1.2;
+              return (
+                <tr key={m.user_id} className={`hover:bg-gray-50 ${isHighCostPerHour ? 'bg-red-50' : ''}`}>
+                  <td className="px-6 py-4">
+                    <div>
+                      <p className="font-medium text-gray-900">{m.user_name}</p>
+                      <p className="text-xs text-gray-500">{m.user_email}</p>
+                      {isHighCostPerHour && (
+                        <span className="inline-block mt-1 text-xs font-medium text-red-600 bg-red-100 px-2 py-0.5 rounded">
+                          Alto coste/h — trabaja menos horas
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right text-gray-700">{m.total_hours.toFixed(1)}h</td>
+                  <td className="px-6 py-4 text-right font-medium">
+                    {m.total_cost != null
+                      ? `${m.total_cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} ${m.currency}`
+                      : '—'}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    {m.effective_cost_per_hour != null ? (
+                      <span className={isHighCostPerHour ? 'font-semibold text-red-700' : 'text-gray-600'}>
+                        {m.effective_cost_per_hour.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {m.currency}/h
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1173,13 +1202,15 @@ function ProjectsMetrics({ metrics }: { metrics: ProjectMetricsType[] }) {
 }
 
 // Componente para métricas de áreas con enfoque en utilización
-function AreasMetrics({ metrics }: { metrics: AreaMetrics[] }) {
+function AreasMetrics({ metrics, costs = [] }: { metrics: AreaMetrics[]; costs?: CostByAreaRow[] }) {
   const totalAreas = metrics.length;
   const overloadedAreas = metrics.filter(m => m.isOverloaded).length;
   const underloadedAreas = metrics.filter(m => m.isUnderloaded).length;
   const avgCapacityUtilization = metrics.length > 0 
     ? metrics.reduce((acc, m) => acc + m.capacityUtilization, 0) / metrics.length 
     : 0;
+  const costMap = new Map(costs.map((c) => [c.area_id, c]));
+  const totalCostByAreas = costs.reduce((acc, c) => acc + c.total_cost, 0);
 
   const getRecommendationText = (action: string) => {
     switch (action) {
@@ -1250,6 +1281,21 @@ function AreasMetrics({ metrics }: { metrics: AreaMetrics[] }) {
             <Clock className="w-8 h-8 text-yellow-600" />
           </div>
         </div>
+
+        <div className="bg-indigo-50 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-indigo-600 font-medium">Coste total áreas</p>
+              <p className="text-2xl font-bold text-indigo-900">
+                {totalCostByAreas > 0
+                  ? totalCostByAreas.toLocaleString('es-CO', { maximumFractionDigits: 0 })
+                  : '—'}
+              </p>
+              <p className="text-xs text-indigo-600 mt-1">Período seleccionado</p>
+            </div>
+            <DollarSign className="w-8 h-8 text-indigo-600" />
+          </div>
+        </div>
       </div>
 
       {/* Alertas críticas */}
@@ -1314,10 +1360,23 @@ function AreasMetrics({ metrics }: { metrics: AreaMetrics[] }) {
                 </div>
                 
                 {/* Métricas principales */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-blue-600">{area.activeUsers}/{area.totalUsers}</div>
                     <div className="text-sm text-gray-600">Personal</div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-indigo-600">
+                      {(costMap.get(area.areaId)?.total_cost ?? 0) > 0
+                        ? (costMap.get(area.areaId)?.total_cost ?? 0).toLocaleString('es-CO', { maximumFractionDigits: 0 })
+                        : '—'}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {(costMap.get(area.areaId)?.total_cost ?? 0) > 0
+                        ? `${costMap.get(area.areaId)?.currency ?? 'COP'} · ${costMap.get(area.areaId)?.total_hours.toFixed(1)}h`
+                        : 'Sin tarifas'}
+                    </div>
                   </div>
                   
                   <div className="text-center">

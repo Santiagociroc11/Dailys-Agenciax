@@ -12,7 +12,9 @@ interface User {
   phone?: string;
   telegram_chat_id?: string;
   hourly_rate?: number | null;
+  monthly_salary?: number | null;
   currency?: string;
+  payment_account?: string | null;
 }
 
 export default function Users() {
@@ -48,7 +50,9 @@ export default function Users() {
     role: 'user',
     telegram_chat_id: '',
     hourly_rate: '' as string | number,
-    currency: 'COP'
+    monthly_salary: '' as string | number,
+    currency: 'COP',
+    payment_account: '',
   });
   const [editSuccess, setEditSuccess] = useState('');
   const [editError, setEditError] = useState('');
@@ -64,7 +68,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, currency');
+        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, monthly_salary, currency, payment_account');
 
       if (error) throw error;
 
@@ -215,10 +219,11 @@ export default function Users() {
         telegram_chat_id: editUser.telegram_chat_id || null,
       };
       const hourlyRate = editUser.hourly_rate === '' || editUser.hourly_rate === null ? null : Number(editUser.hourly_rate);
-      if (hourlyRate !== undefined) {
-        updateData.hourly_rate = hourlyRate;
-        updateData.currency = editUser.currency || 'COP';
-      }
+      const monthlySalary = editUser.monthly_salary === '' || editUser.monthly_salary === null ? null : Number(editUser.monthly_salary);
+      if (hourlyRate !== undefined) updateData.hourly_rate = hourlyRate;
+      if (monthlySalary !== undefined) updateData.monthly_salary = monthlySalary;
+      updateData.currency = editUser.currency || 'COP';
+      updateData.payment_account = editUser.payment_account?.trim() || null;
 
       const { error } = await supabase
         .from('users')
@@ -294,7 +299,9 @@ export default function Users() {
       role: user.role,
       telegram_chat_id: user.telegram_chat_id || '',
       hourly_rate: user.hourly_rate ?? '',
+      monthly_salary: user.monthly_salary ?? '',
       currency: user.currency || 'COP',
+      payment_account: user.payment_account || '',
     });
     
     setShowEditUserModal(true);
@@ -929,6 +936,21 @@ export default function Users() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Sueldo mensual
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={editUser.monthly_salary === '' ? '' : editUser.monthly_salary}
+                      onChange={(e) => setEditUser({ ...editUser, monthly_salary: e.target.value === '' ? '' : Number(e.target.value) })}
+                      className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Ej: 3000000"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Empleados con sueldo fijo. Se usa para costes (sueldo ÷ 160h)</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Tarifa/hora
                     </label>
                     <input
@@ -938,24 +960,39 @@ export default function Users() {
                       value={editUser.hourly_rate === '' ? '' : editUser.hourly_rate}
                       onChange={(e) => setEditUser({ ...editUser, hourly_rate: e.target.value === '' ? '' : Number(e.target.value) })}
                       className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="Ej: 50000"
+                      placeholder="Freelancers (opcional)"
                     />
-                    <p className="mt-1 text-xs text-gray-500">Para cálculo de costes</p>
+                    <p className="mt-1 text-xs text-gray-500">Si se define, tiene prioridad sobre sueldo mensual</p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Moneda
-                    </label>
-                    <select
-                      value={editUser.currency}
-                      onChange={(e) => setEditUser({ ...editUser, currency: e.target.value })}
-                      className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="COP">COP</option>
-                      <option value="USD">USD</option>
-                      <option value="EUR">EUR</option>
-                    </select>
-                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Moneda
+                  </label>
+                  <select
+                    value={editUser.currency}
+                    onChange={(e) => setEditUser({ ...editUser, currency: e.target.value })}
+                    className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="COP">COP</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cuenta de pago
+                  </label>
+                  <input
+                    type="text"
+                    value={editUser.payment_account}
+                    onChange={(e) => setEditUser({ ...editUser, payment_account: e.target.value })}
+                    className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Ej: Banco X - Cuenta ahorros 123456789"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Cuenta bancaria para pagos de nómina. El usuario también puede editarla en su configuración.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

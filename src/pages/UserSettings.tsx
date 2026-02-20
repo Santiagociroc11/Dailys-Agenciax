@@ -5,30 +5,32 @@ import { toast } from 'sonner';
 
 const UserSettings = () => {
   const [telegramId, setTelegramId] = useState('');
+  const [paymentAccount, setPaymentAccount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
-    const fetchUserTelegramId = async () => {
+    const fetchUserSettings = async () => {
       if (!user) return;
       setIsLoading(true);
       const { data, error } = await supabase
         .from('users')
-        .select('telegram_chat_id')
+        .select('telegram_chat_id, payment_account')
         .eq('id', user.id)
         .single();
 
       if (data) {
         setTelegramId(data.telegram_chat_id || '');
+        setPaymentAccount(data.payment_account || '');
       }
       if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching user Telegram ID:', error);
-        toast.error('Error al cargar tu ID de Telegram.');
+        console.error('Error fetching user settings:', error);
+        toast.error('Error al cargar tu configuración.');
       }
       setIsLoading(false);
     };
 
-    fetchUserTelegramId();
+    fetchUserSettings();
   }, [user]);
 
   const handleSave = async () => {
@@ -36,14 +38,14 @@ const UserSettings = () => {
     setIsLoading(true);
     const { error } = await supabase
       .from('users')
-      .update({ telegram_chat_id: telegramId })
+      .update({ telegram_chat_id: telegramId, payment_account: paymentAccount.trim() || null })
       .eq('id', user.id);
 
     if (error) {
-      toast.error('Error al guardar tu ID de Telegram.');
-      console.error('Error saving user Telegram ID:', error);
+      toast.error('Error al guardar la configuración.');
+      console.error('Error saving user settings:', error);
     } else {
-      toast.success('¡ID de Telegram guardado correctamente!');
+      toast.success('¡Configuración guardada correctamente!');
     }
     setIsLoading(false);
   };
@@ -76,7 +78,7 @@ const UserSettings = () => {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Tu Configuración de Notificaciones</h1>
+      <h1 className="text-2xl font-bold mb-6">Tu Configuración</h1>
       
       {/* Estado de configuración personal */}
       {telegramId ? (
@@ -191,6 +193,23 @@ const UserSettings = () => {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+        <div>
+          <label htmlFor="paymentAccount" className="block text-sm font-medium text-gray-700 mb-1">
+            Cuenta de pago
+          </label>
+          <p className="text-xs text-gray-500 mb-2">
+            Cuenta bancaria donde deseas recibir los pagos de nómina (ej: Banco X - Cuenta ahorros 123456789).
+          </p>
+          <input
+            id="paymentAccount"
+            type="text"
+            value={paymentAccount}
+            onChange={(e) => setPaymentAccount(e.target.value)}
+            placeholder="Ej: Banco X - Cuenta ahorros 123456789"
+            disabled={isLoading}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
         <div className="flex gap-2">
             <button 
               onClick={handleSave} 
@@ -201,7 +220,7 @@ const UserSettings = () => {
                   : 'bg-green-600 hover:bg-green-700'
               }`}
             >
-              {isLoading ? 'Guardando...' : (telegramId ? 'Actualizar ID' : 'Activar Notificaciones')}
+              {isLoading ? 'Guardando...' : (telegramId ? 'Guardar cambios' : 'Activar Notificaciones')}
             </button>
             <button 
               onClick={sendTestNotification} 

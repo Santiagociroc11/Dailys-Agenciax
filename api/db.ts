@@ -640,25 +640,101 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
 
       const results = await TaskWorkAssignment.aggregate(pipeline).exec();
       const userIds = results.map((r: { _id: string }) => r._id);
-      const users = await User.find({ id: { $in: userIds } }).select('id name email hourly_rate currency').lean().exec();
-      const userMap = new Map(users.map((u: { id: string; name: string; email: string; hourly_rate?: number | null; currency?: string }) => [u.id, u]));
+      const users = await User.find({ id: { $in: userIds } }).select('id name email hourly_rate monthly_salary currency').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string }) => [u.id, u]));
 
       data = results.map((r: { _id: string; total_minutes: number; task_count: number }) => {
-        const u = userMap.get(r._id) as { name: string; email: string; hourly_rate?: number | null; currency?: string } | undefined;
+        const u = userMap.get(r._id) as { name: string; email: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string } | undefined;
         const hours = r.total_minutes / 60;
-        const rate = u?.hourly_rate ?? 0;
-        const cost = rate > 0 ? hours * rate : null;
+        const fromSalary = (u?.hourly_rate == null || u.hourly_rate <= 0) && (u?.monthly_salary != null && u.monthly_salary > 0);
+        const isFreelancer = u?.hourly_rate != null && u.hourly_rate > 0;
+
+        // Coste real: empleados = sueldo mensual fijo; freelancers = horas × tarifa
+        const totalCost = fromSalary && u?.monthly_salary
+          ? u.monthly_salary
+          : isFreelancer && u?.hourly_rate
+            ? hours * u.hourly_rate
+            : null;
+
+        // Coste por hora efectiva: sueldo ÷ horas. Más alto = menos eficiente (trabajan menos)
+        const effectiveCostPerHour = totalCost != null && hours > 0 ? totalCost / hours : null;
+
         return {
           user_id: r._id,
           user_name: u?.name || 'Sin nombre',
           user_email: u?.email || '',
           total_hours: Math.round(hours * 100) / 100,
           task_count: r.task_count,
-          hourly_rate: rate || null,
+          monthly_salary: u?.monthly_salary ?? null,
+          rate_source: totalCost != null ? (fromSalary ? 'salary' : 'hourly') : null,
           currency: u?.currency || 'COP',
-          total_cost: cost != null ? Math.round(cost * 100) / 100 : null,
+          total_cost: totalCost != null ? Math.round(totalCost * 100) / 100 : null,
+          effective_cost_per_hour: effectiveCostPerHour != null ? Math.round(effectiveCostPerHour * 100) / 100 : null,
         };
-      }).sort((a: { total_hours: number }, b: { total_hours: number }) => b.total_hours - a.total_hours);
+      }).sort((a: { effective_cost_per_hour: number | null }, b: { effective_cost_per_hour: number | null }) => {
+        const ah = a.effective_cost_per_hour ?? 0;
+        const bh = b.effective_cost_per_hour ?? 0;
+        return bh - ah;
+      });
+    } else if (fn === 'get_cost_by_area') {
+      const startDate = params.start_date as string;
+      const endDate = params.end_date as string;
+      if (!startDate || !endDate) {
+        res.status(400).json({ data: null, error: { message: 'Faltan start_date y end_date' } });
+        return;
+      }
+
+      const assignments = await AreaUserAssignment.find({}).lean().exec();
+      const userToArea = new Map<string, string>();
+      for (const a of assignments as { user_id: string; area_id: string }[]) {
+        if (!userToArea.has(a.user_id)) userToArea.set(a.user_id, a.area_id);
+      }
+
+      const pipeline = [
+        {
+          $match: {
+            date: { $gte: startDate, $lte: endDate },
+            actual_duration: { $exists: true, $ne: null, $gt: 0 } as Record<string, unknown>,
+          },
+        },
+        { $group: { _id: '$user_id', total_minutes: { $sum: '$actual_duration' } } },
+      ];
+      const results = await TaskWorkAssignment.aggregate(pipeline).exec();
+      const userIds = [...new Set(results.map((r: { _id: string }) => r._id))];
+      const users = await User.find({ id: { $in: userIds } }).select('id hourly_rate monthly_salary currency').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string }) => [u.id, u]));
+
+      const areaCosts: Record<string, { minutes: number; cost: number; currency: string }> = {};
+      const areas = await Area.find({}).select('id name').lean().exec();
+      for (const a of areas as { id: string; name: string }[]) {
+        areaCosts[a.id] = { minutes: 0, cost: 0, currency: 'COP' };
+      }
+
+      for (const r of results as { _id: string; total_minutes: number }[]) {
+        const areaId = userToArea.get(r._id);
+        if (!areaId || !areaCosts[areaId]) continue;
+        const u = userMap.get(r._id) as { hourly_rate?: number | null; monthly_salary?: number | null; currency?: string } | undefined;
+        const fromSalary = (u?.hourly_rate == null || u.hourly_rate <= 0) && (u?.monthly_salary != null && u.monthly_salary > 0);
+        const isFreelancer = u?.hourly_rate != null && u.hourly_rate > 0;
+        const hours = r.total_minutes / 60;
+        const cost = fromSalary && u?.monthly_salary
+          ? u.monthly_salary
+          : isFreelancer && u?.hourly_rate
+            ? hours * u.hourly_rate
+            : 0;
+        areaCosts[areaId].minutes += r.total_minutes;
+        areaCosts[areaId].cost += cost;
+        if (u?.currency) areaCosts[areaId].currency = u.currency;
+      }
+
+      const areaMap = new Map((areas as { id: string; name: string }[]).map((a) => [a.id, a.name]));
+      data = Object.entries(areaCosts).map(([areaId, v]) => ({
+        area_id: areaId,
+        area_name: areaMap.get(areaId) || '—',
+        total_hours: Math.round((v.minutes / 60) * 100) / 100,
+        total_cost: Math.round(v.cost * 100) / 100,
+        currency: v.currency,
+      })).sort((a: { total_cost: number }, b: { total_cost: number }) => b.total_cost - a.total_cost);
     } else if (fn === 'get_capacity_by_user') {
       const workingHoursPerDay = (params.working_hours_per_day as number) ?? 8;
       const workingDaysPerWeek = (params.working_days_per_week as number) ?? 5;

@@ -14,6 +14,7 @@ import {
   WorkEvent,
   WorkSession,
   AuditLog,
+  PayrollPayment,
 } from '../../models/index.js';
 
 export const MODEL_MAP: Record<string, Model<unknown>> = {
@@ -31,6 +32,7 @@ export const MODEL_MAP: Record<string, Model<unknown>> = {
   work_events: WorkEvent as Model<unknown>,
   work_sessions: WorkSession as Model<unknown>,
   audit_log: AuditLog as Model<unknown>,
+  payroll_payments: PayrollPayment as Model<unknown>,
 };
 
 export function getModel(table: string): Model<unknown> | null {
