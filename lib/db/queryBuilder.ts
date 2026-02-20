@@ -72,13 +72,17 @@ function parseNotInString(str: string): string[] {
 /**
  * Construye el objeto de proyección para select.
  * '*' = todos los campos, 'id, name' = campos específicos.
+ * Si el select contiene sintaxis de joins (ej: tasks!inner(...)), no aplicar proyección
+ * para evitar que Mongoose devuelva solo _id (los campos de join no existen en el doc).
  */
 export function buildProjection(select?: string): Record<string, number> | null {
   if (!select || select === '*') return null;
+  // Si hay joins (Supabase-style), no proyectar: devolveríamos solo _id
+  if (select.includes('!') || select.includes('(')) return null;
   const fields = select.split(',').map((f) => f.trim());
   const projection: Record<string, number> = {};
   for (const field of fields) {
-    if (field) projection[field] = 1;
+    if (field && !field.includes('!') && !field.includes('(')) projection[field] = 1;
   }
   return Object.keys(projection).length > 0 ? projection : null;
 }

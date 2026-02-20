@@ -286,8 +286,26 @@ function Tasks() {
         }
 
         console.log('Subtasks data received:', subtasksData);
-      const groupedSubtasks = (subtasksData || []).reduce((acc: Record<string, Subtask[]>, subtask: Subtask) => {
-          acc[subtask.task_id] = [...(acc[subtask.task_id] || []), subtask];
+      const groupedSubtasks = (subtasksData || []).reduce((acc: Record<string, Subtask[]>, raw: Record<string, unknown>) => {
+          // Normalizar subtareas migradas: MongoDB usa _id, el schema usa id; task_id puede venir de tasks (join)
+          const taskId = raw.task_id as string | undefined;
+          if (!taskId) {
+            console.warn('Subtask sin task_id, omitiendo:', raw._id ?? raw.id);
+            return acc;
+          }
+          const subtask: Subtask = {
+            id: (raw.id as string) ?? String(raw._id),
+            task_id: taskId,
+            title: (raw.title as string) ?? '',
+            description: (raw.description as string) ?? null,
+            estimated_duration: (raw.estimated_duration as number) ?? 0,
+            sequence_order: (raw.sequence_order as number) ?? null,
+            assigned_to: (raw.assigned_to as string) ?? '',
+            status: ((raw.status as string) ?? 'pending') as Subtask['status'],
+            start_date: (raw.start_date as string) ?? null,
+            deadline: (raw.deadline as string) ?? null,
+          };
+          acc[taskId] = [...(acc[taskId] || []), subtask];
           return acc;
         }, {} as Record<string, Subtask[]>);
         console.log('Grouped subtasks:', groupedSubtasks);
@@ -1468,9 +1486,9 @@ function Tasks() {
               </div>
             )}
               <div className="flex items-center text-sm text-gray-500 mb-3">
-              <span>Fecha límite: {new Date(task.deadline).toLocaleDateString()}</span>
+              <span>Fecha límite: {task.deadline && !isNaN(new Date(task.deadline).getTime()) ? new Date(task.deadline).toLocaleDateString() : '—'}</span>
               <span className="mx-2">•</span>
-              <span>{task.estimated_duration} minutos</span>
+              <span>{(task.estimated_duration ?? 0)} minutos</span>
               {task.is_sequential && (
                 <>
                   <span className="mx-2">•</span>
@@ -1561,7 +1579,7 @@ function Tasks() {
                                       setShowSubtaskDetailModal(true);
                                     }}
                                   >
-                                    {subtask.title}
+                                    {subtask.title || 'Sin título'}
                                   </h4>
                                 </div>
                                 
@@ -1578,19 +1596,19 @@ function Tasks() {
                                 <div className="flex flex-wrap items-center text-xs text-gray-500 mt-2 gap-x-3 gap-y-1">
                                   <div className="flex items-center">
                                     <Clock className="w-3 h-3 mr-1" />
-                                    <span>{subtask.estimated_duration} min</span>
+                                    <span>{(subtask.estimated_duration ?? 0)} min</span>
                                   </div>
                                   
-                                  {subtask.start_date && (
+                                  {subtask.start_date && !isNaN(new Date(subtask.start_date).getTime()) && (
                                     <div className="flex items-center">
                                       <span>Inicio: {new Date(subtask.start_date).toLocaleDateString()}</span>
                                     </div>
                                   )}
                                   
-                                  {subtask.deadline && (
+                                  {subtask.deadline && !isNaN(new Date(subtask.deadline).getTime()) && (
                                     <div className="flex items-center">
                                       <span>Fin: {new Date(subtask.deadline).toLocaleDateString()}</span>
-                                      </div>
+                                    </div>
                                   )}
                                   
                                   <div className="flex items-center">
