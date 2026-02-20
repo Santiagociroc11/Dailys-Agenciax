@@ -208,7 +208,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         list.push(st);
         subtasksByTask.set(st.task_id, list);
       }
-      const templateTasks = projectTasks.map((t: { title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean }) => {
+      const templateTasks = projectTasks.map((t: { id: string; title: string; description?: string | null; estimated_duration: number; priority: string; is_sequential: boolean }) => {
         const subs = (subtasksByTask.get(t.id) || []).sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0));
         return {
           title: t.title,

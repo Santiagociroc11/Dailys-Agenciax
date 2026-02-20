@@ -310,15 +310,15 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
 
     const taskIdsForSubs = subtasksDue.map((s: { task_id: string }) => s.task_id);
     const parentTasksForSubs = await Task.find({ id: { $in: taskIdsForSubs } }).select('id title project_id').lean().exec();
-    const parentTaskMap = new Map(parentTasksForSubs.map((t: { id: string; title: string; project_id: string }) => [t.id, t]));
-    const projectIds = [...new Set([...tasksDue.map((t: { project_id: string }) => t.project_id), ...parentTasksForSubs.map((t: { project_id: string }) => t.project_id)])].filter(Boolean);
+    const parentTaskMap = new Map(parentTasksForSubs.map((t: { id: string; title: string; project_id?: string | null }) => [t.id, t]));
+    const projectIds = [...new Set([...tasksDue.map((t: { project_id?: string | null }) => t.project_id), ...parentTasksForSubs.map((t: { project_id?: string | null }) => t.project_id)])].filter(Boolean);
     const projects = await Project.find({ id: { $in: projectIds } }).select('id name').lean().exec();
     const projectMap = new Map(projects.map((p: { id: string; name: string }) => [p.id, p.name]));
 
     let sentCount = 0;
     for (const t of tasksDue) {
       const userIds = (t as { assigned_users?: string[] }).assigned_users || [];
-      const projectName = projectMap.get(t.project_id) || 'Sin proyecto';
+      const projectName = projectMap.get(t.project_id ?? '') || 'Sin proyecto';
       const deadlineStr = new Date(t.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
       const msg = createDeadlineReminderMessage(t.title, projectName, deadlineStr, days, false);
       for (const uid of userIds) {
@@ -388,13 +388,13 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
         .lean()
         .exec();
 
-      const projectIds = [...new Set(tasksDue.map((t: { project_id: string }) => t.project_id).filter(Boolean))];
+      const projectIds = [...new Set(tasksDue.map((t: { project_id?: string | null }) => t.project_id).filter(Boolean))];
       const projects = await Project.find({ id: { $in: projectIds } }).select('id name').lean().exec();
       const projectMap = new Map(projects.map((p: { id: string; name: string }) => [p.id, p.name]));
 
       const taskList: string[] = [];
-      tasksDue.forEach((t: { title: string; project_id: string }) => {
-        taskList.push(`${t.title} (${projectMap.get(t.project_id) || 'Proyecto'})`);
+      tasksDue.forEach((t: { title: string; project_id?: string | null }) => {
+        taskList.push(`${t.title} (${projectMap.get(t.project_id ?? '') || 'Proyecto'})`);
       });
       subtasksDue.forEach((s: { title: string }) => {
         taskList.push(s.title);
@@ -402,8 +402,10 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
 
       const total = taskList.length;
       const msg = createDailySummaryMessage(user.name || user.email || 'Usuario', total, taskList.slice(0, 10));
-      const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
-      if (ok) sentCount++;
+      if (user.telegram_chat_id) {
+        const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
+        if (ok) sentCount++;
+      }
     }
 
     return res.status(200).json({
