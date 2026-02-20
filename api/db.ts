@@ -790,12 +790,36 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const workingDaysPerWeek = (params.working_days_per_week as number) ?? 5;
       const availableHoursPerWeek = workingHoursPerDay * workingDaysPerWeek;
 
+      // Solo considerar trabajo con deadline en ventana de planificación (no todo el histórico).
+      // Incluye: hasta 1 semana vencido + próximas 2 semanas = 3 semanas de carga activa.
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const windowStart = new Date(startOfToday);
+      windowStart.setDate(windowStart.getDate() - 7);
+      const windowEnd = new Date(startOfToday);
+      windowEnd.setDate(windowEnd.getDate() + 14);
+      const deadlineFilter = { deadline: { $gte: windowStart, $lte: windowEnd } };
+      const availableHoursInWindow = availableHoursPerWeek * 3; // 3 semanas
+
+      const activeProjectIds = await Project.find({ is_archived: false })
+        .select('id')
+        .lean()
+        .exec()
+        .then((r) => r.map((p: { id: string }) => p.id));
+
       const users = await User.find({ assigned_projects: { $exists: true, $ne: [] } })
         .select('id name email')
         .lean()
         .exec();
 
-      const tasks = await Task.find({ status: { $nin: ['approved'] } })
+      const tasks = await Task.find({
+        status: { $nin: ['approved'] },
+        ...deadlineFilter,
+        $or: [
+          { project_id: { $in: activeProjectIds } },
+          { project_id: null },
+        ],
+      })
         .select('id assigned_users estimated_duration')
         .lean()
         .exec();
@@ -805,6 +829,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         task_id: { $in: taskIds },
         status: { $nin: ['approved'] },
         assigned_to: { $exists: true, $ne: null },
+        ...deadlineFilter,
       })
         .select('task_id assigned_to estimated_duration')
         .lean()
@@ -840,9 +865,9 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         user_name: u.name,
         user_email: u.email,
         assigned_hours: Math.round((userMinutes[u.id] || 0) / 60 * 100) / 100,
-        available_hours: availableHoursPerWeek,
-        utilization_percent: availableHoursPerWeek > 0
-          ? Math.round(((userMinutes[u.id] || 0) / 60 / availableHoursPerWeek) * 100)
+        available_hours: availableHoursInWindow,
+        utilization_percent: availableHoursInWindow > 0
+          ? Math.round(((userMinutes[u.id] || 0) / 60 / availableHoursInWindow) * 100)
           : 0,
       }));
     } else if (fn === 'get_activity_log') {

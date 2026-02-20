@@ -5,11 +5,11 @@ import { Users, AlertTriangle, CheckCircle, UserPlus, Download, HelpCircle } fro
 
 type CapacityRow = Awaited<ReturnType<typeof getCapacityByUser>>[number];
 
-function exportToCSV(data: CapacityRow[], hoursPerWeek: number) {
-  const headers = ['Usuario', 'Email', 'Horas asignadas (pendientes)', 'Horas disponibles/semana', 'Carga %', 'Estado'];
+function exportToCSV(data: CapacityRow[]) {
+  const headers = ['Usuario', 'Email', 'Horas asignadas (ventana 3 sem)', 'Horas disponibles', 'Carga %', 'Estado'];
   const rows = data.map((r) => {
     const status = r.utilization_percent > 100 ? 'Sobrecargado' : r.utilization_percent >= 70 ? 'Óptimo' : 'Disponible';
-    return [r.user_name, r.user_email, r.assigned_hours.toFixed(1), hoursPerWeek, `${r.utilization_percent}%`, status];
+    return [r.user_name, r.user_email, r.assigned_hours.toFixed(1), r.available_hours, `${r.utilization_percent}%`, status];
   });
   const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
@@ -90,7 +90,7 @@ export default function CapacityView() {
           </p>
         </div>
         <button
-          onClick={() => exportToCSV(capacity, hoursPerWeek)}
+          onClick={() => exportToCSV(capacity)}
           disabled={capacity.length === 0}
           className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 disabled:opacity-50"
         >
@@ -104,10 +104,10 @@ export default function CapacityView() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
           <p className="font-medium mb-2">¿Qué muestra esta vista?</p>
           <p className="mb-2">
-            <strong>Horas asignadas</strong> = suma de las estimaciones de todas las tareas y subtareas pendientes (no aprobadas) que tiene cada persona.
+            <strong>Horas asignadas</strong> = suma de tareas y subtareas pendientes con fecha límite en la ventana de planificación (1 semana vencidas + próximas 2 semanas). Excluye proyectos archivados y todo el histórico.
           </p>
           <p className="mb-2">
-            <strong>Horas disponibles</strong> = capacidad semanal según la jornada (ej: 8h/día × 5 días = 40h).
+            <strong>Horas disponibles</strong> = capacidad total en esa ventana (ej: 40h/sem × 3 sem = 120h).
           </p>
           <p>
             Si alguien tiene &gt;100% está sobrecargado. Si tiene &lt;70% tiene margen para asignarle más trabajo.
@@ -180,7 +180,7 @@ export default function CapacityView() {
           />
           <span className="text-gray-600">días/semana</span>
         </div>
-        <span className="text-sm text-gray-500">= {hoursPerWeek}h disponibles por persona</span>
+        <span className="text-sm text-gray-500">= {hoursPerWeek}h/sem × 3 sem = {hoursPerWeek * 3}h en ventana de planificación</span>
       </div>
 
       {/* Tabla */}
@@ -193,8 +193,8 @@ export default function CapacityView() {
             <thead className="bg-gray-50 text-left">
               <tr>
                 <th className="px-6 py-3 font-medium text-gray-700">Usuario</th>
-                <th className="px-6 py-3 font-medium text-gray-700 text-right">Trabajo pendiente</th>
-                <th className="px-6 py-3 font-medium text-gray-700 text-right">Disponible</th>
+                <th className="px-6 py-3 font-medium text-gray-700 text-right">Trabajo pendiente (3 sem)</th>
+                <th className="px-6 py-3 font-medium text-gray-700 text-right">Capacidad (3 sem)</th>
                 <th className="px-6 py-3 font-medium text-gray-700 w-48">Carga</th>
                 <th className="px-6 py-3 font-medium text-gray-700">Estado</th>
               </tr>
