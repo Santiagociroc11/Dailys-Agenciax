@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Sun, CheckSquare, FolderOpen, ArrowRight, Calendar } from 'lucide-react';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import PhaseBadge from '../components/PhaseBadge';
 import { SkeletonMiDia } from '../components/Skeleton';
 
 interface TodayAssignment {
@@ -17,6 +18,7 @@ interface TodayAssignment {
   project_id: string | null;
   title: string;
   projectName: string;
+  phaseName: string | null;
   deadline: string | null;
   estimated_duration: number;
 }
@@ -73,7 +75,7 @@ export default function MiDiaView() {
           ? supabase.from('projects').select('id, name').in('id', projectIdsFiltered)
           : { data: [] },
         taskIds.length > 0
-          ? supabase.from('tasks').select('id, title, deadline, estimated_duration, project_id').in('id', taskIds)
+          ? supabase.from('tasks').select('id, title, deadline, estimated_duration, project_id, phase_id').in('id', taskIds)
           : { data: [] },
         subtaskIds.length > 0
           ? supabase.from('subtasks').select('id, title, deadline, estimated_duration, task_id').in('id', subtaskIds)
@@ -86,19 +88,30 @@ export default function MiDiaView() {
       const subtaskTaskIds = [...new Set((subtasksRes.data || []).map((s) => s.task_id).filter(Boolean))];
       const subtaskTasksRes =
         subtaskTaskIds.length > 0
-          ? await supabase.from('tasks').select('id, project_id').in('id', subtaskTaskIds)
+          ? await supabase.from('tasks').select('id, project_id, phase_id').in('id', subtaskTaskIds)
           : { data: [] };
       const taskToProject = new Map((subtaskTasksRes.data || []).map((t) => [t.id, t.project_id]));
+      const taskToPhaseId = new Map((subtaskTasksRes.data || []).map((t) => [t.id, (t as { phase_id?: string }).phase_id]));
+
+      const phaseIds = new Set<string>();
+      (tasksRes.data || []).forEach((t) => { if ((t as { phase_id?: string }).phase_id) phaseIds.add((t as { phase_id?: string }).phase_id!); });
+      (subtaskTasksRes.data || []).forEach((t) => { if ((t as { phase_id?: string }).phase_id) phaseIds.add((t as { phase_id?: string }).phase_id!); });
+      const { data: phasesData } = phaseIds.size > 0
+        ? await supabase.from('phases').select('id, name').in('id', Array.from(phaseIds))
+        : { data: [] };
+      const phaseMap = new Map((phasesData || []).map((p) => [p.id, p.name]));
 
       const subtaskMap = new Map(
         (subtasksRes.data || []).map((s) => {
           const projectId = taskToProject.get(s.task_id);
+          const phaseId = taskToPhaseId.get(s.task_id);
           return [
             s.id,
             {
               ...s,
               projectName: projectId ? projectMap.get(projectId) || 'Sin proyecto' : 'Sin proyecto',
               project_id: projectId,
+              phaseName: phaseId ? phaseMap.get(phaseId) || null : null,
             },
           ];
         })
@@ -116,11 +129,13 @@ export default function MiDiaView() {
             project_id: sub?.project_id || a.project_id,
             title: sub?.title || '—',
             projectName: sub?.projectName || projectMap.get(a.project_id || '') || 'Sin proyecto',
+            phaseName: sub?.phaseName ?? null,
             deadline: sub?.deadline || null,
             estimated_duration: sub?.estimated_duration || 0,
           };
         }
         const task = taskMap.get(a.task_id);
+        const taskPhaseId = (task as { phase_id?: string })?.phase_id;
         return {
           id: a.id,
           task_id: a.task_id,
@@ -130,6 +145,7 @@ export default function MiDiaView() {
           project_id: a.project_id,
           title: task?.title || '—',
           projectName: projectMap.get(a.project_id || '') || 'Sin proyecto',
+          phaseName: taskPhaseId ? phaseMap.get(taskPhaseId) || null : null,
           deadline: task?.deadline || null,
           estimated_duration: task?.estimated_duration || 0,
         };
@@ -209,7 +225,10 @@ export default function MiDiaView() {
                   {items.map((item) => (
                     <li key={item.id} className="px-4 py-3 flex items-center justify-between gap-4">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-800 truncate">{item.title}</p>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <p className="font-medium text-gray-800 truncate">{item.title}</p>
+                          <PhaseBadge phaseName={item.phaseName} />
+                        </div>
                         {item.deadline && (
                           <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
                             <Calendar className="w-3 h-3" />

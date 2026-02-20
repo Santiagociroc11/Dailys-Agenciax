@@ -1919,7 +1919,7 @@ export default function UserProjectView() {
                   `
             *,
             tasks!inner (
-              id, title, is_sequential, project_id,
+              id, title, is_sequential, project_id, phase_id,
               projects!inner(id, is_archived)
             )
           `
@@ -2021,6 +2021,7 @@ export default function UserProjectView() {
                      is_sequential: task.is_sequential,
                      project_id: task.project_id,
                      projectName: projectMap[task.project_id] || "Sin proyecto",
+                     phase_id: (task as { phase_id?: string }).phase_id ?? null,
                      type: "task",
                      assignment_date: assignment?.date || today,
                      notes: isActuallyReturned ? returnedInfo?.notes || task.notes : assignment?.notes || task.notes,
@@ -2075,7 +2076,7 @@ export default function UserProjectView() {
                   `
             *,
             tasks!inner (
-              id, title, is_sequential, project_id,
+              id, title, is_sequential, project_id, phase_id,
               projects!inner(id, is_archived)
             )
           `
@@ -2108,6 +2109,7 @@ export default function UserProjectView() {
                      is_sequential: false,
                      project_id: subtask.tasks?.project_id || "",
                      projectName: projectMap[subtask.tasks?.project_id || ""] || "Sin proyecto",
+                     phase_id: (subtask.tasks as { phase_id?: string })?.phase_id ?? null,
                      type: "subtask",
                      assignment_date: assignment?.date || today,
                      checklist: (subtask.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
@@ -2156,6 +2158,20 @@ export default function UserProjectView() {
 
          // Calcular el promedio de días de retraso
          const avgDelayDays = delayCount > 0 ? Math.round(totalDelayDays / delayCount) : 0;
+
+         // Cargar fases para el PhaseBadge en el modal
+         const allGestionItems = [...todayAssignedItems, ...delayedAssignedItems, ...returnedItems, ...blockedItems];
+         const phaseIdsFromGestion = new Set<string>();
+         allGestionItems.forEach((t) => { if (t.phase_id) phaseIdsFromGestion.add(t.phase_id); });
+         if (phaseIdsFromGestion.size > 0) {
+            const { data: phasesData } = await supabase.from("phases").select("id, name, order").in("id", Array.from(phaseIdsFromGestion)).order("order", { ascending: true });
+            setPhasesForProject((prev) => {
+               const existingIds = new Set(prev.map((p) => p.id));
+               const newPhases = (phasesData || []).map((p: { id: string; name: string; order: number }) => ({ id: p.id, name: p.name, order: p.order }));
+               const toAdd = newPhases.filter((p) => !existingIds.has(p.id));
+               return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+            });
+         }
 
          // Actualizar estados
          setAssignedTaskItems(todayAssignedItems);
@@ -2795,6 +2811,7 @@ export default function UserProjectView() {
                      is_sequential: task.is_sequential,
                      project_id: task.project_id,
                      projectName: projectMap[task.project_id] || "Sin proyecto",
+                     phase_id: (task as { phase_id?: string }).phase_id ?? null,
                      type: "task" as const,
                      assignment_date: assignment?.date || "",
                      notes: assignment?.notes || task.notes || "",
@@ -2813,7 +2830,7 @@ export default function UserProjectView() {
                   `
             *,
             tasks!inner (
-              id, title, is_sequential, project_id,
+              id, title, is_sequential, project_id, phase_id,
               projects!inner(id, is_archived)
             )
           `
@@ -2860,6 +2877,7 @@ export default function UserProjectView() {
                      is_sequential: false,
                      project_id: subtask.tasks?.project_id || "",
                      projectName: projectMap[subtask.tasks?.project_id || ""] || "Sin proyecto",
+                     phase_id: (subtask.tasks as { phase_id?: string })?.phase_id ?? null,
                      type: "subtask" as const,
                      assignment_date: assignment?.date || "",
                      notes: assignment?.notes || subtask.notes || "",
@@ -2895,6 +2913,19 @@ export default function UserProjectView() {
                   break;
             }
          });
+
+         // Cargar fases para el PhaseBadge en el modal
+         const phaseIdsFromCompleted = new Set<string>();
+         sortedCompletedItems.forEach((t) => { if (t.phase_id) phaseIdsFromCompleted.add(t.phase_id); });
+         if (phaseIdsFromCompleted.size > 0) {
+            const { data: phasesData } = await supabase.from("phases").select("id, name, order").in("id", Array.from(phaseIdsFromCompleted)).order("order", { ascending: true });
+            setPhasesForProject((prev) => {
+               const existingIds = new Set(prev.map((p) => p.id));
+               const newPhases = (phasesData || []).map((p: { id: string; name: string; order: number }) => ({ id: p.id, name: p.name, order: p.order }));
+               const toAdd = newPhases.filter((p) => !existingIds.has(p.id));
+               return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+            });
+         }
 
          setCompletedTaskItems(submitted);
          setInReviewTaskItems(inReview);
@@ -3520,8 +3551,8 @@ export default function UserProjectView() {
             .from("task_work_assignments")
             .select(`
                *,
-               tasks(id, title, description, project_id, estimated_duration, priority, start_date, deadline, status, is_sequential, projects(name)),
-               subtasks(id, title, description, task_id, estimated_duration, start_date, deadline, status, tasks(id, title, projects(name)))
+               tasks(id, title, description, project_id, phase_id, estimated_duration, priority, start_date, deadline, status, is_sequential, projects(name)),
+               subtasks(id, title, description, task_id, estimated_duration, start_date, deadline, status, tasks(id, title, phase_id, projects(name)))
             `)
             .eq("user_id", user.id)
             .gte("date", startDate)
@@ -3563,6 +3594,7 @@ export default function UserProjectView() {
                   project_id: assignment.project_id,
                   project_name: projectName,
                   parent_task_title: parentTaskTitle,
+                  phase_id: (taskData as { phase_id?: string })?.phase_id ?? (taskData.tasks as { phase_id?: string })?.phase_id ?? null,
                   estimated_duration: taskData.estimated_duration,
                   sessions: {}
                };
@@ -4976,6 +5008,7 @@ export default function UserProjectView() {
                                                          is_sequential: taskGroup.is_sequential,
                                                          project_id: taskGroup.project_id,
                                                          projectName: taskGroup.project_name,
+                                                         phase_id: taskGroup.phase_id ?? null,
                                                          type: taskGroup.type,
                                                          original_id: taskGroup.type === "subtask" ? taskGroup.id.replace("subtask-", "") : undefined,
                                                          subtask_title: taskGroup.parent_task_title

@@ -8,6 +8,7 @@ import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import PhaseBadge from '../components/PhaseBadge';
 import { getProjectHoursConsumed } from '../lib/metrics';
 
 interface Project {
@@ -1704,7 +1705,10 @@ function Projects() {
                         <div key={task.id} className="bg-gray-50 p-3 rounded-md">
                           <div className="flex justify-between items-start">
                             <div>
-                              <h4 className="font-medium">{task.title}</h4>
+                              <div className="flex flex-wrap items-center gap-1 mb-1">
+                                <h4 className="font-medium">{task.title}</h4>
+                                <PhaseBadge phaseName={phases.find(p => p.id === (task as { phase_id?: string }).phase_id)?.name} />
+                              </div>
                               {task.description && <p className="text-sm text-gray-600 mt-1">{task.description}</p>}
                             </div>
                             <div className="flex flex-col items-end gap-1">

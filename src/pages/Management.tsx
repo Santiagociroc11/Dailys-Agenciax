@@ -356,21 +356,34 @@ function Management() {
 
   useEffect(() => {
     async function loadPhases() {
-      if (!selectedProject) {
+      if (selectedProject) {
+        const { data } = await supabase
+          .from('phases')
+          .select('id, name, order, project_id')
+          .eq('project_id', selectedProject)
+          .order('order', { ascending: true });
+        setPhases((data || []) as { id: string; name: string; order: number; project_id: string }[]);
+        setSelectedPhase(null);
+      } else if (tasks.length > 0) {
+        const projectIds = [...new Set(tasks.map(t => t.project_id).filter(Boolean))] as string[];
+        if (projectIds.length > 0) {
+          const { data } = await supabase
+            .from('phases')
+            .select('id, name, order, project_id')
+            .in('project_id', projectIds)
+            .order('order', { ascending: true });
+          setPhases((data || []) as { id: string; name: string; order: number; project_id: string }[]);
+        } else {
+          setPhases([]);
+        }
+        setSelectedPhase(null);
+      } else {
         setPhases([]);
         setSelectedPhase(null);
-        return;
       }
-      const { data } = await supabase
-        .from('phases')
-        .select('id, name, order, project_id')
-        .eq('project_id', selectedProject)
-        .order('order', { ascending: true });
-      setPhases((data || []) as { id: string; name: string; order: number; project_id: string }[]);
-      setSelectedPhase(null);
     }
     loadPhases();
-  }, [selectedProject]);
+  }, [selectedProject, tasks]);
 
   useEffect(() => {
     fetchData();
@@ -536,7 +549,7 @@ function Management() {
         .select(`
           *,
           tasks!inner(
-            id, project_id,
+            id, project_id, phase_id,
             projects!inner(id, is_archived)
           )
         `)
