@@ -45,6 +45,7 @@ interface ChecklistItem {
   title: string;
   checked: boolean;
   order?: number;
+  parentId?: string | null;
 }
 
 interface Subtask {
@@ -4061,6 +4062,25 @@ function Management() {
                       </div>
                     </div>
 
+                    {/* Checklist del responsable */}
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                      <div className="p-4">
+                        <ActivityChecklist
+                          key={`checklist-${taskDetails.id}`}
+                          items={(taskDetails.checklist || []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order, parentId: c.parentId }))}
+                          onUpdate={async (updated) => {
+                            const table = detailsItem?.type === 'subtask' ? 'subtasks' : 'tasks';
+                            const { error } = await supabase.from(table).update({ checklist: updated }).eq('id', taskDetails.id);
+                            if (error) throw error;
+                            setTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
+                            fetchData();
+                          }}
+                          placeholder="Añadir paso o verificación..."
+                          emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
+                        />
+                      </div>
+                    </div>
+
                     {/* Comentarios */}
                     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-4">
@@ -4091,25 +4111,6 @@ function Management() {
                             setTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
                             fetchData();
                           }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Checklist del responsable */}
-                    <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-                      <div className="p-4">
-                        <ActivityChecklist
-                          key={`checklist-${taskDetails.id}`}
-                          items={(taskDetails.checklist || []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
-                          onUpdate={async (updated) => {
-                            const table = detailsItem?.type === 'subtask' ? 'subtasks' : 'tasks';
-                            const { error } = await supabase.from(table).update({ checklist: updated }).eq('id', taskDetails.id);
-                            if (error) throw error;
-                            setTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
-                            fetchData();
-                          }}
-                          placeholder="Añadir paso o verificación..."
-                          emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
                         />
                       </div>
                     </div>

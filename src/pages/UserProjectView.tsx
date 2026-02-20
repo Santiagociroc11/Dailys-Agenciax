@@ -16,6 +16,7 @@ interface ChecklistItem {
    title: string;
    checked: boolean;
    order?: number;
+   parentId?: string | null;
 }
 
 interface Task {
@@ -351,6 +352,7 @@ export default function UserProjectView() {
    const [selectedReturnedTask, setSelectedReturnedTask] = useState<Task | null>(null);
    const [showUnassignConfirmModal, setShowUnassignConfirmModal] = useState(false);
    const [taskToUnassign, setTaskToUnassign] = useState<Task | null>(null);
+   const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(false);
 
    // Estados para detalles de tareas y subtareas
    const [selectedTaskDetails, setSelectedTaskDetails] = useState<Task | null>(null);
@@ -849,7 +851,7 @@ export default function UserProjectView() {
                project_id: projectId,
                projectName: projectMap[projectId] || "Sin proyecto",
                type: "subtask",
-               checklist: (s.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+               checklist: (s.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
                comments: (s.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
             };
          });
@@ -869,7 +871,7 @@ export default function UserProjectView() {
             project_id: t.project_id || "",
             projectName: projectMap[t.project_id || ""] || "Sin proyecto",
             type: "task",
-            checklist: (t.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+            checklist: (t.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
             comments: (t.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
          }));
 
@@ -1073,10 +1075,10 @@ export default function UserProjectView() {
          toast.error("Por favor, selecciona al menos una tarea para asignar");
          return;
       }
-      // Inicializar duraciones personalizadas para cada tarea seleccionada (vacías)
+      // Inicializar duraciones personalizadas vacías (opcional: si no se completa, se usa la del admin)
       const initialDurations: Record<string, { value: number; unit: "minutes" | "hours" }> = {};
       selectedTasks.forEach(taskId => {
-         initialDurations[taskId] = { value: 0, unit: "minutes" }; // Sin valor predeterminado
+         initialDurations[taskId] = { value: 0, unit: "minutes" };
       });
       setCustomDurations(initialDurations);
       setShowDurationInputs(true);
@@ -1096,13 +1098,6 @@ export default function UserProjectView() {
       }, 0);
    }
 
-   function areAllCustomDurationsValid(): boolean {
-      return selectedTasks.every(taskId => {
-         const customDuration = customDurations[taskId];
-         return customDuration && customDuration.value > 0;
-      });
-   }
-
    function areAllTasksScheduled(): boolean {
       return selectedTasks.every(taskId => {
          const schedule = taskSchedules[taskId];
@@ -1111,11 +1106,7 @@ export default function UserProjectView() {
    }
 
    function handleConfirmSave() {
-      // Validar que todas las tareas tengan duración antes de proceder
-      if (!areAllCustomDurationsValid()) {
-         toast.error("Por favor, completa la duración para todas las tareas");
-         return;
-      }
+      // La duración es opcional: si no se completa, se usa la estimada por el admin
       setShowTimeScheduling(true);
       // Cargar eventos del día para mostrar en el timeline
       if (user) {
@@ -1126,7 +1117,6 @@ export default function UserProjectView() {
 
 
    function handleSaveWithSchedule() {
-      // Validar que todas las tareas tengan horario asignado
       if (!areAllTasksScheduled()) {
          toast.error("Debes asignar horario a TODAS las tareas antes de guardar");
          return;
@@ -1526,11 +1516,12 @@ export default function UserProjectView() {
                endTime = `${todayStr}T${schedule.endTime}:00`;
             }
 
-            // Obtener duración personalizada o usar la original como fallback
+            // Duración: personalizada (si el usuario la ingresó) o estimado del admin
             const customDuration = customDurations[taskId];
-            const finalDuration = customDuration 
+            const customMinutes = customDuration?.value
                ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
-               : task.estimated_duration;
+               : 0;
+            const finalDuration = customMinutes > 0 ? customMinutes : task.estimated_duration;
 
             return {
                user_id: user.id,
@@ -1572,29 +1563,15 @@ export default function UserProjectView() {
             onConflict: "user_id,date,task_type,subtask_id",
          });
 
-         // 5. Actualizar estado y duración de subtareas a "assigned" y registrar en historial
+         // 5. Actualizar estado de subtareas a "assigned" (NO sobrescribir estimated_duration: el estimado del admin se mantiene)
          if (subtaskIdsToUpdate.length > 0) {
-            // Actualizar cada subtarea individualmente para poder usar duraciones personalizadas
-            for (const subtaskId of subtaskIdsToUpdate) {
-               const taskId = `subtask-${subtaskId}`;
-               const customDuration = customDurations[taskId];
-               const finalDuration = customDuration 
-                  ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
-                  : undefined;
+            const { error: updateSubtaskError } = await supabase
+               .from("subtasks")
+               .update({ status: "assigned" })
+               .in("id", subtaskIdsToUpdate);
 
-               const updateData: any = { status: "assigned" };
-               if (finalDuration !== undefined) {
-                  updateData.estimated_duration = finalDuration;
-               }
-
-               const { error: updateSubtaskError } = await supabase
-                  .from("subtasks")
-                  .update(updateData)
-                  .eq("id", subtaskId);
-
-               if (updateSubtaskError) {
-                  console.error(`Error al actualizar subtarea ${subtaskId}:`, updateSubtaskError);
-               }
+            if (updateSubtaskError) {
+               console.error("Error al actualizar subtareas:", updateSubtaskError);
             }
 
             // Obtener datos actualizados para historial
@@ -1633,28 +1610,15 @@ export default function UserProjectView() {
             }
          }
 
-         // 6. Actualizar estado y duración de tareas principales sin subtareas a "assigned" y registrar en historial
+         // 6. Actualizar estado de tareas principales sin subtareas a "assigned" (NO sobrescribir estimated_duration: el estimado del admin se mantiene)
          if (taskIdsToUpdate.length > 0) {
-            // Actualizar cada tarea individualmente para poder usar duraciones personalizadas
-            for (const taskId of taskIdsToUpdate) {
-               const customDuration = customDurations[taskId];
-               const finalDuration = customDuration 
-                  ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
-                  : undefined;
+            const { error: updateTaskError } = await supabase
+               .from("tasks")
+               .update({ status: "assigned" })
+               .in("id", taskIdsToUpdate);
 
-               const updateData: any = { status: "assigned" };
-               if (finalDuration !== undefined) {
-                  updateData.estimated_duration = finalDuration;
-               }
-
-               const { error: updateTaskError } = await supabase
-                  .from("tasks")
-                  .update(updateData)
-                  .eq("id", taskId);
-
-               if (updateTaskError) {
-                  console.error(`Error al actualizar tarea ${taskId}:`, updateTaskError);
-               }
+            if (updateTaskError) {
+               console.error("Error al actualizar tareas:", updateTaskError);
             }
 
             // Obtener datos actualizados para historial
@@ -2037,7 +2001,7 @@ export default function UserProjectView() {
                      type: "task",
                      assignment_date: assignment?.date || today,
                      notes: isActuallyReturned ? returnedInfo?.notes || task.notes : assignment?.notes || task.notes,
-                     checklist: (task.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+                     checklist: (task.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
                      comments: (task.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
                   };
 
@@ -2123,7 +2087,7 @@ export default function UserProjectView() {
                      projectName: projectMap[subtask.tasks?.project_id || ""] || "Sin proyecto",
                      type: "subtask",
                      assignment_date: assignment?.date || today,
-                     checklist: (subtask.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0 })),
+                     checklist: (subtask.checklist || []).map((c: { id: string; title: string; checked?: boolean; order?: number; parentId?: string | null }) => ({ id: c.id, title: c.title, checked: c.checked ?? false, order: c.order ?? 0, parentId: c.parentId ?? undefined })),
                      comments: (subtask.comments || []).map((c: { id: string; user_id: string; content: string; created_at: string }) => ({ ...c, created_at: c.created_at })),
                      notes: isActuallyReturned ? returnedInfo?.notes || subtask.notes : assignment?.notes || subtask.notes,
                   };
@@ -3874,12 +3838,18 @@ export default function UserProjectView() {
 
          {/* Tabs */}
          <div className="border-b border-gray-200 mb-6">
-            <div className="flex -mb-px">
-               <button className={`mr-4 py-2 px-4 font-medium ${activeTab === "asignacion" ? "border-b-2 border-yellow-500 text-yellow-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveTab("asignacion")}>
-                  ASIGNACION
+            <div className="flex -mb-px gap-1">
+               <button
+                  className={`py-2.5 px-4 font-medium text-sm transition-colors duration-200 rounded-t-md ${activeTab === "asignacion" ? "border-b-2 border-amber-500 text-amber-600 bg-amber-50/50" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50/50"}`}
+                  onClick={() => setActiveTab("asignacion")}
+               >
+                  Asignación
                </button>
-               <button className={`py-2 px-4 font-medium ${activeTab === "gestion" ? "border-b-2 border-yellow-500 text-yellow-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveTab("gestion")}>
-                  GESTION
+               <button
+                  className={`py-2.5 px-4 font-medium text-sm transition-colors duration-200 rounded-t-md ${activeTab === "gestion" ? "border-b-2 border-amber-500 text-amber-600 bg-amber-50/50" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50/50"}`}
+                  onClick={() => setActiveTab("gestion")}
+               >
+                  Gestión
                </button>
             </div>
          </div>
@@ -3887,7 +3857,7 @@ export default function UserProjectView() {
          {activeTab === "asignacion" && (
             <div>
                <div className="mb-4">
-                  <h2 className="text-xl font-semibold">LISTADO DE ACTIVIDADES PARA ASIGNAR</h2>
+                  <h2 className="text-xl font-semibold text-gray-800">Listado de actividades para asignar</h2>
                </div>
 
                {/* Información de tiempo ya ocupado */}
@@ -4061,61 +4031,68 @@ export default function UserProjectView() {
 
          {activeTab === "gestion" && (
             <div>
-               <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between">
-                  <div>
-                     <h2 className="text-xl font-semibold">GESTIÓN DE TAREAS ASIGNADAS</h2>
-                     <p className="text-sm text-gray-600 mt-1">Administra las tareas que has asignado para trabajar</p>
+               <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="min-w-0">
+                     <h2 className="text-xl font-semibold text-gray-800">Gestión de tareas asignadas</h2>
+                     <p className="text-sm text-gray-500 mt-0.5">Administra las tareas que has asignado para trabajar</p>
                      
-                     {/* Disclaimer sobre incumplimientos */}
-                     <div className="mt-3 p-3 bg-amber-50 border-l-4 border-amber-400 rounded-r-md">
-                        <div className="flex items-start">
-                           <div className="flex-shrink-0">
-                              <svg className="h-5 w-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
-                                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                     {/* Disclaimer colapsable */}
+                     <div className="mt-3 rounded-lg overflow-hidden border border-amber-200/80 bg-amber-50/80">
+                        <button
+                           onClick={() => setDisclaimerCollapsed(!disclaimerCollapsed)}
+                           className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left text-sm text-amber-800 hover:bg-amber-100/50 transition-colors"
+                        >
+                           <span className="flex items-center gap-2">
+                              <svg className="h-4 w-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92z" clipRule="evenodd" />
                               </svg>
+                              <span className="font-medium">Importante: reporte de avance antes de las 12:00 PM</span>
+                           </span>
+                           <svg className={`w-4 h-4 text-amber-600 transition-transform flex-shrink-0 ${disclaimerCollapsed ? "" : "rotate-180"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                           </svg>
+                        </button>
+                        {!disclaimerCollapsed && (
+                           <div className="px-3 pb-3 pt-0 text-sm text-amber-800/90 border-t border-amber-200/60">
+                              Si antes de las 12:00 PM del día actual no reportas avance o completado, el bloque aparecerá como incumplido aunque lo completes después.
                            </div>
-                           <div className="ml-3">
-                              <p className="text-sm text-amber-800">
-                                 <strong>⚠️ Importante:</strong> Si antes de las 12:00 PM del día actual no se reporta el avance o completado de la tarea, el bloque asignado aparecerá como <strong>incumplido</strong>. Así la completes mañana, saldrá incumplido.
-                              </p>
-                           </div>
-                        </div>
+                        )}
                      </div>
                   </div>
-                  {/* Botón para crear actividad adicional */}
-                  <div className="mt-4 md:mt-0 flex justify-end">
+                  <div className="flex-shrink-0">
                      <button
                         onClick={() => setShowEventsModal(true)}
-                        className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg
-                           hover:from-purple-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
-                           transform hover:scale-105 transition-all duration-200 flex items-center gap-2">
-                        ✨ CREAR ACTIVIDAD ADICIONAL
+                        className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-md hover:shadow-lg hover:from-violet-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:ring-offset-2 transition-all duration-200 flex items-center gap-2"
+                     >
+                        <span className="opacity-90">+</span> Crear actividad adicional
                      </button>
                   </div>
                </div>
 
                {/* Sub pestañas para gestión */}
-               <div className="mb-6 bg-white rounded-md shadow-sm border border-gray-200 p-4">
-                  <div className="flex border-b border-gray-200 mb-4">
-                  <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "en_proceso" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_proceso")}>
-                     📋 En Proceso
-                     <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length + completedTaskItems.length + inReviewTaskItems.length).toString()}</span>
-                  </button>
-                  <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "gantt_semanal" ? "border-b-2 border-purple-500 text-purple-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("gantt_semanal")}>
-                     📈 Gantt Semanal
-                     </button>
-                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
-                        Bloqueadas
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600">{blockedTaskItems.length}</span>
-                     </button>
-                     <button className={`mr-4 py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "actividades" ? "border-b-2 border-purple-500 text-purple-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("actividades")}>
-                        📅 Actividades
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-600">{workEvents.length}</span>
-                     </button>
-                     <button className={`py-2 px-4 font-medium flex items-center ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
-                        Aprobadas
-                        <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-600">{approvedTaskItems.length}</span>
-                     </button>
+               <div className="mb-6 bg-white rounded-lg border border-gray-200/80 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                     <div className="flex min-w-max border-b border-gray-200 -mb-px px-2">
+                        <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "en_proceso" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_proceso")}>
+                           En proceso
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600 font-medium">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length + completedTaskItems.length + inReviewTaskItems.length).toString()}</span>
+                        </button>
+                        <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "gantt_semanal" ? "border-b-2 border-violet-500 text-violet-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("gantt_semanal")}>
+                           Gantt semanal
+                        </button>
+                        <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
+                           Bloqueadas
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600 font-medium">{blockedTaskItems.length}</span>
+                        </button>
+                        <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "actividades" ? "border-b-2 border-violet-500 text-violet-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("actividades")}>
+                           Actividades
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-violet-100 text-violet-600 font-medium">{workEvents.length}</span>
+                        </button>
+                        <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
+                           Aprobadas
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-600 font-medium">{approvedTaskItems.length}</span>
+                        </button>
+                     </div>
                   </div>
                </div>
 
@@ -5494,7 +5471,7 @@ export default function UserProjectView() {
                                                 
                                                 {/* Inputs para duración personalizada */}
                                                 <div className="flex items-center gap-2">
-                                                   <label className="text-xs font-medium text-gray-700">¿Cuánto tiempo necesitas? <span className="text-red-500">*</span></label>
+                                                   <label className="text-xs font-medium text-gray-700">¿Cuánto tiempo necesitas? <span className="text-gray-500 font-normal">(opcional, si no completas se usa el estimado del admin)</span></label>
                                                    <input
                                                       type="number"
                                                       min="1"
@@ -5533,25 +5510,14 @@ export default function UserProjectView() {
                               </div>
                            </div>
 
-                           <div className="bg-yellow-50 p-3 rounded-md mb-4">
-                              <div className="flex items-center">
-                                 <svg className="h-5 w-5 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                 </svg>
-                                 <p className="text-sm font-medium text-yellow-800">
-                                    Tiempo total con tus estimaciones: {calculateTotalCustomDuration().toFixed(1)} hora{calculateTotalCustomDuration() !== 1 ? "s" : ""}
-                                 </p>
-                              </div>
-                           </div>
-                           
-                           {!areAllCustomDurationsValid() && (
-                              <div className="bg-red-50 p-3 rounded-md mb-4">
+                           {calculateTotalCustomDuration() > 0 && (
+                              <div className="bg-yellow-50 p-3 rounded-md mb-4">
                                  <div className="flex items-center">
-                                    <svg className="h-5 w-5 text-red-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    <svg className="h-5 w-5 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    <p className="text-sm font-medium text-red-800">
-                                       Por favor, completa la duración estimada para todas las tareas.
+                                    <p className="text-sm font-medium text-yellow-800">
+                                       Tiempo total con tus estimaciones: {calculateTotalCustomDuration().toFixed(1)} hora{calculateTotalCustomDuration() !== 1 ? "s" : ""}
                                     </p>
                                  </div>
                               </div>
@@ -5568,7 +5534,7 @@ export default function UserProjectView() {
                            </button>
                            <button 
                               onClick={handleConfirmSave} 
-                              disabled={saving || !areAllCustomDurationsValid()} 
+                              disabled={saving} 
                               className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md shadow-sm hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
                            >
                               Continuar → Programar Horarios
@@ -6109,6 +6075,25 @@ export default function UserProjectView() {
                         </div>
                      </div>
 
+                     {/* Checklist personal del usuario */}
+                     <div className="mb-4">
+                        <ActivityChecklist
+                           key={`checklist-${selectedTaskDetails.type}-${selectedTaskDetails.original_id || selectedTaskDetails.id}`}
+                           items={selectedTaskDetails.checklist || []}
+                           onUpdate={async (updated) => {
+                              const table = selectedTaskDetails.type === "subtask" ? "subtasks" : "tasks";
+                              const id = selectedTaskDetails.type === "subtask" ? selectedTaskDetails.original_id : selectedTaskDetails.id;
+                              const { error } = await supabase.from(table).update({ checklist: updated }).eq("id", id);
+                              if (error) throw error;
+                              setSelectedTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
+                              fetchAssignedTasks();
+                           }}
+                           disabled={false}
+                           placeholder="Ej: Revisar analytics, enviar reporte..."
+                           emptyMessage="Crea tu checklist para llevar el control de esta actividad. Se incluirá en la plantilla del proyecto."
+                        />
+                     </div>
+
                      {/* Comentarios */}
                      <div className="mb-4">
                         <TaskComments
@@ -6140,25 +6125,6 @@ export default function UserProjectView() {
                               setSelectedTaskDetails((prev) => (prev ? { ...prev, comments: updated } : null));
                               fetchAssignedTasks();
                            }}
-                        />
-                     </div>
-
-                     {/* Checklist personal del usuario */}
-                     <div className="mb-4">
-                        <ActivityChecklist
-                           key={`checklist-${selectedTaskDetails.type}-${selectedTaskDetails.original_id || selectedTaskDetails.id}`}
-                           items={selectedTaskDetails.checklist || []}
-                           onUpdate={async (updated) => {
-                              const table = selectedTaskDetails.type === "subtask" ? "subtasks" : "tasks";
-                              const id = selectedTaskDetails.type === "subtask" ? selectedTaskDetails.original_id : selectedTaskDetails.id;
-                              const { error } = await supabase.from(table).update({ checklist: updated }).eq("id", id);
-                              if (error) throw error;
-                              setSelectedTaskDetails((prev) => (prev ? { ...prev, checklist: updated } : null));
-                              fetchAssignedTasks();
-                           }}
-                           disabled={false}
-                           placeholder="Ej: Revisar analytics, enviar reporte..."
-                           emptyMessage="Crea tu checklist para llevar el control de esta actividad. Se incluirá en la plantilla del proyecto."
                         />
                      </div>
 
@@ -6970,6 +6936,8 @@ export default function UserProjectView() {
                               >
                                  <option value="meeting">🤝 Reunión</option>
                                  <option value="daily">🗣️ Daily</option>
+                                 <option value="review">📋 Revisión</option>
+                                 <option value="planning">📅 Planificación</option>
                                  <option value="training">📚 Capacitación</option>
                                  <option value="break">☕ Descanso</option>
                                  <option value="other">📌 Otro</option>
@@ -7070,7 +7038,7 @@ export default function UserProjectView() {
                                        <div key={i} className="absolute w-full border-b border-gray-200" style={{top: `${i * 50}px`, height: '50px'}} />
                                     ))}
 
-                                    {/* Actividades principales (ganttData) */}
+                                    {/* Tareas asignadas del día (ganttData, excluyendo eventos) */}
                                     {(() => {
                                        interface Session {
                                           id: string;
@@ -7079,7 +7047,9 @@ export default function UserProjectView() {
                                        }
                                        const todayStr = format(new Date(), 'yyyy-MM-dd');
                                        const todaySessions: JSX.Element[] = [];
-                                       ganttData.forEach(task => {
+                                       ganttData
+                                          .filter((task) => task.type !== 'event')
+                                          .forEach((task) => {
                                           const sessions: Session[] = task.sessions[todayStr] || [];
                                           sessions.forEach(session => {
                                              if (session.start_time && session.end_time) {
@@ -7126,6 +7096,8 @@ export default function UserProjectView() {
                                                 <span className="mr-1">
                                                    {event.event_type === 'meeting' ? '🤝' :
                                                     event.event_type === 'daily' ? '🗣️' :
+                                                    event.event_type === 'review' ? '📋' :
+                                                    event.event_type === 'planning' ? '📅' :
                                                     event.event_type === 'training' ? '📚' :
                                                     event.event_type === 'break' ? '☕' : '📌'}
                                                 </span>

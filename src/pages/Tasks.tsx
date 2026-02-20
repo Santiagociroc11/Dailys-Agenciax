@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import { ActivityChecklist } from '../components/ActivityChecklist';
+import { TaskComments } from '../components/TaskComments';
 import RichTextSummary from '../components/RichTextSummary';
 import QuillEditor from '../components/QuillEditor';
 import { SkeletonTaskList, SkeletonInline } from '../components/Skeleton';
@@ -19,6 +20,7 @@ interface ChecklistItem {
   title: string;
   checked: boolean;
   order?: number;
+  parentId?: string | null;
 }
 
 interface Task {
@@ -2508,7 +2510,7 @@ function Tasks() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Checklist</label>
                   <ActivityChecklist
                     key={`checklist-task-${selectedTask.id}`}
-                    items={(editedTask?.checklist ?? selectedTask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
+                    items={(editedTask?.checklist ?? selectedTask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order, parentId: c.parentId }))}
                     onUpdate={async (updated) => {
                       const { error } = await supabase.from('tasks').update({ checklist: updated }).eq('id', selectedTask.id);
                       if (error) throw error;
@@ -3363,6 +3365,29 @@ function Tasks() {
                   )}
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Checklist</label>
+                  <ActivityChecklist
+                    key={`checklist-subtask-${selectedSubtask.id}`}
+                    items={(editedSubtask?.checklist ?? selectedSubtask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order, parentId: c.parentId }))}
+                    onUpdate={async (updated) => {
+                      const { error } = await supabase.from('subtasks').update({ checklist: updated }).eq('id', selectedSubtask.id);
+                      if (error) throw error;
+                      setEditedSubtask((prev) => (prev ? { ...prev, checklist: updated } : null));
+                      setSubtasks((prev) => {
+                        const next = { ...prev };
+                        const list = next[selectedSubtask.task_id] || [];
+                        const idx = list.findIndex((s) => s.id === selectedSubtask.id);
+                        if (idx >= 0) {
+                          next[selectedSubtask.task_id] = list.map((s) => (s.id === selectedSubtask.id ? { ...s, checklist: updated } : s));
+                        }
+                        return next;
+                      });
+                    }}
+                    placeholder="Añadir paso o verificación..."
+                    emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Comentarios</label>
                   <TaskComments
                     key={`comments-subtask-${selectedSubtask.id}`}
@@ -3399,29 +3424,6 @@ function Tasks() {
                         return next;
                       });
                     }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Checklist</label>
-                  <ActivityChecklist
-                    key={`checklist-subtask-${selectedSubtask.id}`}
-                    items={(editedSubtask?.checklist ?? selectedSubtask.checklist ?? []).map((c) => ({ id: c.id, title: c.title, checked: c.checked, order: c.order }))}
-                    onUpdate={async (updated) => {
-                      const { error } = await supabase.from('subtasks').update({ checklist: updated }).eq('id', selectedSubtask.id);
-                      if (error) throw error;
-                      setEditedSubtask((prev) => (prev ? { ...prev, checklist: updated } : null));
-                      setSubtasks((prev) => {
-                        const next = { ...prev };
-                        const list = next[selectedSubtask.task_id] || [];
-                        const idx = list.findIndex((s) => s.id === selectedSubtask.id);
-                        if (idx >= 0) {
-                          next[selectedSubtask.task_id] = list.map((s) => (s.id === selectedSubtask.id ? { ...s, checklist: updated } : s));
-                        }
-                        return next;
-                      });
-                    }}
-                    placeholder="Añadir paso o verificación..."
-                    emptyMessage="El responsable puede crear un checklist para llevar el control. Se incluirá en la plantilla del proyecto."
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
