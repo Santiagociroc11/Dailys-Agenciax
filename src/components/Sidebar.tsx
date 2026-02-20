@@ -23,11 +23,11 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-64 bg-white shadow-lg h-full">
-      <div className="p-6">
+    <div className="w-64 bg-white shadow-lg h-full flex flex-col min-h-0">
+      <div className="p-6 shrink-0">
         <h1 className="text-2xl font-bold text-gray-800">Seguimiento de Actividades</h1>
       </div>
-      <nav className="mt-6">
+      <nav className="flex-1 overflow-y-auto min-h-0 py-2">
         <NavLink
           to="/dashboard"
           className={({ isActive }) =>
@@ -175,7 +175,7 @@ export default function Sidebar() {
           </>
         )}
       </nav>
-      <div className="absolute bottom-0 w-64 p-6">
+      <div className="shrink-0 p-6 border-t border-gray-100">
         <VersionInfo />
         
         {user && (
