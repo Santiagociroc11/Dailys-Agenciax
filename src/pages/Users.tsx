@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/audit';
 import { Users as UsersIcon, Plus, X, Trash2, AlertTriangle, LogIn } from 'lucide-react';
 
 interface User {
@@ -10,6 +11,8 @@ interface User {
   role: string;
   phone?: string;
   telegram_chat_id?: string;
+  hourly_rate?: number | null;
+  currency?: string;
 }
 
 export default function Users() {
@@ -43,7 +46,9 @@ export default function Users() {
     countryCode: '+57',
     phone: '',
     role: 'user',
-    telegram_chat_id: ''
+    telegram_chat_id: '',
+    hourly_rate: '' as string | number,
+    currency: 'COP'
   });
   const [editSuccess, setEditSuccess] = useState('');
   const [editError, setEditError] = useState('');
@@ -59,7 +64,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone, password, telegram_chat_id');
+        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, currency');
 
       if (error) throw error;
 
@@ -99,6 +104,16 @@ export default function Users() {
 
       if (error) throw error;
 
+      if (currentUser?.id && data) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'user',
+          entity_id: data.id,
+          action: 'create',
+          summary: `Usuario creado: ${data.name} (${data.email})`,
+        });
+      }
+
       await fetchUsers();
       setShowModal(false);
       setNewUser({ 
@@ -123,6 +138,17 @@ export default function Users() {
         .eq('id', userId);
 
       if (error) throw error;
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'user',
+          entity_id: userId,
+          action: 'update',
+          field_name: 'role',
+          new_value: newRole,
+          summary: `Rol cambiado a ${newRole}`,
+        });
+      }
       await fetchUsers();
     } catch (error) {
       console.error('Error al actualizar rol:', error);
@@ -181,18 +207,35 @@ export default function Users() {
     try {
       const fullPhone = editUser.phone ? `${editUser.countryCode}${editUser.phone}` : null;
       
+      const updateData: Record<string, unknown> = {
+        name: editUser.name,
+        email: editUser.email,
+        phone: fullPhone,
+        role: editUser.role,
+        telegram_chat_id: editUser.telegram_chat_id || null,
+      };
+      const hourlyRate = editUser.hourly_rate === '' || editUser.hourly_rate === null ? null : Number(editUser.hourly_rate);
+      if (hourlyRate !== undefined) {
+        updateData.hourly_rate = hourlyRate;
+        updateData.currency = editUser.currency || 'COP';
+      }
+
       const { error } = await supabase
         .from('users')
-        .update({
-          name: editUser.name,
-          email: editUser.email,
-          phone: fullPhone,
-          role: editUser.role,
-          telegram_chat_id: editUser.telegram_chat_id || null
-        })
+        .update(updateData)
         .eq('id', editUser.id);
 
       if (error) throw error;
+
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'user',
+          entity_id: editUser.id,
+          action: 'update',
+          summary: `Usuario actualizado: ${editUser.name}`,
+        });
+      }
 
       // Update the password if it was changed
       if (newPassword && selectedUserId === editUser.id) {
@@ -249,7 +292,9 @@ export default function Users() {
       countryCode,
       phone: phoneNumber,
       role: user.role,
-      telegram_chat_id: user.telegram_chat_id || ''
+      telegram_chat_id: user.telegram_chat_id || '',
+      hourly_rate: user.hourly_rate ?? '',
+      currency: user.currency || 'COP',
     });
     
     setShowEditUserModal(true);
@@ -360,6 +405,16 @@ export default function Users() {
         .eq('id', editUser.id);
       
       if (deleteError) throw deleteError;
+
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'user',
+          entity_id: editUser.id,
+          action: 'delete',
+          summary: `Usuario eliminado: ${editUser.name} (${editUser.email})`,
+        });
+      }
       
       // Close modals and refresh user list
       setShowDeleteConfirmation(false);
@@ -870,6 +925,37 @@ export default function Users() {
                   <p className="mt-1 text-xs text-gray-500">
                     ID de chat de Telegram para recibir notificaciones. Dejar vacío para desactivar.
                   </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tarifa/hora
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={editUser.hourly_rate === '' ? '' : editUser.hourly_rate}
+                      onChange={(e) => setEditUser({ ...editUser, hourly_rate: e.target.value === '' ? '' : Number(e.target.value) })}
+                      className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="Ej: 50000"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Para cálculo de costes</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Moneda
+                    </label>
+                    <select
+                      value={editUser.currency}
+                      onChange={(e) => setEditUser({ ...editUser, currency: e.target.value })}
+                      className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="COP">COP</option>
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

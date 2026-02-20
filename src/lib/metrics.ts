@@ -1022,6 +1022,35 @@ export interface CapacityRow {
   utilization_percent: number;
 }
 
+export interface CostByUserRow {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  total_hours: number;
+  task_count: number;
+  hourly_rate: number | null;
+  currency: string;
+  total_cost: number | null;
+}
+
+/** Obtiene coste por usuario (horas × tarifa) en un período */
+export async function getCostByUser(
+  startDate: string,
+  endDate: string
+): Promise<CostByUserRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_cost_by_user', {
+      start_date: startDate,
+      end_date: endDate,
+    });
+    if (error) throw error;
+    return (data as CostByUserRow[]) || [];
+  } catch (error) {
+    console.error('Error getting cost by user:', error);
+    return [];
+  }
+}
+
 /** Obtiene capacidad por usuario (horas asignadas vs disponibles por semana) */
 export async function getCapacityByUser(
   workingHoursPerDay: number = 8,

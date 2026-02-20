@@ -15,6 +15,8 @@ const Areas = lazy(() => import('./pages/Areas'));
 const Management = lazy(() => import('./pages/Management'));
 const Reports = lazy(() => import('./pages/Reports'));
 const CapacityView = lazy(() => import('./pages/CapacityView'));
+const Audits = lazy(() => import('./pages/Audits'));
+const ActivityReport = lazy(() => import('./pages/ActivityReport'));
 const UserProjectView = lazy(() => import('./pages/UserProjectView'));
 const MiDiaView = lazy(() => import('./pages/MiDiaView'));
 const Login = lazy(() => import('./pages/Login'));
@@ -88,6 +90,8 @@ function App() {
               <Route path="areas" element={<Areas />} />
               <Route path="reports" element={<Reports />} />
               <Route path="capacity" element={<CapacityView />} />
+              <Route path="audits" element={<Audits />} />
+              <Route path="activity" element={<ActivityReport />} />
               <Route path="settings" element={<Settings />} />
             </Route>
 

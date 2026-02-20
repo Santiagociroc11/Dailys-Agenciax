@@ -11,3 +11,4 @@ export { StatusHistory } from './StatusHistory.js';
 export { AppSettings } from './AppSettings.js';
 export { WorkEvent } from './WorkEvent.js';
 export { WorkSession } from './WorkSession.js';
+export { AuditLog } from './AuditLog.js';

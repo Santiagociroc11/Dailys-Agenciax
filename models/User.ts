@@ -11,6 +11,8 @@ const userSchema = new mongoose.Schema(
     assigned_projects: { type: [String], default: [] },
     phone: { type: String, default: null },
     telegram_chat_id: { type: String, default: null },
+    hourly_rate: { type: Number, default: null }, // Tarifa por hora (para cálculo de costes)
+    currency: { type: String, default: 'COP' }, // Moneda (COP, USD, etc.)
   },
   {
     timestamps: true,

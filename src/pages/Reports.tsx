@@ -14,7 +14,8 @@ import {
   FolderOpen,
   Layers,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  DollarSign
 } from 'lucide-react';
 import { 
   getAllUsersMetrics,
@@ -25,13 +26,15 @@ import {
   getTeamUtilizationStatistics,
   exportUtilizationToCSV,
   getHoursForBilling,
+  getCostByUser,
   getDateRangeForPeriod,
   type UserMetrics,
   type ProjectMetrics as ProjectMetricsType,
   type AreaMetrics,
   type UtilizationMetrics,
   type PeriodType,
-  type HoursForBillingRow
+  type HoursForBillingRow,
+  type CostByUserRow
 } from '../lib/metrics';
 
 interface DetailedMetrics {
@@ -64,7 +67,7 @@ interface ProjectMetrics {
   daysUntilDeadline: number;
 }
 
-type TabType = 'users' | 'projects' | 'areas' | 'utilization';
+type TabType = 'users' | 'projects' | 'areas' | 'utilization' | 'cost';
 
 const PERIOD_OPTIONS: { value: PeriodType; label: string }[] = [
   { value: 'week', label: 'Esta semana' },
@@ -86,6 +89,7 @@ export default function Reports() {
   const [projectMetrics, setProjectMetrics] = useState<ProjectMetricsType[]>([]);
   const [areaMetrics, setAreaMetrics] = useState<AreaMetrics[]>([]);
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
+  const [costMetrics, setCostMetrics] = useState<CostByUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportingHours, setExportingHours] = useState(false);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
@@ -99,7 +103,7 @@ export default function Reports() {
 
   useEffect(() => {
     fetchMetrics();
-  }, [activeTab]);
+  }, [activeTab, period, customStart, customEnd]);
 
   async function fetchMetrics() {
     setLoading(true);
@@ -120,6 +124,10 @@ export default function Reports() {
         case 'utilization':
           const utilization = await getAllUsersUtilizationMetrics(8); // 8 horas estándar
           setUtilizationMetrics(utilization);
+          break;
+        case 'cost':
+          const cost = await getCostByUser(dateRange.startDate, dateRange.endDate);
+          setCostMetrics(cost);
           break;
       }
     } catch (error) {
@@ -243,7 +251,8 @@ export default function Reports() {
     { id: 'users' as TabType, label: 'Usuarios', icon: Users },
     { id: 'projects' as TabType, label: 'Proyectos', icon: FolderOpen },
     { id: 'areas' as TabType, label: 'Áreas', icon: Layers },
-    { id: 'utilization' as TabType, label: 'Utilización', icon: Clock }
+    { id: 'utilization' as TabType, label: 'Utilización', icon: Clock },
+    { id: 'cost' as TabType, label: 'Costes', icon: DollarSign }
   ];
 
   if (!isAdmin) {
@@ -383,6 +392,69 @@ export default function Reports() {
       {activeTab === 'projects' && <ProjectsMetrics metrics={projectMetrics} />}
       {activeTab === 'areas' && <AreasMetrics metrics={areaMetrics} />}
       {activeTab === 'utilization' && <UtilizationReport metrics={utilizationMetrics} />}
+      {activeTab === 'cost' && <CostReport metrics={costMetrics} />}
+    </div>
+  );
+}
+
+function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
+  const totalHours = metrics.reduce((acc, m) => acc + m.total_hours, 0);
+  const totalCost = metrics.reduce((acc, m) => acc + (m.total_cost ?? 0), 0);
+  const withRate = metrics.filter(m => m.hourly_rate && m.hourly_rate > 0).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-emerald-50 rounded-lg p-4">
+          <p className="text-sm text-emerald-600 font-medium">Total horas</p>
+          <p className="text-2xl font-bold text-emerald-900">{totalHours.toFixed(1)}h</p>
+        </div>
+        <div className="bg-amber-50 rounded-lg p-4">
+          <p className="text-sm text-amber-600 font-medium">Usuarios con tarifa</p>
+          <p className="text-2xl font-bold text-amber-900">{withRate} / {metrics.length}</p>
+        </div>
+        <div className="bg-indigo-50 rounded-lg p-4">
+          <p className="text-sm text-indigo-600 font-medium">Coste total</p>
+          <p className="text-2xl font-bold text-indigo-900">
+            {totalCost > 0 ? totalCost.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'}
+          </p>
+        </div>
+      </div>
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Usuario</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Horas</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tarifa/h</th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Coste</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {metrics.map((m) => (
+              <tr key={m.user_id} className="hover:bg-gray-50">
+                <td className="px-6 py-4">
+                  <div>
+                    <p className="font-medium text-gray-900">{m.user_name}</p>
+                    <p className="text-xs text-gray-500">{m.user_email}</p>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-right text-gray-700">{m.total_hours.toFixed(1)}h</td>
+                <td className="px-6 py-4 text-right text-gray-600">
+                  {m.hourly_rate != null && m.hourly_rate > 0
+                    ? `${m.hourly_rate.toLocaleString('es-CO')} ${m.currency}`
+                    : '—'}
+                </td>
+                <td className="px-6 py-4 text-right font-medium">
+                  {m.total_cost != null
+                    ? `${m.total_cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} ${m.currency}`
+                    : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

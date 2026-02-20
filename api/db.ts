@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { executeQuery } from '../lib/db/queryExecutor.js';
 import type { QueryRequest } from '../lib/db/types.js';
-import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, ProjectTemplate, Task, Subtask } from '../models/index.js';
+import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, ProjectTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
 
 export async function handleDbQuery(req: Request, res: Response): Promise<void> {
   try {
@@ -580,6 +580,84 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         }
       }
       data = project.toObject ? project.toObject() : project;
+    } else if (fn === 'get_audit_logs') {
+      const entityType = params.entity_type as string | undefined;
+      const entityId = params.entity_id as string | undefined;
+      const userId = params.user_id as string | undefined;
+      const limit = (params.limit as number) ?? 100;
+      const startDate = params.start_date as string | undefined;
+      const endDate = params.end_date as string | undefined;
+
+      const { AuditLog } = await import('../models/index.js');
+      const filter: Record<string, unknown> = {};
+      if (entityType) filter.entity_type = entityType;
+      if (entityId) filter.entity_id = entityId;
+      if (userId) filter.user_id = userId;
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) (filter.createdAt as Record<string, unknown>).$gte = new Date(startDate);
+        if (endDate) (filter.createdAt as Record<string, unknown>).$lte = new Date(endDate + 'T23:59:59.999Z');
+      }
+
+      const logs = await AuditLog.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean()
+        .exec();
+
+      const userIds = [...new Set((logs as { user_id: string }[]).map((l) => l.user_id))];
+      const users = await User.find({ id: { $in: userIds } }).select('id name').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
+
+      data = (logs as { user_id: string; entity_type: string; entity_id: string; action: string; field_name?: string; summary?: string; createdAt: string }[]).map((l) => ({
+        ...l,
+        user_name: userMap.get(l.user_id) || 'Desconocido',
+      }));
+    } else if (fn === 'get_cost_by_user') {
+      const startDate = params.start_date as string;
+      const endDate = params.end_date as string;
+      if (!startDate || !endDate) {
+        res.status(400).json({ data: null, error: { message: 'Faltan start_date y end_date' } });
+        return;
+      }
+
+      const pipeline = [
+        {
+          $match: {
+            date: { $gte: startDate, $lte: endDate },
+            actual_duration: { $exists: true, $ne: null, $gt: 0 },
+          },
+        },
+        {
+          $group: {
+            _id: '$user_id',
+            total_minutes: { $sum: '$actual_duration' },
+            task_count: { $sum: 1 },
+          },
+        },
+      ];
+
+      const results = await TaskWorkAssignment.aggregate(pipeline).exec();
+      const userIds = results.map((r: { _id: string }) => r._id);
+      const users = await User.find({ id: { $in: userIds } }).select('id name email hourly_rate currency').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; name: string; email: string; hourly_rate?: number | null; currency?: string }) => [u.id, u]));
+
+      data = results.map((r: { _id: string; total_minutes: number; task_count: number }) => {
+        const u = userMap.get(r._id) as { name: string; email: string; hourly_rate?: number | null; currency?: string } | undefined;
+        const hours = r.total_minutes / 60;
+        const rate = u?.hourly_rate ?? 0;
+        const cost = rate > 0 ? hours * rate : null;
+        return {
+          user_id: r._id,
+          user_name: u?.name || 'Sin nombre',
+          user_email: u?.email || '',
+          total_hours: Math.round(hours * 100) / 100,
+          task_count: r.task_count,
+          hourly_rate: rate || null,
+          currency: u?.currency || 'COP',
+          total_cost: cost != null ? Math.round(cost * 100) / 100 : null,
+        };
+      }).sort((a: { total_hours: number }, b: { total_hours: number }) => b.total_hours - a.total_hours);
     } else if (fn === 'get_capacity_by_user') {
       const workingHoursPerDay = (params.working_hours_per_day as number) ?? 8;
       const workingDaysPerWeek = (params.working_days_per_week as number) ?? 5;
@@ -640,6 +718,93 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           ? Math.round(((userMinutes[u.id] || 0) / 60 / availableHoursPerWeek) * 100)
           : 0,
       }));
+    } else if (fn === 'get_activity_log') {
+      const startDate = params.start_date as string | undefined;
+      const endDate = params.end_date as string | undefined;
+      const userId = params.user_id as string | undefined;
+      const activityType = params.activity_type as string | undefined;
+      const limit = (params.limit as number) ?? 200;
+
+      const filter: Record<string, unknown> = {};
+      if (userId) filter.changed_by = userId;
+      if (activityType) filter.new_status = activityType;
+      if (startDate || endDate) {
+        filter.changed_at = {};
+        if (startDate) (filter.changed_at as Record<string, unknown>).$gte = new Date(startDate);
+        if (endDate) (filter.changed_at as Record<string, unknown>).$lte = new Date(endDate + 'T23:59:59.999Z');
+      }
+
+      const logs = await StatusHistory.find(filter)
+        .sort({ changed_at: -1 })
+        .limit(limit)
+        .lean()
+        .exec();
+
+      const logsTyped = logs as { id: string; task_id?: string | null; subtask_id?: string | null; changed_at: Date; changed_by?: string | null; previous_status?: string | null; new_status: string }[];
+
+      const taskIdsFromLogs = [...new Set(logsTyped.map((l) => l.task_id).filter(Boolean))] as string[];
+      const subtaskIds = [...new Set(logsTyped.map((l) => l.subtask_id).filter(Boolean))] as string[];
+      const userIds = [...new Set(logsTyped.map((l) => l.changed_by).filter(Boolean))] as string[];
+
+      const [tasksRaw, subtasksRaw, usersRaw] = await Promise.all([
+        Task.find({ id: { $in: taskIdsFromLogs } }).select('id title project_id').lean().exec(),
+        Subtask.find({ id: { $in: subtaskIds } }).select('id title task_id').lean().exec(),
+        User.find({ id: { $in: userIds } }).select('id name').lean().exec(),
+      ]);
+
+      const parentTaskIds = [...new Set((subtasksRaw as { task_id: string }[]).map((s) => s.task_id))];
+      const allTaskIds = [...new Set([...taskIdsFromLogs, ...parentTaskIds])];
+      const parentTasks = allTaskIds.length > 0
+        ? await Task.find({ id: { $in: allTaskIds } }).select('id title project_id').lean().exec()
+        : [];
+      const projectIds = [...new Set((parentTasks as { project_id?: string }[]).map((t) => t.project_id).filter(Boolean))];
+      const projects = projectIds.length > 0
+        ? await Project.find({ id: { $in: projectIds } }).select('id name').lean().exec()
+        : [];
+
+      const tasks = parentTasks as { id: string; title: string; project_id?: string }[];
+      const subtasks = subtasksRaw as { id: string; title: string; task_id: string }[];
+      const users = usersRaw;
+
+      const taskMap = new Map((tasks as { id: string; title: string; project_id?: string }[]).map((t) => [t.id, t]));
+      const subtaskMap = new Map((subtasks as { id: string; title: string; task_id: string }[]).map((s) => [s.id, s]));
+      const projectMap = new Map((projects as { id: string; name: string }[]).map((p) => [p.id, p]));
+      const userMap = new Map((users as { id: string; name: string }[]).map((u) => [u.id, u]));
+
+      const ACTIVITY_LABELS: Record<string, string> = {
+        assigned: 'Asignación',
+        in_progress: 'En progreso',
+        completed: 'Entrega',
+        in_review: 'En revisión',
+        approved: 'Aprobado',
+        returned: 'Devuelto',
+        blocked: 'Bloqueado',
+        pending: 'Pendiente',
+      };
+
+      data = logsTyped.map((l) => {
+        const isSubtask = !!l.subtask_id;
+        const itemTitle = isSubtask
+          ? (subtaskMap.get(l.subtask_id!)?.title ?? '—')
+          : (taskMap.get(l.task_id!)?.title ?? '—');
+        const task = l.task_id ? taskMap.get(l.task_id) : l.subtask_id ? taskMap.get(subtaskMap.get(l.subtask_id!)?.task_id ?? '') : null;
+        const projectName = task?.project_id ? projectMap.get(task.project_id)?.name ?? '—' : '—';
+        const actorName = l.changed_by ? userMap.get(l.changed_by)?.name ?? 'Desconocido' : 'Sistema';
+
+        return {
+          id: l.id,
+          activity_type: l.new_status,
+          activity_label: ACTIVITY_LABELS[l.new_status] ?? l.new_status,
+          item_type: isSubtask ? 'subtask' : 'task',
+          item_id: isSubtask ? l.subtask_id : l.task_id,
+          item_title: itemTitle,
+          project_name: projectName,
+          changed_by: l.changed_by,
+          actor_name: actorName,
+          previous_status: l.previous_status,
+          changed_at: l.changed_at,
+        };
+      });
     } else {
       res.status(400).json({ data: null, error: { message: `RPC desconocida: ${fn}` } });
       return;

@@ -22,6 +22,8 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/areas': 'Áreas',
   '/reports': 'Reportes',
   '/capacity': 'Capacidad',
+  '/audits': 'Auditoría',
+  '/activity': 'Reporte de actividad',
   '/settings': 'Configuración',
   '/user': 'Usuario',
   '/user/mi-dia': 'Mi día',
