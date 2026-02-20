@@ -6,6 +6,7 @@ import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
 import TaskStatusDisplay from "../components/TaskStatusDisplay";
+import PhaseBadge from "../components/PhaseBadge";
 import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
 import { ActivityChecklist } from "../components/ActivityChecklist";
@@ -3980,11 +3981,12 @@ export default function UserProjectView() {
                               <div className="text-center">
                                  <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
                               </div>
-                              <div className="text-sm text-gray-700 py-1">
+                              <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                  {(() => {
                                     const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                     return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
                                  })()}
+                                 <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                               </div>
                               <div className="font-medium">
                                  {task.type === "subtask" ? (
@@ -4060,11 +4062,12 @@ export default function UserProjectView() {
                                        <div className="text-center">
                                           <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
                                        </div>
-                                       <div className="text-sm text-gray-700 py-1">
+                                       <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {
                                              const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                              return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
                                           })()}
+                                          <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                        </div>
                                        <div className="font-medium">
                                           {task.type === "subtask" ? (
@@ -4250,10 +4253,11 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                              </div>
                                              
                                              {/* Tarea principal si es subtarea */}
@@ -4330,10 +4334,11 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                              </div>
                                              
                                              {/* Tarea principal si es subtarea */}
@@ -4430,11 +4435,12 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
-                           </div>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
+                                             </div>
 
                                              {/* Tarea principal si es subtarea */}
                                              {task.type === "subtask" && (
@@ -4520,10 +4526,11 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                              </div>
                                              
                                              {/* Tarea principal si es subtarea */}
@@ -4602,10 +4609,11 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                              </div>
                                              
                                              {/* Tarea principal si es subtarea */}
@@ -4703,11 +4711,12 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
-                                       </div>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
+                                             </div>
                                              
                                              {/* Tarea principal si es subtarea */}
                                              {task.type === "subtask" && (
@@ -4775,11 +4784,12 @@ export default function UserProjectView() {
                                        <div className="flex items-start justify-between">
                                           <div className="flex-1 min-w-0">
                                              {/* Proyecto */}
-                                             <div className="mb-2">
+                                             <div className="mb-2 flex flex-wrap items-center gap-1">
                                                 <span className={`inline-block px-2 py-0.5 text-xs ${bg} ${text} font-semibold rounded-full`}>
                                                    {task.projectName || "Sin proyecto"}
                                                 </span>
-                                          </div>
+                                                <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
+                                             </div>
 
                                              {/* Tarea principal si es subtarea */}
                                              {task.type === "subtask" && (
@@ -5343,11 +5353,12 @@ export default function UserProjectView() {
 
                                  return (
                                     <div key={task.id} className="grid grid-cols-7 gap-4 py-3 items-center bg-red-50 hover:bg-red-100 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
+                                       <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {
                                              const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                              return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
                                           })()}
+                                          <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                        </div>
                                        <div className="font-medium">
                                        <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
@@ -5412,11 +5423,12 @@ export default function UserProjectView() {
                               <div className="divide-y divide-green-200">
                                  {approvedTaskItems.map((task) => (
                                     <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
-                                       <div className="text-sm text-gray-700 py-1">
+                                       <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {
                                              const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                              return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
                                           })()}
+                                          <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                        </div>
                                        <div className="font-medium">{task.title}</div>
                                        <div className="text-sm text-gray-600">
@@ -6173,7 +6185,10 @@ export default function UserProjectView() {
                      <div>
                         <h3 className="text-lg font-medium">{selectedTaskDetails.type === "subtask" && selectedTaskDetails.subtask_title ? `${selectedTaskDetails.subtask_title} - ${selectedTaskDetails.title}` : selectedTaskDetails.title}</h3>
                         <p className="text-xs text-gray-500 font-mono mt-1">ID: {selectedTaskDetails.type === "subtask" && selectedTaskDetails.original_id ? selectedTaskDetails.original_id : selectedTaskDetails.id}</p>
-                        {selectedTaskDetails.projectName && <div className="text-sm text-blue-600 mt-1">Proyecto: {selectedTaskDetails.projectName}</div>}
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          {selectedTaskDetails.projectName && <span className="text-sm text-blue-600">Proyecto: {selectedTaskDetails.projectName}</span>}
+                          <PhaseBadge phaseName={phasesForProject.find(p => p.id === selectedTaskDetails.phase_id)?.name} />
+                        </div>
                      </div>
                      <button onClick={closeTaskDetailModal} className="text-gray-400 hover:text-gray-500 focus:outline-none">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -6292,14 +6307,17 @@ export default function UserProjectView() {
                         <p className="text-gray-600">{Math.round((selectedTaskDetails.estimated_duration / 60) * 100) / 100} horas</p>
                      </div>
 
-                     {/* Proyecto */}
+                     {/* Proyecto y Fase */}
                      <div className="mb-4">
                         <h4 className="text-sm font-medium text-gray-700 mb-1">Proyecto:</h4>
-                        {selectedTaskDetails &&
-                           (() => {
-                              const { bg, text } = getProjectColor(selectedTaskDetails.projectName || "Sin proyecto", selectedTaskDetails.project_id);
-                              return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{selectedTaskDetails.projectName || "No especificado"}</span>;
-                           })()}
+                        <div className="flex flex-wrap items-center gap-2">
+                           {selectedTaskDetails &&
+                              (() => {
+                                 const { bg, text } = getProjectColor(selectedTaskDetails.projectName || "Sin proyecto", selectedTaskDetails.project_id);
+                                 return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{selectedTaskDetails.projectName || "No especificado"}</span>;
+                              })()}
+                           <PhaseBadge phaseName={phasesForProject.find(p => p.id === selectedTaskDetails.phase_id)?.name} />
+                        </div>
                      </div>
 
                      {/* Secuencial */}

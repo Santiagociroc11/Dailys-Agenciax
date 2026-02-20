@@ -8,6 +8,7 @@ import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fn
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import PhaseBadge from '../components/PhaseBadge';
 import RichTextDisplay from '../components/RichTextDisplay';
 import { ActivityChecklist } from '../components/ActivityChecklist';
 import { TaskComments } from '../components/TaskComments';
@@ -157,6 +158,7 @@ function Tasks() {
   const [projectSelected, setProjectSelected] = useState(false);
   const [showSelectTaskForDailyModal, setShowSelectTaskForDailyModal] = useState(false);
   const [tasksForDailyModal, setTasksForDailyModal] = useState<Task[]>([]);
+  const [dailyModalPhases, setDailyModalPhases] = useState<{ id: string; name: string; order: number }[]>([]);
   const [dailyModalProjectFilter, setDailyModalProjectFilter] = useState<string | null>(null);
   const [showSupervisionTaskModal, setShowSupervisionTaskModal] = useState(false);
   const [supervisionTaskConfig, setSupervisionTaskConfig] = useState({
@@ -286,7 +288,7 @@ function Tasks() {
           const { data: tasksData, error } = await supabase
             .from('tasks')
             .select(`
-              id, title, start_date, deadline, project_id, status,
+              id, title, start_date, deadline, project_id, phase_id, status,
               projects!inner(id, is_archived)
             `)
             .eq('projects.is_archived', false)
@@ -294,10 +296,23 @@ function Tasks() {
             .order('created_at', { ascending: false })
             .limit(100);
           if (error) throw error;
-          setTasksForDailyModal((tasksData || []) as Task[]);
+          const tasks = (tasksData || []) as Task[];
+          setTasksForDailyModal(tasks);
+          const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))] as string[];
+          if (projectIds.length > 0) {
+            const { data: phasesData } = await supabase
+              .from('phases')
+              .select('id, name, order')
+              .in('project_id', projectIds)
+              .order('order', { ascending: true });
+            setDailyModalPhases((phasesData || []) as { id: string; name: string; order: number }[]);
+          } else {
+            setDailyModalPhases([]);
+          }
         } catch (e) {
           console.error('Error fetching tasks for daily modal:', e);
           setTasksForDailyModal([]);
+          setDailyModalPhases([]);
         }
       }
       fetchForModal();
@@ -2298,6 +2313,7 @@ function Tasks() {
                       {projects.find(p => p.id === task.project_id)?.name}
                     </span>
                   )}
+                  <PhaseBadge phaseName={filterPhases.find(p => p.id === task.phase_id)?.name} className="ml-2" />
                 </div>
               <span className={`px-2 py-1 rounded text-sm ${
                 task.priority === 'high' 
@@ -2605,7 +2621,7 @@ function Tasks() {
                 </div>
               )}
             </div>
-          )))}
+          ))}
               </div>
             ));
           })()
@@ -3512,9 +3528,19 @@ function Tasks() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-semibold">
-                {editMode ? "Editar Tarea" : "Detalles de Tarea"}
-              </h2>
+              <div>
+                <h2 className="text-xl font-semibold">
+                  {editMode ? "Editar Tarea" : "Detalles de Tarea"}
+                </h2>
+                <div className="flex items-center gap-2 mt-2">
+                  {selectedTask.project_id && (
+                    <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                      {projects.find(p => p.id === selectedTask.project_id)?.name}
+                    </span>
+                  )}
+                  <PhaseBadge phaseName={editPhases.find(p => p.id === selectedTask.phase_id)?.name} />
+                </div>
+              </div>
               <button
                 onClick={() => {
                   setShowTaskDetailModal(false);
@@ -4050,22 +4076,6 @@ function Tasks() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setDailySubtaskConfig(prev => ({
-                                    ...prev,
-                                    startDate: editedTask.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
-                                    endDate: editedTask.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
-                                    titlePrefix: editedTask.title?.slice(0, 40) || '',
-                                  }));
-                                  setShowGenerateDailyModal(true);
-                                }}
-                                className="flex items-center text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-md transition-colors border border-emerald-200"
-                              >
-                                <CalendarDays className="w-4 h-4 mr-1.5" />
-                                Generar subtareas diarias
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
                                   setNewSubtasksInEdit([
                                     ...newSubtasksInEdit,
                                     {
@@ -4115,24 +4125,6 @@ function Tasks() {
                     ) : (
                       <div className="space-y-2">
                         <p className="text-gray-500">Esta tarea no tiene subtareas asociadas.</p>
-                        {editMode && isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDailySubtaskConfig(prev => ({
-                                ...prev,
-                                startDate: editedTask?.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
-                                endDate: editedTask?.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
-                                titlePrefix: editedTask?.title?.slice(0, 40) || '',
-                              }));
-                              setShowGenerateDailyModal(true);
-                            }}
-                            className="flex items-center text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-2 rounded-md transition-colors border border-emerald-200"
-                          >
-                            <CalendarDays className="w-4 h-4 mr-1.5" />
-                            Generar subtareas diarias
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
@@ -4517,8 +4509,9 @@ function Tasks() {
                         className="w-full text-left px-3 py-2 rounded-md hover:bg-emerald-50 hover:border-emerald-200 border border-transparent transition-colors flex justify-between items-center"
                       >
                         <span className="font-medium text-gray-800 truncate flex-1">{t.title}</span>
-                        <span className="text-xs text-gray-500 ml-2 shrink-0">
+                        <span className="text-xs text-gray-500 ml-2 shrink-0 flex items-center gap-1">
                           {projects.find((p) => p.id === t.project_id)?.name || 'Sin proyecto'}
+                          <PhaseBadge phaseName={dailyModalPhases.find(p => p.id === t.phase_id)?.name} />
                         </span>
                       </button>
                     ))}

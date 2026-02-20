@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
+import PhaseBadge from '../components/PhaseBadge';
 import RichTextDisplay from '../components/RichTextDisplay';
 import { ActivityChecklist } from '../components/ActivityChecklist';
 import { TaskComments } from '../components/TaskComments';
@@ -2361,11 +2362,14 @@ function Management() {
                                     {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignado'}
                                   </span>
                                 </div>
-                                {parentTask && parentTask.project_id && (
-                                  <div className="flex items-center mt-1 text-indigo-600">
-                                    <span className="truncate max-w-[150px]">
-                                      {projects.find(p => p.id === parentTask.project_id)?.name || 'Proyecto'}
-                                    </span>
+                                {(parentTask?.project_id || parentTask?.phase_id) && (
+                                  <div className="flex items-center mt-1 text-indigo-600 flex-wrap gap-1">
+                                    {parentTask.project_id && (
+                                      <span className="truncate max-w-[150px]">
+                                        {projects.find(p => p.id === parentTask.project_id)?.name || 'Proyecto'}
+                                      </span>
+                                    )}
+                                    <PhaseBadge phaseName={phases.find(p => p.id === parentTask?.phase_id)?.name} />
                                   </div>
                                 )}
                               </div>
@@ -2515,6 +2519,7 @@ function Management() {
                                   </span>
                                 </div>
                               )}
+                              <PhaseBadge phaseName={phases.find(p => p.id === task.phase_id)?.name} />
                             </div>
                             {task.status === 'completed' || task.status === 'blocked' ? (
                               <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
@@ -2879,6 +2884,7 @@ function Management() {
                                   </span>
                                 </div>
                               )}
+                              <PhaseBadge phaseName={phases.find(p => p.id === task.phase_id)?.name} />
                             </div>
                             {/* NEW: Progress bar and stats */}
                             {task.subtaskStats.total > 0 && (
@@ -3073,9 +3079,12 @@ function Management() {
                             <span className="truncate">{parentTask.title}</span>
                           </div>
                         )}
-                        {(isSubtask ? parentTask?.project_id : (item as Task).project_id) && (
-                          <div className="text-xs text-indigo-600 mt-1">
-                            {projects.find(p => p.id === (isSubtask ? parentTask?.project_id : (item as Task).project_id))?.name}
+                        {((isSubtask ? parentTask?.project_id : (item as Task).project_id) || (isSubtask ? parentTask?.phase_id : (item as Task).phase_id)) && (
+                          <div className="text-xs text-indigo-600 mt-1 flex flex-wrap items-center gap-1">
+                            {(isSubtask ? parentTask?.project_id : (item as Task).project_id) && (
+                              <span>{projects.find(p => p.id === (isSubtask ? parentTask?.project_id : (item as Task).project_id))?.name}</span>
+                            )}
+                            <PhaseBadge phaseName={phases.find(p => p.id === (isSubtask ? parentTask?.phase_id : (item as Task).phase_id))?.name} />
                           </div>
                         )}
                       </div>
@@ -4095,9 +4104,10 @@ function Management() {
                   </div>
                 )}
                 {detailsItem?.type === 'subtask' && taskDetails?.parent_task && (
-                  <div className="text-sm text-indigo-600 flex items-center mt-1">
+                  <div className="text-sm text-indigo-600 flex items-center mt-1 flex-wrap gap-1">
                     <FolderOpen className="w-4 h-4 mr-1.5 flex-shrink-0" />
                     <span>Parte de la tarea: {taskDetails.parent_task.title}</span>
+                    <PhaseBadge phaseName={phases.find(p => p.id === taskDetails.parent_task?.phase_id)?.name} />
                   </div>
                 )}
               </div>
@@ -4516,12 +4526,30 @@ function Management() {
                              <span className="font-medium text-gray-800">{new Date(taskDetails.deadline).toLocaleDateString()}</span>
                            </div>
                          )}
-                          {detailsItem?.type === 'task' && taskDetails.project_id && (
-                           <div className="flex justify-between text-sm">
+                          {(detailsItem?.type === 'task' && (taskDetails.project_id || taskDetails.phase_id)) && (
+                           <div className="flex justify-between text-sm items-center gap-2">
                              <span className="text-gray-600">Proyecto:</span>
-                             <span className="font-medium text-gray-800">
-                               {projects.find(p => p.id === taskDetails.project_id)?.name || 'N/A'}
-                             </span>
+                             <div className="flex flex-wrap items-center gap-1 justify-end">
+                               {taskDetails.project_id && (
+                                 <span className="font-medium text-gray-800">
+                                   {projects.find(p => p.id === taskDetails.project_id)?.name || 'N/A'}
+                                 </span>
+                               )}
+                               <PhaseBadge phaseName={phases.find(p => p.id === taskDetails.phase_id)?.name} />
+                             </div>
+                           </div>
+                         )}
+                         {detailsItem?.type === 'subtask' && taskDetails.parent_task && (taskDetails.parent_task.project_id || taskDetails.parent_task.phase_id) && (
+                           <div className="flex justify-between text-sm items-center gap-2">
+                             <span className="text-gray-600">Proyecto (tarea principal):</span>
+                             <div className="flex flex-wrap items-center gap-1 justify-end">
+                               {taskDetails.parent_task.project_id && (
+                                 <span className="font-medium text-gray-800">
+                                   {projects.find(p => p.id === taskDetails.parent_task?.project_id)?.name || 'N/A'}
+                                 </span>
+                               )}
+                               <PhaseBadge phaseName={phases.find(p => p.id === taskDetails.parent_task?.phase_id)?.name} />
+                             </div>
                            </div>
                          )}
                          {detailsItem?.type === 'task' && (
