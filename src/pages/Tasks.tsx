@@ -248,21 +248,34 @@ function Tasks() {
 
   useEffect(() => {
     async function loadFilterPhases() {
-      if (!selectedProject) {
+      if (selectedProject) {
+        const { data } = await supabase
+          .from('phases')
+          .select('id, name, order')
+          .eq('project_id', selectedProject)
+          .order('order', { ascending: true });
+        setFilterPhases((data || []) as { id: string; name: string; order: number }[]);
+        setSelectedPhase(null);
+      } else if (tasks.length > 0) {
+        const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))] as string[];
+        if (projectIds.length > 0) {
+          const { data } = await supabase
+            .from('phases')
+            .select('id, name, order')
+            .in('project_id', projectIds)
+            .order('order', { ascending: true });
+          setFilterPhases((data || []) as { id: string; name: string; order: number }[]);
+        } else {
+          setFilterPhases([]);
+        }
+        setSelectedPhase(null);
+      } else {
         setFilterPhases([]);
         setSelectedPhase(null);
-        return;
       }
-      const { data } = await supabase
-        .from('phases')
-        .select('id, name, order')
-        .eq('project_id', selectedProject)
-        .order('order', { ascending: true });
-      setFilterPhases((data || []) as { id: string; name: string; order: number }[]);
-      setSelectedPhase(null);
     }
     loadFilterPhases();
-  }, [selectedProject]);
+  }, [selectedProject, tasks]);
 
   useEffect(() => {
     async function fetchEditPhases() {
