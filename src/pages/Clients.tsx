@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/audit';
 import { Plus, Edit, Trash2, X, Building2, Mail, User, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -13,7 +14,7 @@ interface Client {
 }
 
 export default function Clients() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -55,16 +56,25 @@ export default function Clients() {
 
     try {
       if (modalMode === 'create') {
-        const { error } = await supabase.from('clients').insert([
+        const { data: created, error } = await supabase.from('clients').insert([
           {
             name: currentClient.name,
             contact: currentClient.contact || null,
             email: currentClient.email || null,
             hourly_rate: currentClient.hourly_rate ? Number(currentClient.hourly_rate) : null,
           },
-        ]);
+        ]).select();
 
         if (error) throw error;
+        if (currentUser?.id && created?.[0]) {
+          await logAudit({
+            user_id: currentUser.id,
+            entity_type: 'client',
+            entity_id: created[0].id,
+            action: 'create',
+            summary: `Cliente creado: ${currentClient.name}`,
+          });
+        }
         toast.success('Cliente creado correctamente');
       } else {
         const { error } = await supabase
@@ -78,6 +88,15 @@ export default function Clients() {
           .eq('id', currentClient.id);
 
         if (error) throw error;
+        if (currentUser?.id) {
+          await logAudit({
+            user_id: currentUser.id,
+            entity_type: 'client',
+            entity_id: currentClient.id,
+            action: 'update',
+            summary: `Cliente actualizado: ${currentClient.name}`,
+          });
+        }
         toast.success('Cliente actualizado correctamente');
       }
 
@@ -97,9 +116,19 @@ export default function Clients() {
     }
 
     try {
+      const clientName = clients.find((c) => c.id === clientId)?.name;
       const { error } = await supabase.from('clients').delete().eq('id', clientId);
 
       if (error) throw error;
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'client',
+          entity_id: clientId,
+          action: 'delete',
+          summary: `Cliente eliminado: ${clientName || clientId}`,
+        });
+      }
       toast.success('Cliente eliminado');
       setClients(clients.filter((c) => c.id !== clientId));
     } catch (err) {

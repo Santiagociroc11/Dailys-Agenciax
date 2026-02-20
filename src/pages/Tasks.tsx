@@ -2,6 +2,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/audit';
 import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles } from 'lucide-react';
 import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -481,7 +482,15 @@ function Tasks() {
       
       if (data && data[0]) {
         const taskId = data[0].id;
-        
+        if (user?.id) {
+          await logAudit({
+            user_id: user.id,
+            entity_type: 'task',
+            entity_id: taskId,
+            action: 'create',
+            summary: `Tarea creada: ${taskData.title}`,
+          });
+        }
         if (newTask.subtasks.length > 0) {
           const subtasksToInsert = newTask.subtasks.map((subtask, index) => {
             const assignedTo = subtask.assigned_to && subtask.assigned_to.trim() !== '' 
@@ -503,13 +512,25 @@ function Tasks() {
 
           console.log("Enviando datos de subtareas:", subtasksToInsert);
 
-          const { error: subtaskError } = await supabase
+          const { data: createdSubtasks, error: subtaskError } = await supabase
             .from('subtasks')
-            .insert(subtasksToInsert);
+            .insert(subtasksToInsert)
+            .select();
 
           if (subtaskError) {
             console.error("Error detallado de subtareas:", subtaskError);
             throw subtaskError;
+          }
+          if (user?.id && createdSubtasks) {
+            for (const st of createdSubtasks as { id: string; title: string }[]) {
+              await logAudit({
+                user_id: user.id,
+                entity_type: 'subtask',
+                entity_id: st.id,
+                action: 'create',
+                summary: `Subtarea creada: ${st.title}`,
+              });
+            }
           }
         }
 
@@ -687,6 +708,15 @@ function Tasks() {
       }));
       const { error } = await supabase.from('subtasks').insert(subtasksToInsert);
       if (error) throw error;
+      if (user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'subtask',
+          entity_id: selectedTask.id,
+          action: 'create',
+          summary: `${dates.length} subtareas diarias creadas para tarea: ${selectedTask.title}`,
+        });
+      }
       toast.success(`${dates.length} subtareas diarias creadas correctamente`);
       setShowGenerateDailyModal(false);
       await fetchSubtasks();
@@ -1227,7 +1257,17 @@ function Tasks() {
           console.error("Error al crear nuevas subtareas:", newSubtasksError);
           throw newSubtasksError;
         }
-        
+        if (user?.id && insertedSubtasks) {
+          for (const st of insertedSubtasks as { id: string; title: string }[]) {
+            await logAudit({
+              user_id: user.id,
+              entity_type: 'subtask',
+              entity_id: st.id,
+              action: 'create',
+              summary: `Subtarea creada: ${st.title}`,
+            });
+          }
+        }
         // 🔔 Notificar usuarios de nuevas subtareas creadas
         if (insertedSubtasks && insertedSubtasks.length > 0) {
           try {

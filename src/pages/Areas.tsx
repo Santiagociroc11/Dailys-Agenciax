@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/audit';
 import { Plus, Edit, Trash2, X, Users, Check } from 'lucide-react';
 import { Area, AreaWithUsers } from '../types/Area';
 
 export default function Areas() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const [areas, setAreas] = useState<AreaWithUsers[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -87,7 +88,16 @@ export default function Areas() {
           .single();
 
         if (error) throw error;
-
+        if (currentUser?.id && data) {
+          const area = data as { id?: string; name?: string };
+          await logAudit({
+            user_id: currentUser.id,
+            entity_type: 'area',
+            entity_id: area.id || '',
+            action: 'create',
+            summary: `Área creada: ${area.name || currentArea.name}`,
+          });
+        }
         setSuccess('Área creada exitosamente');
       } else {
         const { error } = await supabase
@@ -99,7 +109,15 @@ export default function Areas() {
           .eq('id', currentArea.id);
 
         if (error) throw error;
-
+        if (currentUser?.id) {
+          await logAudit({
+            user_id: currentUser.id,
+            entity_type: 'area',
+            entity_id: currentArea.id,
+            action: 'update',
+            summary: `Área actualizada: ${currentArea.name}`,
+          });
+        }
         setSuccess('Área actualizada exitosamente');
       }
 
@@ -128,7 +146,16 @@ export default function Areas() {
         .eq('id', areaId);
 
       if (error) throw error;
-
+      const areaName = areas.find(a => a.id === areaId)?.name;
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'area',
+          entity_id: areaId,
+          action: 'delete',
+          summary: `Área eliminada: ${areaName || areaId}`,
+        });
+      }
       setAreas(areas.filter(area => area.id !== areaId));
     } catch (error) {
       console.error('Error deleting area:', error);

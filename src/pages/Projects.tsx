@@ -2,6 +2,7 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/audit';
 import { Plus, X, Calendar, Clock, Users, Archive, ArchiveRestore, FileStack, Copy } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -196,6 +197,16 @@ function Projects() {
       });
       if (error) throw error;
       setShowCreateTemplateModal(false);
+      if (user?.id && data) {
+        const tpl = data as { id?: string; name?: string };
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project_template',
+          entity_id: tpl.id || '',
+          action: 'create',
+          summary: `Plantilla creada: ${tpl.name || name}`,
+        });
+      }
       setNewTemplateName('');
       setShowDetailModal(false);
       const { data: updated } = await supabase.from('project_templates').select('id, name, description, tasks').order('name');
@@ -218,7 +229,16 @@ function Projects() {
         .eq('id', projectId);
 
       if (error) throw error;
-      
+      const projectName = projects.find(p => p.id === projectId)?.name;
+      if (user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project',
+          entity_id: projectId,
+          action: 'update',
+          summary: `Proyecto archivado: ${projectName || projectId}`,
+        });
+      }
       // Actualizar la lista local
       setProjects(projects.filter(p => p.id !== projectId));
       toast.success('Proyecto archivado correctamente');
@@ -240,7 +260,16 @@ function Projects() {
         .eq('id', projectId);
 
       if (error) throw error;
-      
+      const projectName = archivedProjects.find(p => p.id === projectId)?.name;
+      if (user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project',
+          entity_id: projectId,
+          action: 'update',
+          summary: `Proyecto desarchivado: ${projectName || projectId}`,
+        });
+      }
       // Recargar los datos para mostrar el proyecto desarchivado
       fetchData();
       toast.success('Proyecto desarchivado correctamente');
@@ -278,6 +307,16 @@ function Projects() {
         });
         if (rpcError) throw rpcError;
         if (!rpcData) throw new Error('No se creó el proyecto');
+        if (user?.id && rpcData) {
+          const proj = rpcData as { id?: string; name?: string };
+          await logAudit({
+            user_id: user.id,
+            entity_type: 'project',
+            entity_id: proj.id || '',
+            action: 'create',
+            summary: `Proyecto creado desde plantilla: ${proj.name || newProject.name}`,
+          });
+        }
         await fetchData();
         await fetchUsers();
         setShowModal(false);
@@ -311,6 +350,16 @@ function Projects() {
         .select();
 
       if (error) throw error;
+
+      if (user?.id && data?.[0]) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project',
+          entity_id: data[0].id,
+          action: 'create',
+          summary: `Proyecto creado: ${newProject.name}`,
+        });
+      }
 
       // Añadir usuarios involucrados (ahora es obligatorio)
       if (data && data[0]) {
@@ -514,7 +563,15 @@ function Projects() {
         console.error("Error al actualizar el proyecto:", error);
         throw error;
       }
-      
+      if (user?.id) {
+        await logAudit({
+          user_id: user.id,
+          entity_type: 'project',
+          entity_id: selectedProject.id,
+          action: 'update',
+          summary: `Proyecto actualizado: ${editedProject.name}`,
+        });
+      }
       // Handle project users assignments
       // 1. Obtener todos los usuarios que actualmente tienen este proyecto
       const usersWithAccess = users.filter(u => 

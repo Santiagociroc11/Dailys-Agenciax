@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Plus, Trash2, ListChecks, IndentIncrease, IndentDecrease } from 'lucide-react';
+import { Check, Plus, Trash2, ListChecks, CornerDownRight, CornerUpLeft } from 'lucide-react';
 
 export interface ChecklistItem {
   id: string;
@@ -210,7 +210,7 @@ export function ActivityChecklist({
                       title="Promover (quitar sangría)"
                       aria-label="Promover"
                     >
-                      <IndentDecrease className="w-3.5 h-3.5" />
+                      <CornerUpLeft className="w-3.5 h-3.5" />
                     </button>
                   )}
                   {canIndent && (
@@ -221,7 +221,7 @@ export function ActivityChecklist({
                       title="Convertir en sub-item"
                       aria-label="Indentar"
                     >
-                      <IndentIncrease className="w-3.5 h-3.5" />
+                      <CornerDownRight className="w-3.5 h-3.5" />
                     </button>
                   )}
                   <button

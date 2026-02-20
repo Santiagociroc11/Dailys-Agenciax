@@ -9,6 +9,9 @@ const ENTITY_LABELS: Record<string, string> = {
   subtask: 'Subtarea',
   user: 'Usuario',
   project: 'Proyecto',
+  client: 'Cliente',
+  project_template: 'Plantilla',
+  area: 'Área',
   assignment: 'Asignación',
 };
 
