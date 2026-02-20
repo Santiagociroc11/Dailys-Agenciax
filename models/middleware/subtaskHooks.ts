@@ -2,11 +2,17 @@ import mongoose from 'mongoose';
 import { Task } from '../Task.js';
 import { TaskWorkAssignment } from '../TaskWorkAssignment.js';
 
+interface SubtaskLean {
+  assigned_to?: string;
+  estimated_duration?: number;
+  status?: string;
+}
+
 async function syncTaskFromSubtasks(taskId: string): Promise<void> {
   const Subtask = mongoose.model('Subtask');
-  const subtasks = await Subtask.find({ task_id: taskId }).lean().exec();
-  const assignedUsers = [...new Set(subtasks.map((s: { assigned_to: string }) => s.assigned_to))];
-  const estimatedDuration = subtasks.reduce((sum: number, s: { estimated_duration: number }) => sum + s.estimated_duration, 0);
+  const subtasks = (await Subtask.find({ task_id: taskId }).lean().exec()) as SubtaskLean[];
+  const assignedUsers = [...new Set(subtasks.map((s) => s.assigned_to).filter(Boolean))];
+  const estimatedDuration = subtasks.reduce((sum, s) => sum + (s.estimated_duration ?? 0), 0);
 
   await Task.updateOne(
     { id: taskId },
@@ -23,12 +29,12 @@ async function syncTaskFromSubtasks(taskId: string): Promise<void> {
 
 async function updateParentTaskStatus(taskId: string): Promise<void> {
   const Subtask = mongoose.model('Subtask');
-  const subtasks = await Subtask.find({ task_id: taskId }).lean().exec();
+  const subtasks = (await Subtask.find({ task_id: taskId }).lean().exec()) as SubtaskLean[];
   const allCompleted = subtasks.length > 0 && subtasks.every(
-    (s: { status: string }) => s.status === 'completed' || s.status === 'approved'
+    (s) => s.status === 'completed' || s.status === 'approved'
   );
   const anyInProgress = subtasks.some(
-    (s: { status: string }) => s.status === 'in_progress' || s.status === 'assigned'
+    (s) => s.status === 'in_progress' || s.status === 'assigned'
   );
 
   if (allCompleted) {

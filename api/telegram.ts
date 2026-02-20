@@ -72,7 +72,7 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
   try {
     const { db } = await import('../lib/db/serverDb.js');
 
-    const { data: history, error } = await db
+    const { data: historyRaw, error } = await db
       .from('status_history')
       .select('*')
       .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
@@ -83,6 +83,9 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       return {};
     }
 
+    type HistoryRecord = { new_status?: string; changed_at?: string; changed_by?: string };
+    const history: HistoryRecord[] = Array.isArray(historyRaw) ? historyRaw as HistoryRecord[] : (historyRaw ? [historyRaw as HistoryRecord] : []);
+
     const timeInfo: {
       assignedAt?: string;
       completedAt?: string;
@@ -92,24 +95,24 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
       blockedAt?: string;
     } = {};
 
-    console.log(`[TIME INFO] Historial completo encontrado:`, history?.map(h => `${h.new_status} - ${h.changed_at} - ${h.changed_by || 'sistema'}`));
+    console.log(`[TIME INFO] Historial completo encontrado:`, history.map((h) => `${h.new_status} - ${h.changed_at} - ${h.changed_by || 'sistema'}`));
 
     // Buscar fechas específicas en el historial
     // Para calcular tiempo de revisión correctamente cuando hay múltiples ciclos de completed -> in_review
     let completions: Array<{date: string, changedBy: string}> = [];
     let reviews: Array<{date: string, changedBy: string}> = [];
     
-    history?.forEach((record: any) => {
-      if ((record.new_status === 'assigned' || record.new_status === 'in_progress') && !timeInfo.assignedAt) {
+    history.forEach((record) => {
+      if ((record.new_status === 'assigned' || record.new_status === 'in_progress') && !timeInfo.assignedAt && record.changed_at) {
         timeInfo.assignedAt = record.changed_at;
         console.log(`[TIME INFO] Primera asignación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
-      } else if (record.new_status === 'completed') {
+      } else if (record.new_status === 'completed' && record.changed_at) {
         completions.push({date: record.changed_at, changedBy: record.changed_by || 'sistema'});
         if (!timeInfo.completedAt) {
           timeInfo.completedAt = record.changed_at;
           console.log(`[TIME INFO] Primera completación encontrada: ${record.changed_at} por ${record.changed_by || 'sistema'}`);
         }
-      } else if (record.new_status === 'in_review') {
+      } else if (record.new_status === 'in_review' && record.changed_at) {
         reviews.push({date: record.changed_at, changedBy: record.changed_by || 'sistema'});
         if (!timeInfo.inReviewAt) {
           timeInfo.inReviewAt = record.changed_at;
@@ -167,13 +170,14 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
     // Si no hay suficiente información del historial, intentar obtener desde task_work_assignments
     if (!timeInfo.assignedAt || !timeInfo.completedAt) {
       try {
-        const { data: workData, error: workError } = await db
+        const { data: workDataRaw, error: workError } = await db
           .from('task_work_assignments')
           .select('date, created_at, end_time, status, updated_at')
           .eq(isSubtask ? 'subtask_id' : 'task_id', itemId)
           .eq('task_type', isSubtask ? 'subtask' : 'task')
           .single();
 
+        const workData = workDataRaw as { created_at?: string; end_time?: string; status?: string; updated_at?: string } | null;
         if (!workError && workData) {
           // Usar la fecha de creación como fecha de asignación si no la tenemos
           if (!timeInfo.assignedAt && workData.created_at) {
@@ -297,8 +301,9 @@ export async function getAdminTelegramId(): Promise<string | null> {
       return null;
     }
 
-    if (data && data.value && typeof data.value === 'object' && data.value.id) {
-      return data.value.id;
+    const settingsData = data as { value?: { id?: string } } | null;
+    if (settingsData?.value && typeof settingsData.value === 'object' && settingsData.value.id) {
+      return settingsData.value.id;
     }
 
     return null;
@@ -666,16 +671,19 @@ export async function notifyUsersTaskInReview(
   try {
     const { db } = await import('../lib/db/serverDb.js');
 
-    const { data: users, error: usersError } = await db
+    const { data: usersRaw, error: usersError } = await db
       .from('users')
       .select('id, telegram_chat_id, name, email')
       .in('id', userIds)
       .not('telegram_chat_id', 'is', null);
 
-    if (usersError || !users) {
+    if (usersError || !usersRaw) {
       console.error('Error obteniendo usuarios para notificación de revisión:', usersError);
       return 0;
     }
+
+    type UserRecord = { telegram_chat_id?: string | null; name?: string; email?: string };
+    const users: UserRecord[] = Array.isArray(usersRaw) ? (usersRaw as UserRecord[]) : (usersRaw ? [usersRaw as UserRecord] : []);
 
     // Crear mensaje
     const message = createUserTaskInReviewMessage(
@@ -721,17 +729,18 @@ export async function notifyTaskAvailable(
   try {
     const { db } = await import('../lib/db/serverDb.js');
 
-    const { data: userData, error: userError } = await db
+    const { data: userDataRaw, error: userError } = await db
       .from('users')
       .select('telegram_chat_id, name, email')
       .eq('id', userId)
       .single();
 
-    if (userError || !userData) {
+    if (userError || !userDataRaw) {
       console.error('Error obteniendo datos del usuario:', userError);
       return false;
     }
 
+    const userData = userDataRaw as { telegram_chat_id?: string | null; name?: string; email?: string };
     if (!userData.telegram_chat_id) {
       console.log(`Usuario ${userData.name || userData.email} no tiene telegram_chat_id configurado. Saltando notificación.`);
       return false;

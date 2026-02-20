@@ -42,7 +42,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const assignments = await AreaUserAssignment.find({ user_id: userId }).lean().exec();
       const areaIds = assignments.map((a: { area_id: string }) => a.area_id);
       const areas = await Area.find({ id: { $in: areaIds } }).select('id name description').lean().exec();
-      const areaMap = new Map(areas.map((a: { id: string }) => [a.id, a]));
+      const areaMap = new Map(areas.map((a) => [a.id, a]));
       data = assignments.map((a: { area_id: string }) => {
         const area = areaMap.get(a.area_id);
         return { area_id: a.area_id, area_name: area?.name, area_description: area?.description };
@@ -52,7 +52,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const assignments = await AreaUserAssignment.find({ area_id: areaId }).lean().exec();
       const userIds = assignments.map((a: { user_id: string }) => a.user_id);
       const users = await User.find({ id: { $in: userIds } }).select('id name email').lean().exec();
-      const userMap = new Map(users.map((u: { id: string }) => [u.id, u]));
+      const userMap = new Map(users.map((u) => [u.id, u]));
       data = assignments.map((a: { user_id: string }) => {
         const user = userMap.get(a.user_id);
         return { user_id: a.user_id, user_name: user?.name, user_email: user?.email };

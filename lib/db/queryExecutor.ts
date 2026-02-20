@@ -39,15 +39,15 @@ export async function executeQuery<T = unknown>(
 
     switch (request.operation) {
       case 'select':
-        return await executeSelect(model, request, filters, projection);
+        return (await executeSelect(model, request, filters, projection)) as QueryResponse<T>;
       case 'insert':
-        return await executeInsert(model, request);
+        return (await executeInsert(model, request)) as QueryResponse<T>;
       case 'update':
-        return await executeUpdate(model, request, filters);
+        return (await executeUpdate(model, request, filters)) as QueryResponse<T>;
       case 'delete':
-        return await executeDelete(model, filters, request.single);
+        return (await executeDelete(model, filters, request.single)) as QueryResponse<T>;
       case 'upsert':
-        return await executeUpsert(model, request);
+        return (await executeUpsert(model, request)) as QueryResponse<T>;
       default:
         return {
           data: null,
@@ -123,7 +123,7 @@ async function executeInsert(
 }
 
 async function executeUpdate(
-  model: { updateMany: Function; findOneAndUpdate: Function },
+  model: { updateMany: Function; findOneAndUpdate: Function; find: Function },
   request: QueryRequest,
   filters: Record<string, unknown>
 ): Promise<QueryResponse> {
