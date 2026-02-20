@@ -56,22 +56,29 @@ function App() {
           }}
         />
 
-        <Suspense fallback={
-          <div className="min-h-screen flex items-center justify-center">
-            <Loading message="Cargando..." size="lg" />
-          </div>
-        }>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+        <Routes>
+          <Route path="/" element={
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loading message="Cargando..." size="lg" /></div>}>
+              <Home />
+            </Suspense>
+          } />
+          <Route path="/login" element={
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loading message="Cargando..." size="lg" /></div>}>
+              <Login />
+            </Suspense>
+          } />
+          <Route path="/register" element={
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loading message="Cargando..." size="lg" /></div>}>
+              <Register />
+            </Suspense>
+          } />
 
-            {/* Admin routes */}
-            <Route path="/" element={
-              <AdminRoute>
-                <Layout />
-              </AdminRoute>
-            }>
+          {/* Admin routes */}
+          <Route path="/" element={
+            <AdminRoute>
+              <Layout />
+            </AdminRoute>
+          }>
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="management" element={<Management />} />
               <Route path="projects" element={<Projects />} />
@@ -95,8 +102,7 @@ function App() {
               <Route path="projects/:projectId" element={<UserProjectView />} />
               <Route path="settings" element={<UserSettings />} />
             </Route>
-          </Routes>
-        </Suspense>
+        </Routes>
       </AuthProvider>
     </Router>
   );

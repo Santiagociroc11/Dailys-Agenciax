@@ -3538,7 +3538,7 @@ function Management() {
               xmlns="http://www.w3.org/2000/svg" 
               className={`h-4 w-4 mr-1.5 transition-opacity duration-300 ${
                 refreshing 
-                  ? 'text-indigo-500 animate-spin' 
+                  ? 'text-indigo-500 animate-pulse' 
                   : autoRefresh ? 'text-indigo-500' : 'text-gray-400'
               }`} 
               fill="none" 
@@ -3797,8 +3797,20 @@ function Management() {
 
       <div className="flex-1 overflow-hidden">
         {loading ? (
-          <div className="text-center py-10">
-            <p className="text-gray-500">Cargando tablero...</p>
+          <div className="p-6 animate-pulse">
+            <div className="space-y-4">
+              <div className="h-8 bg-gray-200 rounded w-48" />
+              <div className="flex gap-4 overflow-x-auto pb-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex-shrink-0 w-64 space-y-3">
+                    <div className="h-6 bg-gray-200 rounded w-24" />
+                    {[...Array(5)].map((_, j) => (
+                      <div key={j} className="h-20 bg-gray-200 rounded" />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : view === 'subtasks' ? (
           renderKanbanBoard()
@@ -4012,9 +4024,11 @@ function Management() {
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6">
               {loading ? (
-                <div className="flex items-center justify-center h-64">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                  <span className="ml-3 text-gray-600">Cargando detalles...</span>
+                <div className="p-6 h-64 animate-pulse space-y-4">
+                  <div className="h-6 bg-gray-200 rounded w-48" />
+                  <div className="h-4 bg-gray-200 rounded w-full" />
+                  <div className="h-4 bg-gray-200 rounded w-3/4" />
+                  <div className="h-20 bg-gray-200 rounded" />
                 </div>
               ) : taskDetails ? (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

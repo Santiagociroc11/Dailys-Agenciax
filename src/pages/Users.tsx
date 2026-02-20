@@ -376,8 +376,28 @@ export default function Users() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      <div className="p-6 animate-pulse">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <div className="h-8 bg-gray-200 rounded w-32 mb-2" />
+            <div className="h-4 bg-gray-200 rounded w-48" />
+          </div>
+          <div className="h-10 bg-gray-200 rounded w-28" />
+        </div>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="p-4 border-b flex gap-4">
+            <div className="h-4 bg-gray-200 rounded w-24" />
+            <div className="h-4 bg-gray-200 rounded w-32" />
+            <div className="h-4 bg-gray-200 rounded w-24" />
+          </div>
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="p-4 border-b flex gap-4 items-center">
+              <div className="h-8 w-8 bg-gray-200 rounded-full" />
+              <div className="h-4 bg-gray-200 rounded w-32" />
+              <div className="h-4 bg-gray-200 rounded w-48" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

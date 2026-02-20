@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import UserSidebar from './UserSidebar';
 import Breadcrumbs from './Breadcrumbs';
 import { useAuth } from '../contexts/AuthContext';
 import { AlertTriangle, Home } from 'lucide-react';
+import { SkeletonMiDia } from './Skeleton';
 
 export default function UserLayout() {
   const { isImpersonating, stopImpersonating, user } = useAuth();
@@ -27,7 +28,9 @@ export default function UserLayout() {
         )}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6">
           <Breadcrumbs />
-          <Outlet />
+          <Suspense fallback={<SkeletonMiDia />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

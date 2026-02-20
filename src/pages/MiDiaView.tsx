@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Sun, CheckSquare, FolderOpen, ArrowRight, Calendar } from 'lucide-react';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
-import Loading from '../components/Loading';
+import { SkeletonMiDia } from '../components/Skeleton';
 
 interface TodayAssignment {
   id: string;
@@ -154,11 +154,7 @@ export default function MiDiaView() {
   const todayStr = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
   if (loading) {
-    return (
-      <div className="min-h-[300px] flex items-center justify-center">
-        <Loading message="Cargando tu día..." size="lg" />
-      </div>
-    );
+    return <SkeletonMiDia />;
   }
 
   return (

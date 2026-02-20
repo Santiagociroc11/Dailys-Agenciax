@@ -8,6 +8,7 @@ import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import RichTextDisplay from '../components/RichTextDisplay';
 import RichTextSummary from '../components/RichTextSummary';
 import QuillEditor from '../components/QuillEditor';
+import { SkeletonTaskList, SkeletonInline } from '../components/Skeleton';
 
 
 interface Task {
@@ -1251,11 +1252,7 @@ function Tasks() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
-    );
+    return <SkeletonTaskList />;
   }
 
   // Funciones para manejar la paginación
@@ -1421,12 +1418,7 @@ function Tasks() {
       </div>
 
       <div className="grid gap-4">
-        {pageLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-            <span className="ml-2 text-gray-600">Cargando tareas...</span>
-          </div>
-        )}
+        {pageLoading && <SkeletonInline rows={3} />}
         
         {!pageLoading && tasks.length > 0 ? (
           tasks.map((task) => (

@@ -681,17 +681,29 @@ export default function UserProjectView() {
          const { data: allSubtasksData, error: allSubtasksError } = await allSubtasksQ;
          if (allSubtasksError) throw allSubtasksError;
 
-         // 4️⃣ Construir Set de project_ids para luego pedir sus nombres
+         // 4️⃣ Obtener tareas padre para subtareas (MongoDB no hace joins, s.tasks viene vacío)
+         const parentTaskIds = new Set<string>();
+         allSubtasksData?.forEach((s) => s.task_id && parentTaskIds.add(s.task_id));
+         const parentTaskIdsArr = Array.from(parentTaskIds);
+         const { data: parentTasksData } =
+            parentTaskIdsArr.length > 0
+               ? await supabase.from("tasks").select("id, title, project_id, is_sequential").in("id", parentTaskIdsArr)
+               : { data: [] as { id: string; title: string; project_id: string | null; is_sequential: boolean }[] };
+         const parentTaskMap: Record<string, { id: string; title: string; project_id: string | null; is_sequential: boolean }> = {};
+         (parentTasksData || []).forEach((t) => (parentTaskMap[t.id] = t));
+
+         // 5️⃣ Construir Set de project_ids para luego pedir sus nombres
          const projectIds = new Set<string>();
          allTasksData?.forEach((t) => {
             if (t.project_id) projectIds.add(t.project_id);
          });
          allSubtasksData?.forEach((s) => {
-            const pid = s.tasks?.project_id;
+            const parent = parentTaskMap[s.task_id];
+            const pid = parent?.project_id ?? s.tasks?.project_id;
             if (pid) projectIds.add(pid);
          });
 
-         // 5️⃣ Cargar nombre de cada proyecto
+         // 6️⃣ Cargar nombre de cada proyecto
          const { data: projects, error: projectsError } = await supabase.from("projects").select("id, name").in("id", Array.from(projectIds)).eq("is_archived", false);
          if (projectsError) console.error("Error cargando proyectos:", projectsError);
 
@@ -729,13 +741,16 @@ export default function UserProjectView() {
          const grouped: Record<string, Subtask[]> = {};
          subtaskData?.forEach((s) => {
             if (!grouped[s.task_id]) grouped[s.task_id] = [];
-            grouped[s.task_id].push({ ...s, task_title: s.tasks?.title || "—" });
+            const parentTask = parentTaskMap[s.task_id];
+            grouped[s.task_id].push({ ...s, task_title: parentTask?.title || s.tasks?.title || "—", tasks: parentTask ? { ...s.tasks, id: parentTask.id, title: parentTask.title, project_id: parentTask.project_id, is_sequential: parentTask.is_sequential } : s.tasks });
          });
 
          // 9️⃣ Seleccionar sólo las subtareas relevantes (siguiente si es secuencial, todas si no)
          const relevantSubs: Subtask[] = [];
          Object.entries(grouped).forEach(([taskId, subs]) => {
-            if (subs[0].tasks?.is_sequential) {
+            const parentTask = parentTaskMap[taskId];
+            const isSequential = parentTask?.is_sequential ?? subs[0].tasks?.is_sequential;
+            if (isSequential) {
                const allForThis = allSubtasksData!.filter((x) => x.task_id === taskId).sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
 
                // DEBUG: Verificar secuencia completa
@@ -805,7 +820,7 @@ export default function UserProjectView() {
          });
 
          // Resumen final
-         const sequentialSubs = relevantSubs.filter((s) => s.tasks?.is_sequential);
+         const sequentialSubs = relevantSubs.filter((s) => parentTaskMap[s.task_id]?.is_sequential ?? s.tasks?.is_sequential);
          if (sequentialSubs.length > 0) {
             console.log(
                `[SECUENCIAL] Subtareas secuenciales relevantes para el usuario:`,
@@ -814,22 +829,26 @@ export default function UserProjectView() {
          }
 
          // 🔟 Mapear subtareas a Task[]
-         const subtasksAsTasks: Task[] = relevantSubs.map((s) => ({
-            id: `subtask-${s.id}`,
-            original_id: s.id,
-            title: s.title,
-            subtask_title: s.tasks?.title || "—",
-            description: s.description,
-            priority: "medium",
-            estimated_duration: s.estimated_duration,
-            start_date: s.start_date || "",
-            deadline: s.deadline || "",
-            status: s.status,
-            is_sequential: false,
-            project_id: s.tasks?.project_id || "",
-            projectName: projectMap[s.tasks?.project_id || ""] || "Sin proyecto",
-            type: "subtask",
-         }));
+         const subtasksAsTasks: Task[] = relevantSubs.map((s) => {
+            const parent = parentTaskMap[s.task_id];
+            const projectId = parent?.project_id ?? s.tasks?.project_id ?? "";
+            return {
+               id: `subtask-${s.id}`,
+               original_id: s.id,
+               title: s.title,
+               subtask_title: parent?.title ?? s.tasks?.title ?? "—",
+               description: s.description,
+               priority: "medium",
+               estimated_duration: s.estimated_duration,
+               start_date: s.start_date || "",
+               deadline: s.deadline || "",
+               status: s.status,
+               is_sequential: false,
+               project_id: projectId,
+               projectName: projectMap[projectId] || "Sin proyecto",
+               type: "subtask",
+            };
+         });
 
          // 1️⃣1️⃣ Mapear tareas a Task[]
          const tasksAsTasks: Task[] = tasksWithoutSubs.map((t) => ({
@@ -3907,9 +3926,10 @@ export default function UserProjectView() {
                   {/* Task list */}
                   <div className="divide-y divide-gray-200">
                      {loading || isFiltering ? (
-                        <div className="py-8 text-center text-gray-500 bg-white">
-                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                           <p>{isFiltering ? "Filtrando tareas..." : "Cargando tareas..."}</p>
+                        <div className="py-8 px-4 animate-pulse space-y-3">
+                           {[...Array(5)].map((_, i) => (
+                              <div key={i} className="h-14 bg-gray-200 rounded w-full" />
+                           ))}
                         </div>
                      ) : isDataInitialized && taskItems.length > 0 ? (
                         taskItems.map((task) => (
@@ -5181,9 +5201,10 @@ export default function UserProjectView() {
                         </div>
                         <div className="divide-y divide-red-200">
                            {loadingAssigned ? (
-                              <div className="py-8 text-center text-gray-500 bg-white">
-                                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                                 <p>Cargando tareas...</p>
+                              <div className="py-8 px-4 animate-pulse space-y-3">
+                                 {[...Array(4)].map((_, i) => (
+                                    <div key={i} className="h-12 bg-gray-200 rounded w-full" />
+                                 ))}
                               </div>
                            ) : blockedTaskItems.length > 0 ? (
                               blockedTaskItems.map((task) => {
@@ -5235,9 +5256,10 @@ export default function UserProjectView() {
                {activeGestionSubTab === "aprobadas" && (
                   <>
                      {loadingCompleted ? (
-                        <div className="py-8 text-center text-gray-500 bg-white">
-                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                           <p>Cargando tareas aprobadas...</p>
+                        <div className="py-8 px-4 animate-pulse space-y-3">
+                           {[...Array(4)].map((_, i) => (
+                              <div key={i} className="h-12 bg-gray-200 rounded w-full" />
+                           ))}
                         </div>
                      ) : approvedTaskItems.length > 0 ? (
                         <div className="mb-8">
@@ -5306,9 +5328,10 @@ export default function UserProjectView() {
                      </div>
 
                      {loadingAllEvents ? (
-                        <div className="py-8 text-center text-gray-500 bg-white">
-                           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mx-auto mb-2"></div>
-                           <p>Cargando actividades...</p>
+                        <div className="py-8 px-4 animate-pulse space-y-3">
+                           {[...Array(5)].map((_, i) => (
+                              <div key={i} className="h-10 bg-gray-200 rounded w-full" />
+                           ))}
                         </div>
                      ) : allWorkEvents.length > 0 ? (
                         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">

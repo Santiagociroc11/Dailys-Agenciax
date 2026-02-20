@@ -20,8 +20,30 @@ export default function CapacityView() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600" />
+      <div className="space-y-6 p-6 animate-pulse">
+        <div>
+          <div className="h-8 bg-gray-200 rounded w-48 mb-2" />
+          <div className="h-4 bg-gray-200 rounded w-64" />
+        </div>
+        <div className="flex gap-4">
+          <div className="h-10 bg-gray-200 rounded w-24" />
+          <div className="h-10 bg-gray-200 rounded w-24" />
+        </div>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="p-4 border-b flex gap-4">
+            <div className="h-4 bg-gray-200 rounded w-24" />
+            <div className="h-4 bg-gray-200 rounded w-32" />
+            <div className="h-4 bg-gray-200 rounded w-24" />
+          </div>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="p-4 border-b flex gap-4 items-center">
+              <div className="h-8 w-8 bg-gray-200 rounded-full" />
+              <div className="h-4 bg-gray-200 rounded w-32" />
+              <div className="h-4 bg-gray-200 rounded w-20" />
+              <div className="h-4 bg-gray-200 rounded w-16" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

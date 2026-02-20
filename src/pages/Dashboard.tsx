@@ -620,9 +620,12 @@ const Dashboard = () => {
             Métricas del Equipo
           </h2>
           {loading ? (
-             <div className="py-8 text-center text-gray-500">
-                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-800 mx-auto mb-2"></div>
-                <p>Calculando métricas del equipo...</p>
+             <div className="py-8 animate-pulse">
+                <div className="space-y-3">
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} className="h-12 bg-gray-200 rounded w-full" />
+                  ))}
+                </div>
               </div>
           ) : teamMetrics.length > 0 ? (
             <>
