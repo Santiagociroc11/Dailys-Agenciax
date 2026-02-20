@@ -280,7 +280,6 @@ function Management() {
   const [groupByPriority, setGroupByPriority] = useState(false);
   const [groupByAssignee, setGroupByAssignee] = useState(false);
   const [groupByDeadline, setGroupByDeadline] = useState(false);
-  const [groupByPhase, setGroupByPhase] = useState(false);
   const [view, setView] = useState<'subtasks' | 'main_tasks' | 'review'>('subtasks');
   const [processedMainTasks, setProcessedMainTasks] = useState<(Task & { 
     main_task_status: string;
@@ -2176,23 +2175,6 @@ function Management() {
         tasks: displayTasks.filter(task => !task.deadline),
         subtasks: displaySubtasks.filter(subtask => !subtask.deadline)
       };
-    } else if (groupByPhase && phases.length > 0) {
-      phases.forEach(phase => {
-        groupedItems[phase.id] = {
-          tasks: displayTasks.filter(task => task.phase_id === phase.id),
-          subtasks: displaySubtasks.filter(subtask => {
-            const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
-            return relatedTask && relatedTask.phase_id === phase.id;
-          })
-        };
-      });
-      groupedItems['no_phase'] = {
-        tasks: displayTasks.filter(task => !task.phase_id),
-        subtasks: displaySubtasks.filter(subtask => {
-          const relatedTask = displayTasks.find(task => task.id === subtask.task_id);
-          return relatedTask && !relatedTask.phase_id;
-        })
-      };
     } else {
       // No grouping, just one group with all items
       groupedItems['all'] = {
@@ -2229,10 +2211,6 @@ function Management() {
         'no_deadline': 'Sin Fecha Límite'
       };
       return deadlineGroups[groupId] || 'Fecha Desconocida';
-    } else if (groupByPhase) {
-      if (groupId === 'no_phase') return 'Sin fase';
-      const phase = phases.find(p => p.id === groupId);
-      return phase ? phase.name : 'Fase';
     }
     return 'Todas las Tareas';
   };
@@ -3800,7 +3778,6 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
-                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3817,7 +3794,6 @@ function Management() {
                       setGroupByPriority(true);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
-                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3834,7 +3810,6 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(true);
                       setGroupByDeadline(false);
-                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
@@ -3851,41 +3826,21 @@ function Management() {
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(true);
-                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />
                   <label htmlFor="group-deadline">Agrupar por Fecha Límite</label>
                 </div>
-                {phases.length > 0 && (
-                  <div className="flex items-center">
-                    <input
-                      type="radio"
-                      id="group-phase"
-                      checked={groupByPhase}
-                      onChange={() => {
-                        setGroupByProject(false);
-                        setGroupByPriority(false);
-                        setGroupByAssignee(false);
-                        setGroupByDeadline(false);
-                        setGroupByPhase(true);
-                      }}
-                      className="mr-2"
-                    />
-                    <label htmlFor="group-phase">Agrupar por Fase</label>
-                  </div>
-                )}
                 <div className="flex items-center">
                   <input
                     type="radio"
                     id="group-none"
-                    checked={!groupByProject && !groupByPriority && !groupByAssignee && !groupByDeadline && !groupByPhase}
+                    checked={!groupByProject && !groupByPriority && !groupByAssignee && !groupByDeadline}
                     onChange={() => {
                       setGroupByProject(false);
                       setGroupByPriority(false);
                       setGroupByAssignee(false);
                       setGroupByDeadline(false);
-                      setGroupByPhase(false);
                     }}
                     className="mr-2"
                   />

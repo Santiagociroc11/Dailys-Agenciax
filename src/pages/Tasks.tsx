@@ -2261,33 +2261,9 @@ function Tasks() {
         
         {!pageLoading && tasks.length > 0 ? (
           (() => {
-            const phaseMap = new Map(filterPhases.map((p) => [p.id, { name: p.name, order: p.order }]));
-            const grouped = new Map<string, typeof tasks>();
-            const NO_PHASE = '__no_phase__';
-            tasks.forEach((task) => {
-              const key = task.phase_id || NO_PHASE;
-              if (!grouped.has(key)) grouped.set(key, []);
-              grouped.get(key)!.push(task);
-            });
-            const phaseOrder = [...filterPhases].sort((a, b) => a.order - b.order);
-            const sections = phaseOrder.map((p) => ({ key: p.id, label: p.name, tasks: grouped.get(p.id) || [] }))
-              .filter((s) => s.tasks.length > 0);
-            const noPhaseTasks = grouped.get(NO_PHASE) || [];
-            if (noPhaseTasks.length > 0) {
-              sections.push({ key: NO_PHASE, label: 'Sin fase', tasks: noPhaseTasks });
-            }
-            const toRender = filterPhases.length > 0 && sections.length > 0
-              ? sections
-              : [{ key: 'all', label: null, tasks }];
-            return toRender.map((section) => (
-              <div key={section.key}>
-                {section.label && (
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2 mt-4 first:mt-0 px-1 py-2 bg-indigo-50 rounded-md border-l-4 border-indigo-400">
-                    {section.label}
-                    <span className="ml-2 text-gray-500 font-normal">({section.tasks.length})</span>
-                  </h3>
-                )}
-                {section.tasks.map((task) => (
+            return (
+              <div key="all">
+                {tasks.map((task) => (
           <div
             key={task.id}
             className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow"
@@ -2636,7 +2612,7 @@ function Tasks() {
             </div>
           ))}
               </div>
-            ));
+            );
           })()
         ) : !pageLoading && (
           <div className="text-center py-12">

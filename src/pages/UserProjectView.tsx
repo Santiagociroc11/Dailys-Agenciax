@@ -4007,8 +4007,7 @@ export default function UserProjectView() {
                                  ? taskItems.filter((t) => !t.phase_id)
                                  : taskItems.filter((t) => t.phase_id === selectedPhaseFilter)
                               : taskItems;
-                           if (phasesForProject.length === 0) {
-                              return filtered.map((task) => (
+                           return filtered.map((task) => (
                            <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
                               <div className="text-center">
                                  <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
@@ -4071,87 +4070,6 @@ export default function UserProjectView() {
                               </div>
                            </div>
                         ));
-                           }
-                           const grouped = new Map<string | null, typeof filtered>();
-                           filtered.forEach((t) => {
-                              const key = t.phase_id ?? null;
-                              if (!grouped.has(key)) grouped.set(key, []);
-                              grouped.get(key)!.push(t);
-                           });
-                           const sections = phasesForProject
-                              .map((p) => ({ phase: p, tasks: grouped.get(p.id) || [] }))
-                              .filter((s) => s.tasks.length > 0);
-                           const noPhase = grouped.get(null) || [];
-                           if (noPhase.length > 0) sections.push({ phase: { id: "__no_phase__", name: "Sin fase", order: 999 }, tasks: noPhase });
-                           return sections.map((section) => (
-                              <div key={section.phase.id}>
-                                 <h3 className="text-sm font-semibold text-gray-700 mt-4 mb-2 px-3 py-2 bg-indigo-50 rounded-md border-l-4 border-indigo-400 first:mt-0">
-                                    {section.phase.name}
-                                    <span className="ml-2 text-gray-500 font-normal">({section.tasks.length})</span>
-                                 </h3>
-                                 {section.tasks.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
-                                       <div className="text-center">
-                                          <input type="checkbox" checked={selectedTasks.includes(task.id)} onChange={() => handleTaskSelection(task.id)} className="h-5 w-5 text-yellow-500 rounded border-gray-300 focus:ring-yellow-500" />
-                                       </div>
-                                       <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
-                                          {(() => {
-                                             const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
-                                             return <span className={`inline-block px-3 py-1 ${bg} ${text} font-semibold rounded-full shadow-sm`}>{task.projectName || "Sin proyecto"}</span>;
-                                          })()}
-                                          <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
-                                       </div>
-                                       <div className="font-medium">
-                                          {task.type === "subtask" ? (
-                                             <div>
-                                                <div className="text-sm text-gray-700 font-medium mb-1">
-                                                   <span className="inline-block mr-2">T.P:</span>
-                                                   {task.subtask_title || "Sin tarea principal"}
-                                                </div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                   <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full">Subtarea</span>
-                                                   {getPriorityBadge(task.priority)}
-                                                </div>
-                                             </div>
-                                          ) : (
-                                             <div>
-                                                <div className="cursor-pointer hover:text-indigo-600 mb-1 text-base" onClick={() => handleViewTaskDetails(task)}>
-                                                   {task.title}
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-1">{getPriorityBadge(task.priority)}</div>
-                                             </div>
-                                          )}
-                                       </div>
-                                       <div className="text-sm text-gray-600">
-                                          <RichTextSummary text={task.description || "-"} maxLength={80} />
-                                       </div>
-                                       <div className="text-sm text-gray-700">
-                                          {task.start_date ? (
-                                             <>
-                                                <div>{format(new Date(task.start_date), "dd/MM/yyyy")}</div>
-                                                {getTimeIndicator(task.start_date, true).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.start_date, true).color}`}>{getTimeIndicator(task.start_date, true).text}</div>}
-                                             </>
-                                          ) : (
-                                             <span className="text-gray-400">-</span>
-                                          )}
-                                       </div>
-                                       <div className="text-sm text-gray-700">
-                                          {task.deadline ? (
-                                             <>
-                                                <div>{format(new Date(task.deadline), "dd/MM/yyyy")}</div>
-                                                {getTimeIndicator(task.deadline, false).text && <div className={`text-xs mt-1 ${getTimeIndicator(task.deadline, false).color}`}>{getTimeIndicator(task.deadline, false).text}</div>}
-                                             </>
-                                          ) : (
-                                             <span className="text-gray-400">-</span>
-                                          )}
-                                       </div>
-                                    </div>
-                                 ))}
-                              </div>
-                           ));
                         })()
                      ) : (
                         <div className="py-8 text-center bg-white">
