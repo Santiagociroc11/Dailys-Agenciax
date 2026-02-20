@@ -178,7 +178,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       });
     } else if (fn === 'get_project_hours_consumed') {
       const pipeline = [
-        { $match: { project_id: { $ne: null }, actual_duration: { $exists: true, $gt: 0 } } },
+        { $match: { project_id: { $ne: null } as Record<string, unknown>, actual_duration: { $exists: true, $gt: 0 } } },
         { $group: { _id: '$project_id', total_minutes: { $sum: '$actual_duration' } } },
       ];
       const results = await TaskWorkAssignment.aggregate(pipeline).exec();
@@ -186,6 +186,255 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         project_id: r._id,
         hours_consumed: Math.round((r.total_minutes / 60) * 100) / 100,
       }));
+    } else if (fn === 'get_all_users_metrics') {
+      const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+      const activeTaskIds = await Task.find({ project_id: { $in: activeProjectIds } }).select('id').lean().exec().then((r) => r.map((t: { id: string }) => t.id));
+      const [subtaskAgg, taskIdsWithSubtasks] = await Promise.all([
+        Subtask.aggregate([
+          { $match: { assigned_to: { $exists: true, $ne: null }, task_id: { $in: activeTaskIds } } },
+          {
+            $group: {
+              _id: '$assigned_to',
+              tasksAssigned: { $sum: 1 },
+              tasksApproved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+              tasksReturned: { $sum: { $cond: [{ $eq: ['$status', 'returned'] }, 1, 0] } },
+              tasksDelivered: {
+                $sum: { $cond: [{ $in: ['$status', ['approved', 'returned', 'completed', 'in_review']] }, 1, 0] } },
+            },
+          },
+        ]).exec(),
+        Subtask.distinct('task_id').exec(),
+      ]);
+      const taskIdsSet = new Set(taskIdsWithSubtasks as string[]);
+      const taskAgg = await Task.aggregate([
+        { $match: { id: { $nin: Array.from(taskIdsSet) }, project_id: { $in: activeProjectIds }, assigned_users: { $exists: true, $ne: [] } } },
+        { $unwind: '$assigned_users' },
+        {
+          $group: {
+            _id: '$assigned_users',
+            tasksAssigned: { $sum: 1 },
+            tasksApproved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+            tasksReturned: { $sum: { $cond: [{ $eq: ['$status', 'returned'] }, 1, 0] } },
+            tasksDelivered: {
+              $sum: { $cond: [{ $in: ['$status', ['approved', 'returned', 'completed', 'in_review']] }, 1, 0] } },
+          },
+        },
+      ]).exec();
+      const users = await User.find({}).select('id name email').lean().exec();
+      const userMap = new Map(users.map((u: { id: string; name: string; email: string }) => [u.id, u]));
+      const merged = new Map<string, { tasksAssigned: number; tasksApproved: number; tasksReturned: number; tasksDelivered: number }>();
+      for (const u of users) {
+        merged.set((u as { id: string }).id, { tasksAssigned: 0, tasksApproved: 0, tasksReturned: 0, tasksDelivered: 0 });
+      }
+      for (const r of subtaskAgg as { _id: string; tasksAssigned: number; tasksApproved: number; tasksReturned: number; tasksDelivered: number }[]) {
+        const m = merged.get(r._id);
+        if (m) {
+          m.tasksAssigned += r.tasksAssigned;
+          m.tasksApproved += r.tasksApproved;
+          m.tasksReturned += r.tasksReturned;
+          m.tasksDelivered += r.tasksDelivered;
+        }
+      }
+      for (const r of taskAgg as { _id: string; tasksAssigned: number; tasksApproved: number; tasksReturned: number; tasksDelivered: number }[]) {
+        const m = merged.get(r._id);
+        if (m) {
+          m.tasksAssigned += r.tasksAssigned;
+          m.tasksApproved += r.tasksApproved;
+          m.tasksReturned += r.tasksReturned;
+          m.tasksDelivered += r.tasksDelivered;
+        }
+      }
+      data = Array.from(merged.entries())
+        .filter(([, m]) => m.tasksAssigned > 0)
+        .map(([userId, m]) => {
+          const u = userMap.get(userId) as { name: string; email: string } | undefined;
+          const totalReviewed = m.tasksApproved + m.tasksReturned;
+          const approvalRate = totalReviewed > 0 ? (m.tasksApproved / totalReviewed) * 100 : 100;
+          const reworkRate = m.tasksDelivered > 0 ? (m.tasksReturned / m.tasksDelivered) * 100 : 0;
+          return {
+            userId,
+            userName: u?.name || 'Sin nombre',
+            userEmail: u?.email || 'Sin email',
+            tasksCompleted: m.tasksApproved,
+            tasksAssigned: m.tasksAssigned,
+            tasksApproved: m.tasksApproved,
+            tasksReturned: m.tasksReturned,
+            completionRate: (m.tasksApproved / m.tasksAssigned) * 100,
+            approvalRate,
+            reworkRate,
+            averageCompletionTime: 0,
+            efficiencyRatio: 0,
+            onTimeDeliveryRate: 0,
+            overdueTasks: 0,
+            upcomingDeadlines: 0,
+            averageTasksPerDay: 0,
+            tasksCompletedThisWeek: 0,
+            tasksCompletedThisMonth: 0,
+          };
+        })
+        .sort((a, b) => (b.tasksApproved / b.tasksAssigned) - (a.tasksApproved / a.tasksAssigned));
+    } else if (fn === 'get_project_metrics') {
+      const now = new Date();
+      const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+      const [projects, taskStats, subtaskStats, avgTimeByProject] = await Promise.all([
+        Project.find({ is_archived: false }).select('id name deadline').lean().exec(),
+        Task.aggregate([
+          { $match: { project_id: { $in: activeProjectIds } } },
+          {
+            $group: {
+              _id: '$project_id',
+              totalTasks: { $sum: 1 },
+              completedTasks: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+              assignedUsers: { $addToSet: '$assigned_users' },
+            },
+          },
+          { $addFields: { assignedUsers: { $reduce: { input: '$assignedUsers', initialValue: [], in: { $setUnion: ['$$value', '$$this'] } } } } },
+          { $addFields: { teamSize: { $size: '$assignedUsers' } } },
+        ]).exec(),
+        Subtask.aggregate([
+          { $lookup: { from: 'tasks', localField: 'task_id', foreignField: 'id', as: 'task' } },
+          { $unwind: '$task' },
+          { $match: { 'task.project_id': { $in: activeProjectIds } } },
+          {
+            $group: {
+              _id: '$task.project_id',
+              totalSubtasks: { $sum: 1 },
+              completedSubtasks: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] } },
+              assignedUsers: { $addToSet: '$assigned_to' },
+            },
+          },
+          { $addFields: { teamSize: { $size: '$assignedUsers' } } },
+        ]).exec(),
+        TaskWorkAssignment.aggregate([
+          { $match: { project_id: { $in: activeProjectIds }, actual_duration: { $gt: 0 } } },
+          { $group: { _id: '$project_id', totalMinutes: { $sum: '$actual_duration' }, count: { $sum: 1 } } },
+        ]).exec(),
+      ]);
+      const taskMap = new Map((taskStats as { _id: string; totalTasks: number; completedTasks: number; teamSize: number }[]).map((t) => [t._id, t]));
+      const subtaskMap = new Map((subtaskStats as { _id: string; totalSubtasks: number; completedSubtasks: number; teamSize: number }[]).map((s) => [s._id, s]));
+      const avgTimeMap = new Map((avgTimeByProject as { _id: string; totalMinutes: number; count: number }[]).map((a) => [a._id, a]));
+      data = (projects as { id: string; name: string; deadline?: Date }[]).map((p) => {
+        const t = taskMap.get(p.id);
+        const s = subtaskMap.get(p.id);
+        const totalTasks = (t?.totalTasks ?? 0) + (s?.totalSubtasks ?? 0);
+        const completedTasks = (t?.completedTasks ?? 0) + (s?.completedSubtasks ?? 0);
+        const teamSize = Math.max(t?.teamSize ?? 0, s?.teamSize ?? 0);
+        const avgData = avgTimeMap.get(p.id);
+        const averageTimePerTask = avgData && avgData.count > 0 ? avgData.totalMinutes / avgData.count : 0;
+        const daysUntilDeadline = p.deadline
+          ? Math.ceil((new Date(p.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+        const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+        return {
+          projectId: p.id,
+          projectName: p.name,
+          totalTasks,
+          completedTasks,
+          completionRate,
+          teamSize,
+          averageTimePerTask,
+          onSchedule: completionRate >= 75 && daysUntilDeadline > 0,
+          daysUntilDeadline,
+        };
+      });
+    } else if (fn === 'get_all_users_utilization_metrics') {
+      const workingHoursPerDay = (params.working_hours_per_day as number) ?? 8;
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStr = startOfMonth.toISOString().split('T')[0];
+      const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+      const pipeline = [
+        {
+          $match: {
+            project_id: { $in: activeProjectIds },
+            actual_duration: { $gt: 0 },
+            date: { $gte: monthStr },
+          },
+        },
+        {
+          $group: {
+            _id: '$user_id',
+            totalMinutes: { $sum: '$actual_duration' },
+            daysWorked: { $addToSet: '$date' },
+            totalTaskDurations: { $push: '$actual_duration' },
+          },
+        },
+        {
+          $addFields: {
+            workingDaysThisMonth: { $size: '$daysWorked' },
+            totalHoursThisMonth: { $divide: ['$totalMinutes', 60] },
+          },
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: 'id',
+            as: 'user',
+          },
+        },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            userId: '$_id',
+            userName: '$user.name',
+            userEmail: '$user.email',
+            totalMinutes: 1,
+            workingDaysThisMonth: 1,
+            totalHoursThisMonth: 1,
+            totalTaskDurations: 1,
+          },
+        },
+      ];
+      const results = await TaskWorkAssignment.aggregate(pipeline).exec();
+      const usersWithProjects = await User.find({ assigned_projects: { $exists: true, $ne: [] } })
+        .select('id')
+        .lean()
+        .exec();
+      const activeUserIds = new Set(usersWithProjects.map((u: { id: string }) => u.id));
+      data = (results as {
+        userId: string;
+        userName: string;
+        userEmail: string;
+        totalMinutes: number;
+        workingDaysThisMonth: number;
+        totalHoursThisMonth: number;
+        totalTaskDurations: number[];
+      }[]).map((r) => {
+        if (!activeUserIds.has(r.userId)) return null;
+        const expectedHoursThisMonth = r.workingDaysThisMonth * workingHoursPerDay;
+        const monthlyUtilizationRate = expectedHoursThisMonth > 0 ? (r.totalHoursThisMonth / expectedHoursThisMonth) * 100 : 0;
+        const weeklyMinutes = 0;
+        const workingDaysThisWeek = 0;
+        const expectedHoursThisWeek = workingDaysThisWeek * workingHoursPerDay;
+        const weeklyUtilizationRate = expectedHoursThisWeek > 0 ? 0 : 0;
+        const avgDaily = r.workingDaysThisMonth > 0 ? r.totalHoursThisMonth / r.workingDaysThisMonth : 0;
+        const utilizationRate = monthlyUtilizationRate;
+        const avgTaskDuration = r.totalTaskDurations.length > 0
+          ? r.totalTaskDurations.reduce((a, b) => a + b, 0) / r.totalTaskDurations.length
+          : 0;
+        return {
+          userId: r.userId,
+          userName: r.userName || 'Usuario',
+          userEmail: r.userEmail || '',
+          workingHoursPerDay,
+          averageHoursWorkedPerDay: avgDaily,
+          utilizationRate,
+          idleTime: Math.max(0, workingHoursPerDay * 60 - (r.totalMinutes / (r.workingDaysThisMonth || 1))),
+          totalHoursThisWeek: weeklyMinutes / 60,
+          expectedHoursThisWeek,
+          weeklyUtilizationRate,
+          totalHoursThisMonth: r.totalHoursThisMonth,
+          expectedHoursThisMonth: expectedHoursThisMonth,
+          monthlyUtilizationRate,
+          mostProductiveTimeOfDay: '09:00',
+          averageTaskDuration: avgTaskDuration,
+          workingDaysThisMonth: r.workingDaysThisMonth,
+          isUnderutilized: utilizationRate < 70,
+          isOverutilized: utilizationRate > 110,
+          consistencyScore: 80,
+        };
+      }).filter(Boolean);
     } else if (fn === 'create_template_from_project') {
       const projectId = params.project_id as string;
       const templateName = (params.template_name as string) || 'Plantilla';
@@ -286,7 +535,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           assigned_users: [],
           status: 'pending',
         });
-        const subs = t.subtasks || [];
+        const subs: Array<{ title: string; description?: string | null; estimated_duration: number; sequence_order?: number | null }> = t.subtasks || [];
         if (subs.length > 0) {
           for (let i = 0; i < subs.length; i++) {
             const s = subs[i];

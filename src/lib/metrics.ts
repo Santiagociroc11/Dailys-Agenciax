@@ -265,116 +265,19 @@ export async function getUserMetrics(userId: string): Promise<UserMetrics> {
 }
 
 /**
- * Obtiene métricas de calidad y rendimiento para todos los usuarios,
- * basándose en el historial de estados para mayor precisión.
+ * Obtiene métricas de calidad y rendimiento para todos los usuarios.
+ * Usa agregación MongoDB en el backend para máximo rendimiento.
  */
 export async function getAllUsersMetrics(): Promise<UserMetrics[]> {
   try {
-    // 1. Carga masiva de datos necesarios, similar a como lo hacía la lógica anterior que funcionaba.
-    const [
-      { data: users, error: usersError },
-      { data: allTasks, error: tasksError },
-      { data: allSubtasks, error: subtasksError }
-    ] = await Promise.all([
-      supabase.from('users').select('id, name, email'),
-      supabase.from('tasks').select('id, assigned_users, status'),
-      supabase.from('subtasks').select('id, task_id, assigned_to, status')
-    ]);
-
-    if (usersError || tasksError || subtasksError) {
-      console.error("Error fetching batch data for metrics:", { usersError, tasksError, subtasksError });
+    const { data, error } = await supabase.rpc('get_all_users_metrics', {});
+    if (error) {
+      console.error('Error fetching users metrics:', error);
       return [];
     }
-
-    // Mapa para saber qué tareas tienen subtareas y no contarlas dos veces
-    const tasksWithSubtasks = new Set(allSubtasks.map(st => st.task_id));
-    const userMetrics = new Map<string, any>();
-
-    // 2. Inicializar contadores para todos los usuarios
-    users.forEach(user => {
-      userMetrics.set(user.id, {
-        userId: user.id,
-        userName: user.name || 'Sin nombre',
-        userEmail: user.email || 'Sin email',
-        tasksAssigned: 0,
-        tasksApproved: 0,
-        tasksReturned: 0,
-        tasksDelivered: 0, // Tareas que han sido entregadas (completed o in_review)
-      });
-    });
-
-    // 3. Procesar subtareas (la unidad de trabajo principal)
-    for (const subtask of allSubtasks) {
-      if (subtask.assigned_to) {
-        const metrics = userMetrics.get(subtask.assigned_to);
-        if (metrics) {
-          metrics.tasksAssigned++;
-          if (subtask.status === 'approved') {
-            metrics.tasksApproved++;
-            metrics.tasksDelivered++; // Una tarea aprobada obviamente fue entregada primero
-          } else if (subtask.status === 'returned') {
-            metrics.tasksReturned++;
-            metrics.tasksDelivered++; // Una tarea devuelta también fue entregada
-          } else if (['completed', 'in_review'].includes(subtask.status)) {
-            metrics.tasksDelivered++;
-          }
-        }
-      }
-    }
-
-    // 4. Procesar tareas que no tienen subtareas (trabajo independiente)
-    for (const task of allTasks) {
-      if (!tasksWithSubtasks.has(task.id) && task.assigned_users && task.assigned_users.length > 0) {
-         for (const userId of task.assigned_users) {
-            const metrics = userMetrics.get(userId);
-            if (metrics) {
-                metrics.tasksAssigned++;
-                 if (task.status === 'approved') {
-                    metrics.tasksApproved++;
-                    metrics.tasksDelivered++;
-                } else if (task.status === 'returned') {
-                    metrics.tasksReturned++;
-                    metrics.tasksDelivered++;
-                } else if (['completed', 'in_review'].includes(task.status)) {
-                    metrics.tasksDelivered++;
-                }
-            }
-        }
-      }
-    }
-
-    // 5. Calcular las tasas y métricas finales
-    const finalMetrics: UserMetrics[] = [];
-    for (const metrics of userMetrics.values()) {
-        const { tasksDelivered, tasksReturned, tasksApproved } = metrics;
-        
-        // El total de trabajo revisado es la suma de lo aprobado y lo devuelto.
-        const totalReviewed = tasksApproved + tasksReturned;
-        
-        // La tasa de aprobación se calcula sobre el total revisado. Si no se ha revisado nada, es 100%.
-        const approvalRate = totalReviewed > 0 ? (tasksApproved / totalReviewed) * 100 : 100;
-        
-        // La tasa de retrabajo se calcula sobre el total entregado.
-        const reworkRate = tasksDelivered > 0 ? (tasksReturned / tasksDelivered) * 100 : 0;
-      
-        finalMetrics.push({
-            ...metrics,
-            tasksCompleted: tasksApproved, // Para la vista, las "completadas" son las que están aprobadas.
-            completionRate: metrics.tasksAssigned > 0 ? (tasksApproved / metrics.tasksAssigned) * 100 : 0,
-            approvalRate,
-            reworkRate,
-            // Métricas no relevantes para esta vista
-            averageCompletionTime: 0, efficiencyRatio: 0, onTimeDeliveryRate: 0, overdueTasks: 0, upcomingDeadlines: 0, averageTasksPerDay: 0, tasksCompletedThisWeek: 0, tasksCompletedThisMonth: 0,
-        });
-    }
-
-    // Devolver solo usuarios con tareas asignadas para no poblar la tabla con ceros.
-    return finalMetrics
-      .filter(m => m.tasksAssigned > 0)
-      .sort((a, b) => (b.tasksApproved / b.tasksAssigned) - (a.tasksApproved / a.tasksAssigned));
-
+    return (data as UserMetrics[]) || [];
   } catch (error) {
-    console.error("Error in getAllUsersMetrics:", error);
+    console.error('Error in getAllUsersMetrics:', error);
     return [];
   }
 }
@@ -419,94 +322,17 @@ export async function getAllUsersInfo() {
 }
 
 /**
- * Obtiene métricas de proyectos
+ * Obtiene métricas de proyectos.
+ * Usa agregación MongoDB en el backend para máximo rendimiento.
  */
 export async function getProjectMetrics(): Promise<ProjectMetrics[]> {
   try {
-    const { data: projects } = await supabase
-      .from('projects')
-      .select('*');
-
-    const projectMetrics: ProjectMetrics[] = [];
-
-    for (const project of projects || []) {
-      // Obtener tareas del proyecto
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select(`
-          *,
-          subtasks (*)
-        `)
-        .eq('project_id', project.id);
-
-      // Contar todas las tareas y subtareas
-      let totalTasks = tasks?.length || 0;
-      let completedTasks = tasks?.filter(t => ['approved'].includes(t.status)).length || 0;
-
-      // Agregar subtareas al conteo
-      tasks?.forEach(task => {
-        if (task.subtasks) {
-          totalTasks += task.subtasks.length;
-          completedTasks += task.subtasks.filter((s: any) => ['approved'].includes(s.status)).length;
-        }
-      });
-
-      const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-
-      // Obtener usuarios únicos del proyecto
-      const uniqueUsers = new Set<string>();
-      
-      // Usuarios desde tareas principales
-      tasks?.forEach(task => {
-        if (task.assigned_users && task.assigned_users.length > 0) {
-          task.assigned_users.forEach((userId: string) => {
-            uniqueUsers.add(userId);
-          });
-        }
-        // Usuarios desde subtareas
-        if (task.subtasks && task.subtasks.length > 0) {
-          task.subtasks.forEach((subtask: any) => {
-            if (subtask.assigned_to) {
-              uniqueUsers.add(subtask.assigned_to);
-            }
-          });
-        }
-      });
-
-      const teamSize = uniqueUsers.size;
-
-      // Calcular tiempo promedio (solo donde hay datos)
-      const { data: taskAssignments } = await supabase
-        .from('task_work_assignments')
-        .select('actual_duration')
-        .eq('project_id', project.id)
-        .not('actual_duration', 'is', null);
-
-      const averageTimePerTask = taskAssignments && taskAssignments.length > 0
-        ? taskAssignments.reduce((acc, a) => acc + (a.actual_duration || 0), 0) / taskAssignments.length
-        : 0;
-
-      // Verificar si está en tiempo
-      const daysUntilDeadline = project.deadline 
-        ? Math.ceil((new Date(project.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-        : 0;
-
-      const onSchedule = completionRate >= 75 && daysUntilDeadline > 0;
-
-      projectMetrics.push({
-        projectId: project.id,
-        projectName: project.name,
-        totalTasks,
-        completedTasks,
-        completionRate,
-        teamSize,
-        averageTimePerTask,
-        onSchedule,
-        daysUntilDeadline
-      });
+    const { data, error } = await supabase.rpc('get_project_metrics', {});
+    if (error) {
+      console.error('Error fetching project metrics:', error);
+      return [];
     }
-
-    return projectMetrics;
+    return (data as ProjectMetrics[]) || [];
   } catch (error) {
     console.error('Error getting project metrics:', error);
     return [];
@@ -804,29 +630,19 @@ export async function getUserUtilizationMetrics(userId: string, workingHoursPerD
 }
 
 /**
- * Obtiene métricas de utilización para todos los usuarios
+ * Obtiene métricas de utilización para todos los usuarios.
+ * Usa agregación MongoDB en el backend para máximo rendimiento.
  */
 export async function getAllUsersUtilizationMetrics(workingHoursPerDay: number = 8): Promise<UtilizationMetrics[]> {
   try {
-    // Obtener solo usuarios que están asignados a al menos un proyecto
-    const { data: users, error } = await supabase
-      .from('users')
-      .select('id, assigned_projects')
-      .not('assigned_projects', 'is', null);
-
-    if (error) throw error;
-
-    // Filtrar localmente por si la base de datos devuelve un array vacío en lugar de nulo
-    const activeUsers = users?.filter(u => u.assigned_projects && u.assigned_projects.length > 0) || [];
-    
-    if (!activeUsers.length) return [];
-
-    const utilizationMetrics = await Promise.all(
-      activeUsers.map(user => getUserUtilizationMetrics(user.id, workingHoursPerDay))
-    );
-
-    // No filtrar por días trabajados para incluir a todos los usuarios con asignaciones
-    return utilizationMetrics;
+    const { data, error } = await supabase.rpc('get_all_users_utilization_metrics', {
+      working_hours_per_day: workingHoursPerDay,
+    });
+    if (error) {
+      console.error('Error fetching utilization metrics:', error);
+      return [];
+    }
+    return (data as UtilizationMetrics[]) || [];
   } catch (error) {
     console.error('Error getting all users utilization metrics:', error);
     return [];
@@ -943,28 +759,40 @@ export function exportUtilizationToCSV(metrics: UtilizationMetrics[], filename: 
 }
 
 /**
- * Obtiene métricas por áreas de trabajo con enfoque en utilización y capacidad
+ * Obtiene métricas por áreas de trabajo con enfoque en utilización y capacidad.
+ * Usa agregaciones optimizadas: 1 llamada para métricas de usuarios + 1 para utilización + 2 para áreas.
  */
 export async function getAreaMetrics(workingHoursPerDay: number = 8): Promise<AreaMetrics[]> {
   try {
-    const { data: areas } = await supabase
-      .from('areas')
-      .select('*');
+    const [
+      { data: userMetricsData },
+      { data: utilizationData },
+      { data: areas },
+      { data: assignments }
+    ] = await Promise.all([
+      supabase.rpc('get_all_users_metrics', {}),
+      supabase.rpc('get_all_users_utilization_metrics', { working_hours_per_day: workingHoursPerDay }),
+      supabase.from('areas').select('id, name'),
+      supabase.from('area_user_assignments').select('area_id, user_id')
+    ]);
+
+    const userMetricsList = (userMetricsData as UserMetrics[]) || [];
+    const utilizationList = (utilizationData as UtilizationMetrics[]) || [];
+    const userMetricsMap = new Map(userMetricsList.map(m => [m.userId, m]));
+    const utilizationMap = new Map(utilizationList.map(m => [m.userId, m]));
+
+    const areaUserIds = new Map<string, string[]>();
+    for (const a of assignments || []) {
+      const list = areaUserIds.get(a.area_id) || [];
+      list.push(a.user_id);
+      areaUserIds.set(a.area_id, list);
+    }
 
     const areaMetrics: AreaMetrics[] = [];
 
     for (const area of areas || []) {
-      // Obtener usuarios asignados al área
-      const { data: areaUsers } = await supabase
-        .from('area_user_assignments')
-        .select(`
-          user_id,
-          users (id, name, email)
-        `)
-        .eq('area_id', area.id);
-
-      const totalUsers = areaUsers?.length || 0;
-      const userIds = areaUsers?.map(au => au.user_id) || [];
+      const userIds = areaUserIds.get(area.id) || [];
+      const totalUsers = userIds.length;
 
       if (userIds.length === 0) {
         areaMetrics.push({
@@ -992,80 +820,56 @@ export async function getAreaMetrics(workingHoursPerDay: number = 8): Promise<Ar
         continue;
       }
 
-      // Obtener métricas de rendimiento de todos los usuarios del área
-      const userMetrics = await Promise.all(
-        userIds.map(userId => getUserMetrics(userId))
-      );
+      const userMetrics = userIds.map(id => userMetricsMap.get(id)).filter(Boolean) as UserMetrics[];
+      const utilizationMetrics = userIds.map(id => utilizationMap.get(id)).filter(Boolean) as UtilizationMetrics[];
 
-      // Obtener métricas de utilización de todos los usuarios del área
-      const utilizationMetrics = await Promise.all(
-        userIds.map(userId => getUserUtilizationMetrics(userId, workingHoursPerDay))
-      );
-
-      // Filtrar usuarios activos (que tienen al menos una tarea)
       const activeUserMetrics = userMetrics.filter(m => m.tasksAssigned > 0);
       const activeUtilizationMetrics = utilizationMetrics.filter(m => m.workingDaysThisMonth > 0);
 
-      // Calcular métricas básicas del área
       const totalTasks = userMetrics.reduce((acc, m) => acc + m.tasksAssigned, 0);
       const completedTasks = userMetrics.reduce((acc, m) => acc + m.tasksCompleted, 0);
       const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-      
+
       const averageEfficiency = activeUserMetrics.length > 0
         ? activeUserMetrics.reduce((acc, m) => acc + m.efficiencyRatio, 0) / activeUserMetrics.length
         : 0;
 
       const averageTasksPerUser = userIds.length > 0 ? totalTasks / userIds.length : 0;
 
-      // Top performers (usuarios con mejor eficiencia)
       const topPerformers = activeUserMetrics
         .sort((a, b) => b.efficiencyRatio - a.efficiencyRatio)
         .slice(0, 3)
         .map(m => m.userName);
 
-      // NUEVAS MÉTRICAS DE UTILIZACIÓN Y CAPACIDAD
-      
-      // Utilización promedio del área
       const averageUtilizationRate = activeUtilizationMetrics.length > 0
         ? activeUtilizationMetrics.reduce((acc, m) => acc + m.utilizationRate, 0) / activeUtilizationMetrics.length
         : 0;
 
-      // Horas trabajadas y capacidad total
       const totalHoursWorked = utilizationMetrics.reduce((acc, m) => acc + m.totalHoursThisMonth, 0);
       const workingDaysThisMonth = Math.max(...utilizationMetrics.map(m => m.workingDaysThisMonth), 1);
       const totalCapacityHours = userIds.length * workingDaysThisMonth * workingHoursPerDay;
       const capacityUtilization = totalCapacityHours > 0 ? (totalHoursWorked / totalCapacityHours) * 100 : 0;
 
-      // Distribución de carga de trabajo (qué tan equilibrada está)
       const utilizationRates = activeUtilizationMetrics.map(m => m.utilizationRate);
       const avgUtilization = utilizationRates.reduce((acc, rate) => acc + rate, 0) / utilizationRates.length || 0;
       const variance = utilizationRates.reduce((acc, rate) => acc + Math.pow(rate - avgUtilization, 2), 0) / utilizationRates.length || 0;
       const standardDeviation = Math.sqrt(variance);
-      const workloadDistribution = Math.max(0, 100 - (standardDeviation / avgUtilization * 100)) || 0;
+      const workloadDistribution = Math.max(0, 100 - (standardDeviation / (avgUtilization || 1) * 100)) || 0;
 
-      // Indicadores de sobrecarga y subcarga
       const isOverloaded = capacityUtilization > 95;
       const isUnderloaded = capacityUtilization < 60;
 
-      // Determinar presión de carga de trabajo
       let workloadPressure: 'high' | 'medium' | 'low';
       if (capacityUtilization > 90) workloadPressure = 'high';
       else if (capacityUtilization > 70) workloadPressure = 'medium';
       else workloadPressure = 'low';
 
-      // Recomendación de acción
       let recommendedAction: 'hire' | 'redistribute' | 'optimal' | 'consider_reduction';
-      if (isOverloaded && workloadDistribution < 60) {
-        recommendedAction = 'hire'; // Sobrecarga general, necesita más personal
-      } else if (isOverloaded && workloadDistribution >= 60) {
-        recommendedAction = 'redistribute'; // Sobrecarga pero mal distribuida
-      } else if (isUnderloaded && capacityUtilization < 40) {
-        recommendedAction = 'consider_reduction'; // Muy poca utilización
-      } else {
-        recommendedAction = 'optimal'; // En rango aceptable
-      }
+      if (isOverloaded && workloadDistribution < 60) recommendedAction = 'hire';
+      else if (isOverloaded && workloadDistribution >= 60) recommendedAction = 'redistribute';
+      else if (isUnderloaded && capacityUtilization < 40) recommendedAction = 'consider_reduction';
+      else recommendedAction = 'optimal';
 
-      // Tendencia de utilización (simplificada, podrías mejorarla con datos históricos)
       let utilizationTrend: 'increasing' | 'stable' | 'decreasing';
       if (capacityUtilization > 85) utilizationTrend = 'increasing';
       else if (capacityUtilization < 50) utilizationTrend = 'decreasing';
@@ -1095,14 +899,11 @@ export async function getAreaMetrics(workingHoursPerDay: number = 8): Promise<Ar
       });
     }
 
-    // Ordenar por capacidad de utilización (más críticas primero)
     return areaMetrics.sort((a, b) => {
-      // Priorizar áreas sobrecargadas o con problemas
       if (a.isOverloaded && !b.isOverloaded) return -1;
       if (!a.isOverloaded && b.isOverloaded) return 1;
       if (a.isUnderloaded && !b.isUnderloaded) return 1;
       if (!a.isUnderloaded && b.isUnderloaded) return -1;
-      // Luego por utilización de capacidad
       return b.capacityUtilization - a.capacityUtilization;
     });
   } catch (error) {

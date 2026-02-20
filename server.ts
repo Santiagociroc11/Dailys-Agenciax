@@ -292,7 +292,11 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
     targetDate.setDate(targetDate.getDate() + days);
     const targetStr = targetDate.toISOString().split('T')[0];
 
+    const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+    const activeTaskIds = await Task.find({ project_id: { $in: activeProjectIds } }).select('id').lean().exec().then((r) => r.map((t: { id: string }) => t.id));
+
     const tasksDue = await Task.find({
+      project_id: { $in: activeProjectIds },
       status: { $nin: ['approved'] },
       deadline: { $gte: new Date(targetStr + 'T00:00:00'), $lt: new Date(targetStr + 'T23:59:59') },
     })
@@ -301,6 +305,7 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
       .exec();
 
     const subtasksDue = await Subtask.find({
+      task_id: { $in: activeTaskIds },
       status: { $nin: ['approved'] },
       deadline: { $gte: new Date(targetStr + 'T00:00:00'), $lt: new Date(targetStr + 'T23:59:59') },
     })
@@ -368,9 +373,13 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
       .lean()
       .exec();
 
+    const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+    const activeTaskIds = await Task.find({ project_id: { $in: activeProjectIds } }).select('id').lean().exec().then((r) => r.map((t: { id: string }) => t.id));
+
     let sentCount = 0;
     for (const user of usersWithTelegram) {
       const tasksDue = await Task.find({
+        project_id: { $in: activeProjectIds },
         assigned_users: user.id,
         status: { $nin: ['approved'] },
         deadline: { $gte: todayStart, $lte: todayEnd },
@@ -380,6 +389,7 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
         .exec();
 
       const subtasksDue = await Subtask.find({
+        task_id: { $in: activeTaskIds },
         assigned_to: user.id,
         status: { $nin: ['approved'] },
         deadline: { $gte: todayStart, $lte: todayEnd },
@@ -435,7 +445,7 @@ app.post('/api/telegram/budget-check', async (req, res) => {
       .exec();
 
     const pipeline = [
-      { $match: { project_id: { $ne: null }, actual_duration: { $exists: true, $gt: 0 } } },
+      { $match: { project_id: { $ne: null } as Record<string, unknown>, actual_duration: { $exists: true, $gt: 0 } } },
       { $group: { _id: '$project_id', total_minutes: { $sum: '$actual_duration' } } },
     ];
     const hoursResults = await TaskWorkAssignment.aggregate(pipeline).exec();

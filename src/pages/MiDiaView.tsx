@@ -55,12 +55,22 @@ export default function MiDiaView() {
       }
 
       const projectIds = [...new Set(rawAssignments.map((a) => a.project_id).filter(Boolean))] as string[];
-      const taskIds = rawAssignments.filter((a) => a.task_type === 'task').map((a) => a.task_id);
-      const subtaskIds = rawAssignments.filter((a) => a.task_type === 'subtask' && a.subtask_id).map((a) => a.subtask_id!);
+      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false).in('id', projectIds);
+      const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
+      const filteredAssignments = rawAssignments.filter((a) => a.project_id && activeProjectIds.has(a.project_id));
+      if (filteredAssignments.length === 0) {
+        setAssignments([]);
+        setLoading(false);
+        return;
+      }
+
+      const projectIdsFiltered = [...new Set(filteredAssignments.map((a) => a.project_id).filter(Boolean))] as string[];
+      const taskIds = filteredAssignments.filter((a) => a.task_type === 'task').map((a) => a.task_id);
+      const subtaskIds = filteredAssignments.filter((a) => a.task_type === 'subtask' && a.subtask_id).map((a) => a.subtask_id!);
 
       const [projectsRes, tasksRes, subtasksRes] = await Promise.all([
-        projectIds.length > 0
-          ? supabase.from('projects').select('id, name').in('id', projectIds)
+        projectIdsFiltered.length > 0
+          ? supabase.from('projects').select('id, name').in('id', projectIdsFiltered)
           : { data: [] },
         taskIds.length > 0
           ? supabase.from('tasks').select('id, title, deadline, estimated_duration, project_id').in('id', taskIds)
@@ -94,7 +104,7 @@ export default function MiDiaView() {
         })
       );
 
-      const enriched: TodayAssignment[] = rawAssignments.map((a) => {
+      const enriched: TodayAssignment[] = filteredAssignments.map((a) => {
         if (a.task_type === 'subtask' && a.subtask_id) {
           const sub = subtaskMap.get(a.subtask_id);
           return {

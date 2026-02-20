@@ -83,25 +83,27 @@ const Dashboard = () => {
   }
 
   async function getUserMetrics(userId: string): Promise<PerformanceMetrics> {
-    // Obtener tareas completadas (incluyendo aprobadas)
+    const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
+    const activeProjectIds = (activeProjects || []).map((p) => p.id);
+    if (activeProjectIds.length === 0) {
+      return calculateUserMetrics([], [], new Map(), new Map(), userId, 0);
+    }
     const { data: completedTasks } = await supabase
       .from('task_work_assignments')
       .select('*, tasks(deadline, status_history)')
       .eq('user_id', userId)
-      .in('status', ['completed', 'approved']);
+      .in('status', ['completed', 'approved'])
+      .in('project_id', activeProjectIds);
 
-    // Obtener todas las subtareas del usuario para un desglose de estado detallado
-    const { data: allUserSubtasks, error: subtasksError } = await supabase
-      .from('subtasks')
-      .select('status, created_at, tasks(deadline)')
-      .eq('assigned_to', userId);
+    const { data: activeTasks } = await supabase.from('tasks').select('id').in('project_id', activeProjectIds);
+    const activeTaskIds = (activeTasks || []).map((t) => t.id).filter(Boolean);
+    const { data: allUserSubtasks, error: subtasksError } = activeTaskIds.length > 0
+      ? await supabase.from('subtasks').select('status, created_at, tasks(deadline)').eq('assigned_to', userId).in('task_id', activeTaskIds)
+      : { data: [], error: null };
 
     if (subtasksError) {
       console.error('Error fetching user subtasks:', subtasksError);
     }
-    
-    // NOTA: Esta función ahora solo se usa para el dashboard individual.
-    // Los parámetros de equipo se calculan directamente en fetchTeamMetrics.
     const individualMetrics = calculateUserMetrics(completedTasks || [], allUserSubtasks || [], new Map(), new Map(), userId, 0);
     return individualMetrics;
   }
@@ -139,21 +141,30 @@ const Dashboard = () => {
     setLoading(true);
     try {
       await fetchBudgetAlerts();
-      // 1. Obtener todos los datos necesarios en paralelo
+      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
+      const activeProjectIds = (activeProjects || []).map((p) => p.id);
+      if (activeProjectIds.length === 0) {
+        setTeamMetrics([]);
+        setLoading(false);
+        return;
+      }
       const [
-        { data: users, error: usersError },
         { data: allTasks, error: tasksError },
-        { data: allSubtasks, error: subtasksError },
-        { data: allAssignments, error: assignmentsError }
+        { data: allAssignments, error: assignmentsError },
+        { data: users, error: usersError }
       ] = await Promise.all([
-        supabase.from('users').select('id, name, email'),
-        supabase.from('tasks').select('id, is_sequential, status, assigned_users, feedback'),
-        supabase.from('subtasks').select('id, task_id, assigned_to, status, sequence_order, feedback'),
-        supabase.from('task_work_assignments').select('user_id, date, status, updated_at')
+        supabase.from('tasks').select('id, is_sequential, status, assigned_users, feedback').in('project_id', activeProjectIds),
+        supabase.from('task_work_assignments').select('user_id, date, status, updated_at').in('project_id', activeProjectIds),
+        supabase.from('users').select('id, name, email')
       ]);
+      const taskIds = (allTasks || []).map((t) => t.id).filter(Boolean);
+      const { data: subtasksData } = taskIds.length > 0
+        ? await supabase.from('subtasks').select('id, task_id, assigned_to, status, sequence_order, feedback').in('task_id', taskIds)
+        : { data: [] };
+      const allSubtasks = subtasksData || [];
 
-      if (usersError || tasksError || subtasksError || assignmentsError) {
-        console.error("Error fetching batch data:", { usersError, tasksError, subtasksError, assignmentsError });
+      if (usersError || tasksError || assignmentsError) {
+        console.error("Error fetching batch data for metrics:", { usersError, tasksError, assignmentsError });
         setTeamMetrics([]);
         return;
       }
