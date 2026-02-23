@@ -790,19 +790,30 @@ function Tasks() {
         phase_id: taskToCreate.phase_id || null,
       };
 
-      const { data, error } = await supabase
+      const result = await supabase
         .from('tasks')
         .insert([taskData])
         .select();
+      const { data, error } = result;
+
+      console.log('[CREATE TASK] Respuesta del API:', { data, error, hasData: !!data, dataType: typeof data, isArray: Array.isArray(data) });
 
       if (error) {
-        console.error("Error detallado:", error);
-        throw error;
+        console.error("[CREATE TASK] Error:", error);
+        setError(`Error: ${error.message}`);
+        toast.error(`Error al crear tarea: ${error.message}`);
+        return;
       }
 
       // El API devuelve un documento cuando single:true, no un array
       const taskDoc = Array.isArray(data) ? data[0] : data;
-      if (taskDoc) {
+      if (!taskDoc) {
+        console.warn("[CREATE TASK] No se recibió taskDoc. data:", data);
+        setError("La tarea se creó pero la respuesta del servidor fue inesperada. Revisa la lista de tareas.");
+        toast.warning("Respuesta inesperada del servidor. Revisa si la tarea se creó.");
+        return;
+      }
+      {
         const taskId = taskDoc.id;
         if (user?.id) {
           await logAudit({
@@ -890,6 +901,7 @@ function Tasks() {
           subtasks: [],
           project_id: null,
         });
+        toast.success(newTask.subtasks.length > 0 ? 'Tarea y subtareas creadas' : 'Tarea creada');
 
         // Refrescar lista en segundo plano (no bloquear el cierre del modal)
         fetchTasks().then(() => fetchSubtasks()).catch((err) => console.error('Error refrescando lista:', err));

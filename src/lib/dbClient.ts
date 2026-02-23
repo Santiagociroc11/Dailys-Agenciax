@@ -265,19 +265,32 @@ function parseOrExpression(expr: string): Array<Record<string, unknown>> {
 }
 
 async function executeRequest<T>(request: QueryRequest): Promise<QueryResponse<T>> {
+  const url = `${API_BASE}/api/db/query`;
   try {
-    const res = await fetch(`${API_BASE}/api/db/query`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
-    const json = await res.json();
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      console.error('[dbClient] Error parseando JSON. Status:', res.status, 'URL:', url);
+      return { data: null, error: { message: 'La respuesta del servidor no es JSON válido' } };
+    }
     if (!res.ok) {
-      return { data: null, error: { message: json.error?.message ?? 'Error de red' } };
+      const msg = (json as { error?: { message?: string } })?.error?.message ?? 'Error de red';
+      console.error('[dbClient] Request falló:', res.status, msg);
+      return { data: null, error: { message: msg } };
+    }
+    if (request.operation === 'insert' && request.table === 'tasks') {
+      console.log('[dbClient] tasks insert response:', JSON.stringify(json).slice(0, 300));
     }
     return json as QueryResponse<T>;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error desconocido';
+    console.error('[dbClient] Fetch error:', message, 'URL:', url);
     return { data: null, error: { message } };
   }
 }
