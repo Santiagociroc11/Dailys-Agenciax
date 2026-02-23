@@ -1395,42 +1395,6 @@ function Management() {
     }
   }
 
-  // Función para desasignar una tarea o subtarea (quitar responsable)
-  async function handleUnassign(itemId: string, isSubtask: boolean) {
-    setIsUpdatingAssignee(true);
-    try {
-      if (isSubtask) {
-        const { error } = await supabase
-          .from('subtasks')
-          .update({ assigned_to: '' })
-          .eq('id', itemId);
-        if (error) throw error;
-        setSubtasks(prev => prev.map(s => s.id === itemId ? { ...s, assigned_to: '' } : s));
-        if (taskDetails && taskDetails.id === itemId) {
-          setTaskDetails({ ...taskDetails, assigned_to: '' });
-        }
-      } else {
-        const { error } = await supabase
-          .from('tasks')
-          .update({ assigned_users: [] })
-          .eq('id', itemId);
-        if (error) throw error;
-        setTasks(prev => prev.map(t => t.id === itemId ? { ...t, assigned_users: [] } : t));
-        if (taskDetails && taskDetails.id === itemId) {
-          setTaskDetails({ ...taskDetails, assigned_users: [] });
-        }
-      }
-      toast.success('Tarea desasignada correctamente');
-      setNewAssignee('');
-      await fetchData();
-    } catch (error) {
-      console.error('Error al desasignar:', error);
-      toast.error('Error al desasignar la tarea');
-    } finally {
-      setIsUpdatingAssignee(false);
-    }
-  }
-
   // Función para eliminar tareas o subtareas
   async function handleDeleteItem(itemId: string, isSubtask: boolean) {
     const itemType = isSubtask ? 'subtarea' : 'tarea';
@@ -4429,15 +4393,6 @@ function Management() {
                                 >
                                   {isUpdatingAssignee ? 'Guardando...' : 'Cambiar'}
                                 </button>
-                                <button
-                                  onClick={() => handleUnassign(taskDetails.id, true)}
-                                  disabled={isUpdatingAssignee}
-                                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                                  title="Quitar asignación"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  Desasignar
-                                </button>
                               </div>
                             </div>
                           </div>
@@ -4486,15 +4441,6 @@ function Management() {
                                   className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                                 >
                                   {isUpdatingAssignee ? 'Guardando...' : 'Cambiar'}
-                                </button>
-                                <button
-                                  onClick={() => handleUnassign(taskDetails.id, false)}
-                                  disabled={isUpdatingAssignee}
-                                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                                  title="Quitar asignación"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  Desasignar
                                 </button>
                               </div>
                             </div>
