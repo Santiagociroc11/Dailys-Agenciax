@@ -86,6 +86,8 @@ interface NewTask {
     assigned_to: string;
     start_date: string;
     deadline: string;
+    /** Nivel/orden secuencial (varias subtareas pueden tener el mismo número, ej. 1, 1, 2) */
+    sequence_order?: number;
   }[];
   project_id: string | null;
 }
@@ -746,13 +748,15 @@ function Tasks() {
             const assignedTo = subtask.assigned_to && subtask.assigned_to.trim() !== '' 
               ? subtask.assigned_to 
               : user.id;
-            
+            const order = subtask.sequence_order != null && subtask.sequence_order >= 1
+              ? subtask.sequence_order
+              : index + 1;
             return {
             task_id: taskId,
             title: subtask.title,
               description: subtask.description || '',
               estimated_duration: subtask.estimated_duration || 0,
-              sequence_order: index + 1,
+              sequence_order: order,
               assigned_to: assignedTo,
               status: 'pending',
               start_date: subtask.start_date || null,
@@ -3272,8 +3276,8 @@ function Tasks() {
                             className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200"
                           >
                           <div className="flex justify-between items-center mb-2">
-                              <div className="flex items-center">
-                                <div className="mr-2">
+                              <div className="flex items-center flex-wrap gap-3">
+                                <div className="flex items-center gap-2">
                                   <input
                                     type="number"
                                     value={index + 1}
@@ -3290,7 +3294,28 @@ function Tasks() {
                                     min="1"
                                     max={newTask.subtasks.length}
                                   />
+                                  <span className="text-sm text-gray-500">Pos.</span>
                                 </div>
+                                {newTask.is_sequential && (
+                                  <div className="flex items-center gap-2">
+                                    <label className="text-xs font-medium text-gray-700">Nivel:</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={subtask.sequence_order ?? index + 1}
+                                      onChange={(e) => {
+                                        const v = parseInt(e.target.value, 10);
+                                        if (Number.isNaN(v) || v < 1) return;
+                                        const updatedSubtasks = [...newTask.subtasks];
+                                        updatedSubtasks[index] = { ...subtask, sequence_order: v };
+                                        setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                      }}
+                                      className="w-14 p-1 border rounded text-center"
+                                      title="Varias subtareas pueden tener el mismo nivel (ej. dos con nivel 1)"
+                                    />
+                                    <span className="text-xs text-gray-500">(puede repetirse)</span>
+                                  </div>
+                                )}
                                 <h4 className="font-medium">Subtarea {index + 1}</h4>
                               </div>
                             <button
@@ -3460,6 +3485,7 @@ function Tasks() {
                                 assigned_to: '',
                                 start_date: newTask.start_date,
                                 deadline: newTask.deadline,
+                                sequence_order: newTask.subtasks.length + 1,
                               },
                             ],
                           });
@@ -3814,6 +3840,11 @@ function Tasks() {
                         {editMode ? (
                           <div className="bg-gray-50 p-4 rounded-md">
                             <p className="text-sm text-gray-600 mb-3">Puedes cambiar el orden y asignación de las subtareas:</p>
+                            {selectedTask.is_sequential && (
+                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3">
+                                Varias subtareas pueden tener el mismo nivel (ej. dos con nivel 1). El nivel indica el orden de ejecución; las del mismo nivel pueden hacerse en paralelo.
+                              </p>
+                            )}
                             <div className="space-y-4">
                               {subtasks[selectedTask.id]
                                 .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0))
