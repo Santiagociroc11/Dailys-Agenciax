@@ -1505,10 +1505,9 @@ export default function UserProjectView() {
             }
          }
 
-         // 2. Obtener las tareas principales de las subtareas (y mapa subtaskId -> parentTaskId para MongoDB)
-         const parentTaskIdBySubtaskId: Record<string, string> = {};
+         // 2. Obtener las tareas principales de las subtareas
          if (subtaskIdsToUpdate.length > 0) {
-            const { data: subtasks, error: subtasksError } = await supabase.from("subtasks").select("id, task_id").in("id", subtaskIdsToUpdate);
+            const { data: subtasks, error: subtasksError } = await supabase.from("subtasks").select("task_id").in("id", subtaskIdsToUpdate);
 
             if (subtasksError) {
                console.error("Error al obtener tareas principales:", subtasksError);
@@ -1516,7 +1515,6 @@ export default function UserProjectView() {
                subtasks.forEach((subtask) => {
                   if (subtask.task_id) {
                      parentTasksOfSubtasks.add(subtask.task_id);
-                     parentTaskIdBySubtaskId[subtask.id] = subtask.task_id;
                   }
                });
             }
@@ -1527,10 +1525,6 @@ export default function UserProjectView() {
             const task = taskItems.find((t) => t.id === taskId)!;
             const isSubtask = task.type === "subtask";
             const originalId = isSubtask ? task.id.replace("subtask-", "") : task.id;
-            const parentTaskId = isSubtask ? parentTaskIdBySubtaskId[originalId] : null;
-            if (isSubtask && !parentTaskId) {
-               console.warn("[SAVE] Subtarea sin tarea padre en mapa:", originalId, parentTaskIdBySubtaskId);
-            }
 
             // Obtener horarios programados para esta tarea
             const schedule = taskSchedules[taskId];
@@ -1553,7 +1547,7 @@ export default function UserProjectView() {
                user_id: user.id,
                date: today,
                task_type: isSubtask ? "subtask" : "task",
-               task_id: isSubtask ? (parentTaskId || originalId) : originalId,
+               task_id: isSubtask ? null : originalId,
                subtask_id: isSubtask ? originalId : null,
                project_id: task.project_id,
                estimated_duration: finalDuration,

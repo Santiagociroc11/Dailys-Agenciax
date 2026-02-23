@@ -23,8 +23,9 @@ const taskWorkAssignmentSchema = new mongoose.Schema(
   }
 );
 
+// Índice único que distingue tareas y subtareas (varias subtareas del mismo padre deben coexistir)
 taskWorkAssignmentSchema.index(
-  { user_id: 1, date: 1, task_id: 1, task_type: 1 },
+  { user_id: 1, date: 1, task_type: 1, task_id: 1, subtask_id: 1 },
   { unique: true }
 );
 taskWorkAssignmentSchema.index({ user_id: 1, date: 1 });
