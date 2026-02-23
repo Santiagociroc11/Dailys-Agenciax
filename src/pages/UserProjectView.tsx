@@ -4230,14 +4230,7 @@ export default function UserProjectView() {
                                                 <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
                                              </div>
                                           </div>
-                                          <div className="relative ml-2 flex flex-col gap-1">
-                                             <button
-                                                onClick={() => handleShowUnassignConfirmModal(task.id)}
-                                                className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 hover:text-gray-800 transition-colors flex items-center gap-1 border border-gray-300"
-                                                title="Quitar esta tarea del día (desasignar)"
-                                             >
-                                                🗑️ Desasignar del día
-                                             </button>
+                                          <div className="relative ml-2">
                                              <button
                                                 onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
                                                 className="text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 transition-colors flex items-center gap-1"
@@ -4273,7 +4266,7 @@ export default function UserProjectView() {
                                                       onClick={() => handleShowUnassignConfirmModal(task.id)}
                                                       className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 hover:text-gray-600 flex items-center gap-2"
                                                    >
-                                                      🗑️ Desasignar del día
+                                                      🗑️ Desasignar
                                                    </button>
                                                 </div>
                                              )}
@@ -4318,14 +4311,7 @@ export default function UserProjectView() {
                                                 <p className="text-xs text-gray-500">{Math.round((task.estimated_duration / 60) * 100) / 100}h</p>
                                              </div>
                                           </div>
-                                          <div className="relative ml-2 flex flex-col gap-1">
-                                             <button
-                                                onClick={() => handleShowUnassignConfirmModal(task.id)}
-                                                className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 hover:text-gray-800 transition-colors flex items-center gap-1 border border-gray-300"
-                                                title="Quitar esta tarea del día (desasignar)"
-                                             >
-                                                🗑️ Desasignar del día
-                                             </button>
+                                          <div className="relative ml-2">
                                              <button
                                                 onClick={() => setShowActionsDropdown(prev => ({ ...prev, [task.id]: !prev[task.id] }))}
                                                 className="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
@@ -4361,7 +4347,7 @@ export default function UserProjectView() {
                                                       onClick={() => handleShowUnassignConfirmModal(task.id)}
                                                       className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 hover:text-gray-600 flex items-center gap-2"
                                                    >
-                                                      🗑️ Desasignar del día
+                                                      🗑️ Desasignar
                                                    </button>
                                                 </div>
                                              )}
@@ -6953,7 +6939,7 @@ export default function UserProjectView() {
             <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
                <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                     <h3 className="text-lg font-medium">Desasignar del día</h3>
+                     <h3 className="text-lg font-medium">Confirmar Desasignación</h3>
                      <button onClick={() => setShowUnassignConfirmModal(false)} className="text-gray-400 hover:text-gray-500 focus:outline-none">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -6961,7 +6947,7 @@ export default function UserProjectView() {
                      </button>
                   </div>
                   <div className="px-6 py-4">
-                     <p className="mb-2 text-gray-700">¿Quitar esta tarea de la lista del día? Ya no estará asignada para hoy y volverá a pendiente.</p>
+                     <p className="mb-2 text-gray-700">¿Estás seguro de que quieres desasignar la siguiente tarea de tu lista de hoy?</p>
                      <div className="p-3 bg-gray-50 rounded-md">
                         <p className="font-semibold text-gray-800">{taskToUnassign.title}</p>
                         {taskToUnassign.type === "subtask" && <p className="text-xs text-gray-500">Subtarea de: {taskToUnassign.subtask_title}</p>}
@@ -6975,7 +6961,7 @@ export default function UserProjectView() {
                         Cancelar
                      </button>
                      <button onClick={handleConfirmUnassign} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md shadow-sm hover:bg-red-700 disabled:bg-gray-400">
-                        {saving ? "DESASIGNANDO..." : "Sí, quitar del día"}
+                        {saving ? "DESASIGNANDO..." : "Sí, desasignar"}
                      </button>
                   </div>
                </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2, Search } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2, Search, UserMinus } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
@@ -2056,6 +2056,68 @@ function Management() {
     }
   }
   
+  // Desasignar del día: quitar la tarea/subtarea de la columna "asignada" (el trabajador la había puesto para hoy)
+  const [isUnassigning, setIsUnassigning] = useState(false);
+  async function handleUnassignFromDay(itemId: string, isSubtask: boolean) {
+    const table = isSubtask ? 'subtasks' : 'tasks';
+    const item = isSubtask ? subtasks.find(s => s.id === itemId) : tasks.find(t => t.id === itemId);
+    if (!item) {
+      toast.error('No se encontró el elemento');
+      return;
+    }
+    const userId = isSubtask ? (item as Subtask).assigned_to : (item as Task).assigned_users?.[0];
+    if (!userId) {
+      toast.error('No hay usuario asignado para desasignar');
+      return;
+    }
+    setIsUnassigning(true);
+    try {
+      const taskType = isSubtask ? 'subtask' : 'task';
+      let assignmentQuery = supabase
+        .from('task_work_assignments')
+        .select('id, date')
+        .eq('task_type', taskType)
+        .eq('user_id', userId);
+      assignmentQuery = isSubtask ? assignmentQuery.eq('subtask_id', itemId) : assignmentQuery.eq('task_id', itemId);
+      const { data: assignments, error: fetchErr } = await assignmentQuery.order('date', { ascending: false }).limit(5);
+      if (fetchErr) throw fetchErr;
+      if (!assignments || assignments.length === 0) {
+        toast.error('No hay asignación del día para esta tarea');
+        setIsUnassigning(false);
+        return;
+      }
+      const toRemove = assignments[0];
+      const { error: delErr } = await supabase
+        .from('task_work_assignments')
+        .delete()
+        .eq('id', toRemove.id);
+      if (delErr) throw delErr;
+      const { error: updErr } = await supabase
+        .from(table)
+        .update({ status: 'pending' })
+        .eq('id', itemId);
+      if (updErr) {
+        console.warn('No se pudo revertir estado a pending:', updErr);
+      }
+      if (isSubtask) {
+        const { data: subData } = await supabase.from('subtasks').select('task_id').eq('id', itemId).single();
+        if (subData?.task_id) {
+          const { data: siblings } = await supabase.from('subtasks').select('status').eq('task_id', subData.task_id);
+          if (siblings && !siblings.some((s: { status: string }) => s.status !== 'pending')) {
+            await supabase.from('tasks').update({ status: 'pending' }).eq('id', subData.task_id);
+          }
+        }
+      }
+      toast.success('Tarea desasignada del día correctamente');
+      fetchData();
+    } catch (err) {
+      console.error('Error al desasignar del día:', err);
+      toast.error('Error al desasignar la tarea del día');
+    } finally {
+      setIsUnassigning(false);
+    }
+  }
+
   // Función para manejar el envío del formulario de aprobación
   function handleApprovalSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -2415,6 +2477,21 @@ function Management() {
                                     Aprobar
                                   </button>
                                 </div>
+                              ) : subtask.status === 'assigned' ? (
+                                <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
+                                  <button
+                                    className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded-md flex items-center hover:bg-amber-200 disabled:opacity-50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUnassignFromDay(subtask.id, true);
+                                    }}
+                                    disabled={isUnassigning}
+                                    title="Quitar del día asignado"
+                                  >
+                                    <UserMinus className="w-2.5 h-2.5 mr-1" />
+                                    Desasignar del día
+                                  </button>
+                                </div>
                               ) : null}
                             </div>
                           );
@@ -2561,6 +2638,21 @@ function Management() {
                                 >
                                   <CheckCircle className="w-2.5 h-2.5 mr-1" />
                                   Aprobar
+                                </button>
+                              </div>
+                            ) : task.status === 'assigned' ? (
+                              <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
+                                <button
+                                  className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded-md flex items-center hover:bg-amber-200 disabled:opacity-50"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleUnassignFromDay(task.id, false);
+                                  }}
+                                  disabled={isUnassigning}
+                                  title="Quitar del día asignado"
+                                >
+                                  <UserMinus className="w-2.5 h-2.5 mr-1" />
+                                  Desasignar del día
                                 </button>
                               </div>
                             ) : null}
@@ -4395,6 +4487,17 @@ function Management() {
                                 </button>
                               </div>
                             </div>
+                            {taskDetails.status === 'assigned' && (
+                              <button
+                                onClick={() => handleUnassignFromDay(taskDetails.id, true)}
+                                disabled={isUnassigning}
+                                className="w-full mt-2 px-3 py-2 text-xs font-medium rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200 flex items-center justify-center gap-2 disabled:opacity-50"
+                                title="Quitar del día asignado"
+                              >
+                                <UserMinus className="w-4 h-4" />
+                                Desasignar del día
+                              </button>
+                            )}
                           </div>
                         )}
                         {detailsItem?.type === 'task' && taskDetails.assigned_users && taskDetails.assigned_users.length > 0 && (
@@ -4444,6 +4547,17 @@ function Management() {
                                 </button>
                               </div>
                             </div>
+                            {taskDetails.status === 'assigned' && (
+                              <button
+                                onClick={() => handleUnassignFromDay(taskDetails.id, false)}
+                                disabled={isUnassigning}
+                                className="w-full mt-2 px-3 py-2 text-xs font-medium rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200 flex items-center justify-center gap-2 disabled:opacity-50"
+                                title="Quitar del día asignado"
+                              >
+                                <UserMinus className="w-4 h-4" />
+                                Desasignar del día
+                              </button>
+                            )}
                           </div>
                         )}
                          <div className="flex justify-between text-sm">
