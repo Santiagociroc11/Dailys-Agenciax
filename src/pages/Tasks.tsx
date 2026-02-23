@@ -3021,12 +3021,13 @@ function Tasks() {
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center p-6 border-b">
+            <div className="flex justify-between items-center p-6 border-b shrink-0">
               <h2 className="text-xl font-semibold">Crear Nueva Tarea</h2>
               <button
                 onClick={() => {
                   setShowModal(false);
                   setProjectSelected(false);
+                  setError('');
                   setNewTask({
                     title: '',
                     description: '',
@@ -3046,12 +3047,39 @@ function Tasks() {
                 <X className="w-6 h-6" />
               </button>
             </div>
-            <form onSubmit={handleCreateTask} className="p-6 overflow-y-auto">
-              {error && (
-                <div className="mb-4 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded">
-                  {error}
-                </div>
-              )}
+            {error && (
+              <div className="mx-6 mt-4 p-4 bg-red-50 border border-red-300 text-red-700 rounded-lg shrink-0">
+                <p className="font-medium">Error al crear</p>
+                <p className="text-sm mt-1">{error}</p>
+                <p className="text-xs mt-2 text-red-600">No presiones &quot;Crear Tarea&quot; de nuevo o crearás duplicados. Usa el botón de abajo. Abre la consola (F12) para ver el error técnico.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('');
+                    setShowModal(false);
+                    setProjectSelected(false);
+                    setNewTask({
+                      title: '',
+                      description: '',
+                      start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      estimated_duration: 30,
+                      priority: 'medium',
+                      is_sequential: false,
+                      phase_id: null,
+                      assigned_to: [],
+                      subtasks: [],
+                      project_id: null,
+                    });
+                    fetchTasks().then(() => fetchSubtasks()).catch(() => {});
+                  }}
+                  className="mt-3 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-md text-sm font-medium"
+                >
+                  Cerrar y revisar lista
+                </button>
+              </div>
+            )}
+            <form onSubmit={handleCreateTask} className="p-6 overflow-y-auto flex-1">
               {(newTask.title?.trim() || newTask.subtasks.length > 0) && (
                 <div className="mb-4 flex items-center justify-between gap-2 bg-sky-50 border border-sky-200 text-sky-800 px-4 py-2 rounded text-sm">
                   <span>Borrador guardado automáticamente en este navegador.</span>
