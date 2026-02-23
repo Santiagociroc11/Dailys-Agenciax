@@ -1,5 +1,5 @@
 import React from 'react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
@@ -86,8 +86,6 @@ interface NewTask {
     assigned_to: string;
     start_date: string;
     deadline: string;
-    /** Nivel/orden secuencial (varias subtareas pueden tener el mismo número, ej. 1, 1, 2) */
-    sequence_order?: number;
   }[];
   project_id: string | null;
 }
@@ -190,12 +188,7 @@ function Tasks() {
   const [csvImportData, setCsvImportData] = useState<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]>([]);
   const [csvImportProject, setCsvImportProject] = useState<string | null>(null);
   const [importingCsv, setImportingCsv] = useState(false);
-  const [creatingTask, setCreatingTask] = useState(false);
   const csvInputRef = React.useRef<HTMLInputElement>(null);
-
-  const TASK_DRAFT_KEY = 'dailys_newTask_draft';
-  const draftSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [quickTask, setQuickTask] = useState({
     title: '',
     project_id: '' as string | null,
@@ -224,69 +217,6 @@ function Tasks() {
     fetchTasks();
     fetchProjects();
   }, []);
-
-  // Autoguardado local del borrador de nueva tarea (evita perder muchas subtareas por un error)
-  useEffect(() => {
-    if (!showModal) return;
-    const hasContent = (newTask.title && newTask.title.trim()) || newTask.subtasks.length > 0;
-    if (!hasContent) {
-      try {
-        localStorage.removeItem(TASK_DRAFT_KEY);
-      } catch (_) { }
-      return;
-    }
-    if (draftSaveTimeoutRef.current) clearTimeout(draftSaveTimeoutRef.current);
-    draftSaveTimeoutRef.current = setTimeout(() => {
-      try {
-        const draft = {
-          newTask,
-          projectSelected,
-          selectedProjectDates,
-          savedAt: Date.now(),
-        };
-        localStorage.setItem(TASK_DRAFT_KEY, JSON.stringify(draft));
-      } catch (_) { }
-      draftSaveTimeoutRef.current = null;
-    }, 800);
-    return () => {
-      if (draftSaveTimeoutRef.current) {
-        clearTimeout(draftSaveTimeoutRef.current);
-        draftSaveTimeoutRef.current = null;
-      }
-    };
-  }, [showModal, newTask, projectSelected, selectedProjectDates]);
-
-  // Restaurar borrador al abrir el modal de crear tarea (solo si hay borrador y el formulario está vacío)
-  useEffect(() => {
-    if (!showModal) return;
-    const formEmpty = !(newTask.title?.trim()) && newTask.subtasks.length === 0;
-    if (!formEmpty) return;
-    try {
-      const raw = localStorage.getItem(TASK_DRAFT_KEY);
-      if (!raw) return;
-      const d = JSON.parse(raw) as { newTask?: NewTask; projectSelected?: boolean; selectedProjectDates?: { start_date: string; deadline: string } };
-      if (!d.newTask) return;
-      const hasContent = (d.newTask.title && String(d.newTask.title).trim()) || (d.newTask.subtasks?.length ?? 0) > 0;
-      if (!hasContent) return;
-      setNewTask({
-        ...d.newTask,
-        title: d.newTask.title ?? '',
-        description: d.newTask.description ?? '',
-        start_date: d.newTask.start_date ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        deadline: d.newTask.deadline ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        estimated_duration: d.newTask.estimated_duration ?? 30,
-        priority: (d.newTask.priority as 'low' | 'medium' | 'high') ?? 'medium',
-        is_sequential: d.newTask.is_sequential ?? false,
-        phase_id: d.newTask.phase_id ?? null,
-        assigned_to: Array.isArray(d.newTask.assigned_to) ? d.newTask.assigned_to : [],
-        subtasks: Array.isArray(d.newTask.subtasks) ? d.newTask.subtasks : [],
-        project_id: d.newTask.project_id ?? null,
-      });
-      setProjectSelected(d.projectSelected ?? !!d.newTask.project_id);
-      if (d.selectedProjectDates) setSelectedProjectDates(d.selectedProjectDates);
-      toast.info('Borrador restaurado. Puedes seguir editando o descartar para empezar de cero.');
-    } catch (_) { }
-  }, [showModal]);
 
   useEffect(() => {
     async function loadTaskTemplates() {
@@ -471,7 +401,7 @@ function Tasks() {
   async function fetchTasks() {
     try {
       setPageLoading(true);
-
+      
       // Primero obtener el total de tareas para la paginación - excluyendo proyectos archivados
       let countQuery = supabase
         .from('tasks')
@@ -480,7 +410,7 @@ function Tasks() {
           projects!inner(id, is_archived)
         `, { count: 'exact', head: true })
         .eq('projects.is_archived', false);
-
+      
       if (selectedProject) {
         countQuery = countQuery.eq('project_id', selectedProject);
       }
@@ -493,9 +423,9 @@ function Tasks() {
       }
 
       const { count, error: countError } = await countQuery;
-
+      
       if (countError) throw countError;
-
+      
       // Para el conteo preciso con filtros de pestañas, necesitamos obtener todas las tareas
       // y luego filtrarlas, ya que el filtro de pestañas depende de las subtareas
       let allTasksQuery = supabase
@@ -506,7 +436,7 @@ function Tasks() {
         `)
         .eq('projects.is_archived', false)
         .order('created_at', { ascending: false });
-
+      
       if (selectedProject) {
         allTasksQuery = allTasksQuery.eq('project_id', selectedProject);
       }
@@ -520,7 +450,7 @@ function Tasks() {
 
       const { data: allTasks, error: allTasksError } = await allTasksQuery;
       if (allTasksError) throw allTasksError;
-
+      
       // Aplicar filtro de pestañas para el conteo
       let filteredForCount = allTasks || [];
       if (activeTab === 'approved') {
@@ -528,14 +458,14 @@ function Tasks() {
       } else if (activeTab === 'active') {
         filteredForCount = filteredForCount.filter(task => !isTaskApproved(task.id));
       }
-
+      
       setTotalTasks(filteredForCount.length);
 
       // Aplicar paginación a las tareas ya filtradas
       const from = (currentPage - 1) * tasksPerPage;
       const to = from + tasksPerPage;
       const paginatedTasks = filteredForCount.slice(from, to);
-
+      
       setTasks(paginatedTasks);
     } catch (error) {
       console.error('Error al cargar las tareas:', error);
@@ -545,61 +475,61 @@ function Tasks() {
     }
   }
 
-  async function fetchSubtasks() {
-    try {
-      console.log('Fetching subtasks...');
-      const { data: subtasksData, error: subtasksError } = await supabase
-        .from('subtasks')
-        .select(`
+    async function fetchSubtasks() {
+      try {
+        console.log('Fetching subtasks...');
+        const { data: subtasksData, error: subtasksError } = await supabase
+          .from('subtasks')
+          .select(`
             *,
             tasks!inner(
               id, project_id,
               projects!inner(id, is_archived)
             )
           `)
-        .eq('tasks.projects.is_archived', false);
+          .eq('tasks.projects.is_archived', false);
 
-      if (subtasksError) {
-        console.error('Error fetching subtasks:', subtasksError);
-        throw subtasksError;
-      }
-
-      console.log('Subtasks data received:', subtasksData);
-      const groupedSubtasks = (subtasksData || []).reduce((acc: Record<string, Subtask[]>, raw: Record<string, unknown>) => {
-        // Normalizar subtareas migradas: MongoDB usa _id, el schema usa id; task_id puede venir de tasks (join)
-        const taskId = raw.task_id as string | undefined;
-        if (!taskId) {
-          console.warn('Subtask sin task_id, omitiendo:', raw._id ?? raw.id);
-          return acc;
+        if (subtasksError) {
+          console.error('Error fetching subtasks:', subtasksError);
+          throw subtasksError;
         }
-        const subtask: Subtask = {
-          id: (raw.id as string) ?? String(raw._id),
-          task_id: taskId,
-          title: (raw.title as string) ?? '',
-          description: (raw.description as string) ?? null,
-          estimated_duration: (raw.estimated_duration as number) ?? 0,
-          sequence_order: (raw.sequence_order as number) ?? null,
-          assigned_to: (raw.assigned_to as string) ?? '',
-          status: ((raw.status as string) ?? 'pending') as Subtask['status'],
-          start_date: (raw.start_date as string) ?? null,
-          deadline: (raw.deadline as string) ?? null,
-          checklist: (raw.checklist as ChecklistItem[]) || [],
-          comments: (raw.comments as { id: string; user_id: string; content: string; created_at: string }[]) || [],
-        };
-        acc[taskId] = [...(acc[taskId] || []), subtask];
-        return acc;
-      }, {} as Record<string, Subtask[]>);
-      console.log('Grouped subtasks:', groupedSubtasks);
-      setSubtasks(groupedSubtasks);
-    } catch (error) {
-      console.error('Error al cargar subtareas:', error);
+
+        console.log('Subtasks data received:', subtasksData);
+      const groupedSubtasks = (subtasksData || []).reduce((acc: Record<string, Subtask[]>, raw: Record<string, unknown>) => {
+          // Normalizar subtareas migradas: MongoDB usa _id, el schema usa id; task_id puede venir de tasks (join)
+          const taskId = raw.task_id as string | undefined;
+          if (!taskId) {
+            console.warn('Subtask sin task_id, omitiendo:', raw._id ?? raw.id);
+            return acc;
+          }
+          const subtask: Subtask = {
+            id: (raw.id as string) ?? String(raw._id),
+            task_id: taskId,
+            title: (raw.title as string) ?? '',
+            description: (raw.description as string) ?? null,
+            estimated_duration: (raw.estimated_duration as number) ?? 0,
+            sequence_order: (raw.sequence_order as number) ?? null,
+            assigned_to: (raw.assigned_to as string) ?? '',
+            status: ((raw.status as string) ?? 'pending') as Subtask['status'],
+            start_date: (raw.start_date as string) ?? null,
+            deadline: (raw.deadline as string) ?? null,
+            checklist: (raw.checklist as ChecklistItem[]) || [],
+            comments: (raw.comments as { id: string; user_id: string; content: string; created_at: string }[]) || [],
+          };
+          acc[taskId] = [...(acc[taskId] || []), subtask];
+          return acc;
+        }, {} as Record<string, Subtask[]>);
+        console.log('Grouped subtasks:', groupedSubtasks);
+        setSubtasks(groupedSubtasks);
+      } catch (error) {
+        console.error('Error al cargar subtareas:', error);
+      }
     }
-  }
 
   useEffect(() => {
     if (newTask.subtasks.length > 0) {
       const totalDuration = newTask.subtasks.reduce(
-        (sum, subtask) => sum + (subtask.estimated_duration || 0),
+        (sum, subtask) => sum + (subtask.estimated_duration || 0), 
         0
       );
       setNewTask(prev => ({
@@ -617,7 +547,7 @@ function Tasks() {
           .map(subtask => subtask.assigned_to)
           .filter(userId => userId)
       )];
-
+      
       setNewTask(prev => ({
         ...prev,
         assigned_to: assignedUsers
@@ -632,13 +562,13 @@ function Tasks() {
   // Función para obtener los usuarios disponibles para un proyecto específico
   function getAvailableUsers(projectId: string | null): User[] {
     if (!projectId) return users;
-
+    
     // El creador del proyecto
     const projectCreatorId = projects.find(p => p.id === projectId)?.created_by;
-
+    
     // Usuarios que tienen asignado este proyecto en su array de assigned_projects
-    return users.filter(u =>
-      u.assigned_projects?.includes(projectId) ||
+    return users.filter(u => 
+      u.assigned_projects?.includes(projectId) || 
       u.id === projectCreatorId
     );
   }
@@ -714,7 +644,6 @@ function Tasks() {
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
-    if (creatingTask) return;
     setError('');
 
     // Validar que se haya seleccionado un proyecto
@@ -729,10 +658,9 @@ function Tasks() {
       return;
     }
 
-    setCreatingTask(true);
     try {
       let taskToCreate = { ...newTask };
-
+      
       // --- Determine final assigned users based on subtasks presence --- 
       let finalAssignedUsers: string[];
 
@@ -744,7 +672,7 @@ function Tasks() {
             .filter(userId => userId && userId.trim() !== '')
         )];
         finalAssignedUsers = assignedSubtaskUsers.length > 0 ? assignedSubtaskUsers : [user.id]; // Default to creator if no one assigned in subtasks
-
+        
         // Adjust main task start/end dates based on subtasks
         const earliestStart = taskToCreate.subtasks.reduce(
           (earliest, subtask) => {
@@ -753,7 +681,7 @@ function Tasks() {
           },
           taskToCreate.subtasks[0]?.start_date || taskToCreate.start_date
         );
-
+        
         const latestDeadline = taskToCreate.subtasks.reduce(
           (latest, subtask) => {
             if (!subtask.deadline) return latest;
@@ -761,7 +689,7 @@ function Tasks() {
           },
           taskToCreate.subtasks[0]?.deadline || taskToCreate.deadline
         );
-
+        
         // Update taskToCreate with adjusted dates
         taskToCreate = {
           ...taskToCreate,
@@ -790,16 +718,18 @@ function Tasks() {
         phase_id: taskToCreate.phase_id || null,
       };
 
+      console.log("Enviando datos de tarea:", taskData);
+
       const { data, error } = await supabase
         .from('tasks')
         .insert([taskData])
         .select();
-
+      
       if (error) {
         console.error("Error detallado:", error);
         throw error;
       }
-
+      
       if (data && data[0]) {
         const taskId = data[0].id;
         if (user?.id) {
@@ -813,33 +743,25 @@ function Tasks() {
         }
         if (newTask.subtasks.length > 0) {
           const subtasksToInsert = newTask.subtasks.map((subtask, index) => {
-            const assignedTo = subtask.assigned_to && subtask.assigned_to.trim() !== ''
-              ? subtask.assigned_to
+            const assignedTo = subtask.assigned_to && subtask.assigned_to.trim() !== '' 
+              ? subtask.assigned_to 
               : user.id;
-            const order = (subtask.sequence_order != null && subtask.sequence_order >= 1)
-              ? subtask.sequence_order
-              : index + 1;
-            // start_date y deadline son NOT NULL en la tabla; usar fechas de la tarea si la subtarea no tiene
-            const startDate = subtask.start_date?.trim() ? subtask.start_date : taskToCreate.start_date;
-            const endDate = subtask.deadline?.trim() ? subtask.deadline : taskToCreate.deadline;
-
-            // Log para debug de secuencia
-            console.log(`Preparando subtarea ${index}: ${subtask.title}, Orden final: ${order}`);
-
+            
             return {
-              task_id: taskId,
-              title: subtask.title.trim(),
+            task_id: taskId,
+            title: subtask.title,
               description: subtask.description || '',
               estimated_duration: subtask.estimated_duration || 0,
-              sequence_order: order,
+              sequence_order: index + 1,
               assigned_to: assignedTo,
               status: 'pending',
-              start_date: startDate,
-              deadline: endDate
+              start_date: subtask.start_date || null,
+              deadline: subtask.deadline || null
             };
           });
 
-          console.log("Insertando subtareas:", subtasksToInsert);
+          console.log("Enviando datos de subtareas:", subtasksToInsert);
+
           const { data: createdSubtasks, error: subtaskError } = await supabase
             .from('subtasks')
             .insert(subtasksToInsert)
@@ -847,8 +769,7 @@ function Tasks() {
 
           if (subtaskError) {
             console.error("Error detallado de subtareas:", subtaskError);
-            toast.error(`La tarea se creó pero hubo un error con las subtareas: ${subtaskError.message}`);
-            // No lanzamos error aquí para permitir que la tarea principal se mantenga creada
+            throw subtaskError;
           }
           if (user?.id && createdSubtasks) {
             for (const st of createdSubtasks as { id: string; title: string }[]) {
@@ -863,34 +784,13 @@ function Tasks() {
           }
         }
 
-        // Cerrar modal y resetear formulario de inmediato (no depender del refresco de lista)
-        setTasks([...(data || []), ...tasks]);
-        try {
-          localStorage.removeItem(TASK_DRAFT_KEY);
-        } catch (_) { }
-        setShowModal(false);
-        setProjectSelected(false);
-        setNewTask({
-          title: '',
-          description: '',
-          start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-          deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-          estimated_duration: 30,
-          priority: 'medium',
-          is_sequential: false,
-          phase_id: null,
-          assigned_to: [],
-          subtasks: [],
-          project_id: null,
-        });
-
-        // Refrescar lista en segundo plano (no bloquear el cierre del modal)
-        fetchTasks().then(() => fetchSubtasks()).catch((err) => console.error('Error refrescando lista:', err));
-
+        await fetchTasks();
+        await fetchSubtasks();
+        
         // 🔔 Notificar a usuarios sobre tareas/subtareas disponibles inmediatamente
         try {
           const createdTask = data[0];
-
+          
           // Obtener nombre del proyecto
           let projectName = "Proyecto sin nombre";
           if (createdTask.project_id) {
@@ -900,12 +800,12 @@ function Tasks() {
               .eq('id', createdTask.project_id)
               .eq('is_archived', false)
               .single();
-
+              
             if (projectData) {
               projectName = projectData.name;
             }
           }
-
+          
           if (newTask.subtasks.length > 0) {
             // Para tareas con subtareas, notificar usuarios de subtareas disponibles
             const { data: createdSubtasks } = await supabase
@@ -913,11 +813,11 @@ function Tasks() {
               .select('id, title, assigned_to, sequence_order')
               .eq('task_id', taskId)
               .order('sequence_order');
-
+              
             if (createdSubtasks) {
               // Determinar qué subtareas están disponibles inmediatamente
               let availableSubtasks = [];
-
+              
               if (createdTask.is_sequential) {
                 // Para tareas secuenciales, solo la primera (sequence_order = 1)
                 availableSubtasks = createdSubtasks.filter(st => st.sequence_order === 1);
@@ -925,7 +825,7 @@ function Tasks() {
                 // Para tareas paralelas, todas las subtareas están disponibles
                 availableSubtasks = createdSubtasks;
               }
-
+              
               // Notificar a cada usuario de subtareas disponibles
               for (const subtask of availableSubtasks) {
                 if (subtask.assigned_to) {
@@ -979,12 +879,25 @@ function Tasks() {
         } catch (notificationError) {
           console.error('🚨 [NOTIFICATION] Error preparando notificaciones de tarea creada:', notificationError);
         }
+
+      setTasks([...(data || []), ...tasks]);
+      setShowModal(false);
+      setNewTask({
+        title: '',
+        description: '',
+        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        estimated_duration: 30,
+        priority: 'medium',
+        is_sequential: false,
+          assigned_to: [],
+        subtasks: [],
+          project_id: null,
+      });
       }
     } catch (error) {
       console.error('Error al crear la tarea:', error);
       setError('Error al crear la tarea. Por favor, inténtalo de nuevo.');
-    } finally {
-      setCreatingTask(false);
     }
   }
 
@@ -1150,20 +1063,20 @@ function Tasks() {
 
   async function handleUpdateTask() {
     if (!selectedTask || !editedTask) return;
-
+    
     try {
       // 🔔 Verificar cambios en asignación antes de actualizar
       const previousAssignedUsers = selectedTask.assigned_users || [];
       const newAssignedUsers = editedTask.assigned_users || [];
       const previousIsSequential = selectedTask.is_sequential;
       const newIsSequential = editedTask.is_sequential;
-
+      
       // Detectar usuarios recién asignados
       const newlyAssignedUsers = newAssignedUsers.filter(userId => !previousAssignedUsers.includes(userId));
-
+      
       // Detectar cambio de secuencial a paralelo
       const sequentialToParallel = previousIsSequential && !newIsSequential;
-
+      
       const { error } = await supabase
         .from('tasks')
         .update({
@@ -1179,12 +1092,12 @@ function Tasks() {
           assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
-
+      
       if (error) {
         console.error("Error al actualizar la tarea:", error);
         throw error;
       }
-
+      
       // 🔔 Notificar cambios después de actualización exitosa
       try {
         // Obtener nombre del proyecto
@@ -1196,19 +1109,19 @@ function Tasks() {
             .eq('id', editedTask.project_id)
             .eq('is_archived', false)
             .single();
-
+            
           if (projectData) {
             projectName = projectData.name;
           }
         }
-
+        
         // Notificar usuarios recién asignados (solo si tarea está pendiente)
         if (newlyAssignedUsers.length > 0 && selectedTask.status === 'pending') {
           const { data: subtasksData } = await supabase
             .from('subtasks')
             .select('*')
             .eq('task_id', selectedTask.id);
-
+            
           if (!subtasksData || subtasksData.length === 0) {
             // Tarea sin subtareas - notificar directamente
             fetch('/api/telegram/task-available', {
@@ -1230,7 +1143,7 @@ function Tasks() {
             });
           }
         }
-
+        
         // Notificar cambio de secuencial a paralelo
         if (sequentialToParallel && selectedTask.status === 'pending') {
           const { data: pendingSubtasks } = await supabase
@@ -1239,7 +1152,7 @@ function Tasks() {
             .eq('task_id', selectedTask.id)
             .eq('status', 'pending')
             .gt('sequence_order', 1); // Subtareas que no están en el primer nivel
-
+            
           if (pendingSubtasks && pendingSubtasks.length > 0) {
             for (const subtask of pendingSubtasks) {
               if (subtask.assigned_to) {
@@ -1268,7 +1181,7 @@ function Tasks() {
       } catch (notificationError) {
         console.error('🚨 [NOTIFICATION] Error en notificaciones de actualización de tarea:', notificationError);
       }
-
+      
       await fetchTasks();
       setShowTaskDetailModal(false);
     } catch (error) {
@@ -1276,23 +1189,23 @@ function Tasks() {
       setError('Error al actualizar la tarea. Por favor, inténtalo de nuevo.');
     }
   }
-
+  
   async function handleUpdateSubtask() {
     if (!selectedSubtask || !editedSubtask) return;
-
+    
     try {
       // 🔔 Verificar cambios antes de actualizar
       const previousAssignedTo = selectedSubtask.assigned_to;
       const newAssignedTo = editedSubtask.assigned_to;
       const previousSequenceOrder = selectedSubtask.sequence_order;
       const newSequenceOrder = editedSubtask.sequence_order;
-
+      
       // Detectar cambio de usuario asignado
       const assignmentChanged = previousAssignedTo !== newAssignedTo;
-
+      
       // Detectar cambio de orden de secuencia
       const sequenceOrderChanged = previousSequenceOrder !== newSequenceOrder;
-
+      
       const { error } = await supabase
         .from('subtasks')
         .update({
@@ -1311,24 +1224,24 @@ function Tasks() {
         console.error("Error al actualizar la subtarea:", error);
         throw error;
       }
-
+      
       // 🔔 Notificar cambios después de actualización exitosa
       try {
         // Obtener información de la tarea padre y proyecto
         let projectName = "Proyecto sin nombre";
         let parentTaskTitle = "Tarea sin nombre";
         let isTaskSequential = false;
-
+        
         const { data: parentTask } = await supabase
           .from('tasks')
           .select('title, project_id, is_sequential')
           .eq('id', selectedSubtask.task_id)
           .single();
-
+          
         if (parentTask) {
           parentTaskTitle = parentTask.title;
           isTaskSequential = parentTask.is_sequential;
-
+          
           if (parentTask.project_id) {
             const { data: projectData } = await supabase
               .from('projects')
@@ -1336,18 +1249,18 @@ function Tasks() {
               .eq('id', parentTask.project_id)
               .eq('is_archived', false)
               .single();
-
+              
             if (projectData) {
               projectName = projectData.name;
             }
           }
         }
-
+        
         // Notificar nuevo usuario asignado (solo si subtarea está pendiente)
         if (assignmentChanged && newAssignedTo && selectedSubtask.status === 'pending') {
           // Verificar si la subtarea está disponible según dependencias secuenciales
           let isAvailable = true;
-
+          
           if (isTaskSequential && newSequenceOrder && newSequenceOrder > 1) {
             // Verificar que todos los niveles anteriores estén aprobados
             const { data: previousSubtasks } = await supabase
@@ -1355,7 +1268,7 @@ function Tasks() {
               .select('status, sequence_order')
               .eq('task_id', selectedSubtask.task_id)
               .lt('sequence_order', newSequenceOrder);
-
+              
             if (previousSubtasks) {
               const groupedByLevel = previousSubtasks.reduce((acc, st) => {
                 const level = st.sequence_order || 0;
@@ -1363,7 +1276,7 @@ function Tasks() {
                 acc[level].push(st);
                 return acc;
               }, {} as Record<number, any[]>);
-
+              
               // Verificar que todos los niveles anteriores estén completamente aprobados
               for (const level in groupedByLevel) {
                 if (parseInt(level) < newSequenceOrder) {
@@ -1376,7 +1289,7 @@ function Tasks() {
               }
             }
           }
-
+          
           if (isAvailable) {
             fetch('/api/telegram/task-available', {
               method: 'POST',
@@ -1398,7 +1311,7 @@ function Tasks() {
             });
           }
         }
-
+        
         // Notificar cambios de orden de secuencia que pueden liberar dependencias
         if (sequenceOrderChanged && isTaskSequential && selectedSubtask.status === 'pending') {
           // Si se movió a un nivel anterior y está disponible, notificar
@@ -1426,7 +1339,7 @@ function Tasks() {
       } catch (notificationError) {
         console.error('🚨 [NOTIFICATION] Error en notificaciones de actualización de subtarea:', notificationError);
       }
-
+      
       await fetchSubtasks();
       setShowSubtaskDetailModal(false);
     } catch (error) {
@@ -1434,7 +1347,7 @@ function Tasks() {
       setError('Error al actualizar la subtarea. Por favor, inténtalo de nuevo.');
     }
   }
-
+  
   async function handleDuplicateTask() {
     if (!selectedTask || !user) return;
     try {
@@ -1757,58 +1670,58 @@ function Tasks() {
 
   async function handleDeleteTask() {
     if (!selectedTask) return;
-
+    
     if (!window.confirm('¿Estás seguro de que deseas eliminar esta tarea y todas sus subtareas? Esta acción no se puede deshacer.')) {
       return;
     }
-
+    
     try {
       console.log('🗑️ Iniciando eliminación de tarea:', selectedTask.id);
-
+      
       // 1. Primero obtener todos los IDs de subtareas
       const { data: subtasksData, error: subtasksQueryError } = await supabase
         .from('subtasks')
         .select('id')
         .eq('task_id', selectedTask.id);
-
+      
       if (subtasksQueryError) {
         console.error("❌ Error al consultar subtareas:", subtasksQueryError);
         throw subtasksQueryError;
       }
-
+      
       console.log('📝 Subtareas encontradas:', subtasksData?.length || 0);
-
+      
       // 2. Eliminar TODAS las asignaciones de trabajo relacionadas (con diferentes criterios)
       if (subtasksData && subtasksData.length > 0) {
         const subtaskIds = subtasksData.map(s => s.id);
         console.log('🔗 Eliminando asignaciones de trabajo para subtareas:', subtaskIds);
-
+        
         // Eliminar por subtask_id (cuando task_type = 'subtask')
         const { error: subtaskWorkAssignmentsError1 } = await supabase
           .from('task_work_assignments')
           .delete()
           .in('subtask_id', subtaskIds);
-
+        
         if (subtaskWorkAssignmentsError1) {
           console.error("❌ Error al eliminar asignaciones por subtask_id:", subtaskWorkAssignmentsError1);
           throw subtaskWorkAssignmentsError1;
         }
-
+        
         // También eliminar por task_id cuando se refiere a subtareas
         const { error: subtaskWorkAssignmentsError2 } = await supabase
           .from('task_work_assignments')
           .delete()
           .in('task_id', subtaskIds)
           .eq('task_type', 'subtask');
-
+        
         if (subtaskWorkAssignmentsError2) {
           console.error("❌ Error al eliminar asignaciones por task_id (subtareas):", subtaskWorkAssignmentsError2);
           throw subtaskWorkAssignmentsError2;
         }
-
+        
         console.log('✅ Asignaciones de subtareas eliminadas');
       }
-
+      
       // 3. Eliminar asignaciones de trabajo de la tarea principal
       console.log('🔗 Eliminando asignaciones de la tarea principal:', selectedTask.id);
       const { error: taskWorkAssignmentsError } = await supabase
@@ -1816,111 +1729,111 @@ function Tasks() {
         .delete()
         .eq('task_id', selectedTask.id)
         .eq('task_type', 'task');
-
+      
       if (taskWorkAssignmentsError) {
         console.error("❌ Error al eliminar asignaciones de la tarea principal:", taskWorkAssignmentsError);
         throw taskWorkAssignmentsError;
       }
-
+      
       console.log('✅ Asignaciones de tarea principal eliminadas');
-
+      
       // 4. Eliminar subtareas
       if (subtasksData && subtasksData.length > 0) {
         console.log('🗑️ Eliminando subtareas');
-        const { error: subtasksError } = await supabase
-          .from('subtasks')
-          .delete()
-          .eq('task_id', selectedTask.id);
-
-        if (subtasksError) {
+      const { error: subtasksError } = await supabase
+        .from('subtasks')
+        .delete()
+        .eq('task_id', selectedTask.id);
+      
+      if (subtasksError) {
           console.error("❌ Error al eliminar subtareas:", subtasksError);
-          throw subtasksError;
-        }
-
+        throw subtasksError;
+      }
+      
         console.log('✅ Subtareas eliminadas');
       }
-
+      
       // 5. Finalmente eliminar la tarea principal
       console.log('🗑️ Eliminando tarea principal');
       const { error: taskError } = await supabase
         .from('tasks')
         .delete()
         .eq('id', selectedTask.id);
-
+      
       if (taskError) {
         console.error("❌ Error al eliminar la tarea principal:", taskError);
         throw taskError;
       }
-
+      
       console.log('✅ Tarea principal eliminada exitosamente');
-
+      
       await fetchTasks();
       await fetchSubtasks();
       setShowTaskDetailModal(false);
       setError(''); // Limpiar cualquier error previo
-
+      
     } catch (error) {
       console.error('💥 Error al eliminar la tarea:', error);
       setError(`Error al eliminar la tarea: ${error instanceof Error ? error.message : 'Por favor, inténtalo de nuevo.'}`);
     }
   }
-
+  
   async function handleDeleteSubtask() {
     if (!selectedSubtask) return;
-
+    
     if (!window.confirm('¿Estás seguro de que deseas eliminar esta subtarea? Esta acción no se puede deshacer.')) {
       return;
     }
-
+    
     try {
       console.log('🗑️ Iniciando eliminación de subtarea:', selectedSubtask.id);
-
+      
       // 1. Eliminar TODAS las asignaciones de trabajo de la subtarea (con diferentes criterios)
       console.log('🔗 Eliminando asignaciones de trabajo para subtarea:', selectedSubtask.id);
-
+      
       // Eliminar por subtask_id
       const { error: workAssignmentsError1 } = await supabase
         .from('task_work_assignments')
         .delete()
         .eq('subtask_id', selectedSubtask.id);
-
+      
       if (workAssignmentsError1) {
         console.error("❌ Error al eliminar asignaciones por subtask_id:", workAssignmentsError1);
         throw workAssignmentsError1;
       }
-
+      
       // También eliminar por task_id cuando se refiere a esta subtarea
       const { error: workAssignmentsError2 } = await supabase
         .from('task_work_assignments')
         .delete()
         .eq('task_id', selectedSubtask.id)
         .eq('task_type', 'subtask');
-
+      
       if (workAssignmentsError2) {
         console.error("❌ Error al eliminar asignaciones por task_id:", workAssignmentsError2);
         throw workAssignmentsError2;
       }
-
+      
       console.log('✅ Asignaciones de subtarea eliminadas');
-
+      
       // 2. Luego eliminar la subtarea
       console.log('🗑️ Eliminando subtarea');
       const { error: subtaskError } = await supabase
         .from('subtasks')
         .delete()
         .eq('id', selectedSubtask.id);
-
+      
       if (subtaskError) {
         console.error("❌ Error al eliminar la subtarea:", subtaskError);
         throw subtaskError;
       }
-
+      
       console.log('✅ Subtarea eliminada exitosamente');
-
+      
       await fetchSubtasks();
       setShowSubtaskDetailModal(false);
       setError(''); // Limpiar cualquier error previo
-
+      
     } catch (error) {
       console.error('💥 Error al eliminar la subtarea:', error);
       setError(`Error al eliminar la subtarea: ${error instanceof Error ? error.message : 'Por favor, inténtalo de nuevo.'}`);
@@ -1929,7 +1842,7 @@ function Tasks() {
 
   async function handleCompleteTaskUpdate() {
     if (!selectedTask || !editedTask) return;
-
+    
     try {
       const { error: taskError } = await supabase
         .from('tasks')
@@ -1946,19 +1859,19 @@ function Tasks() {
           assigned_users: editedTask.assigned_users
         })
         .eq('id', selectedTask.id);
-
+      
       if (taskError) {
         console.error("Error al actualizar la tarea:", taskError);
         throw taskError;
       }
-
+      
       // Actualizar subtareas existentes
       const subtasksToUpdate = Object.entries(editedSubtasks).map(([id, data]) => ({
         id,
         sequence_order: data.sequence_order,
         assigned_to: data.assigned_to
       }));
-
+      
       for (const subtask of subtasksToUpdate) {
         const { error: subtaskError } = await supabase
           .from('subtasks')
@@ -1967,13 +1880,13 @@ function Tasks() {
             assigned_to: subtask.assigned_to
           })
           .eq('id', subtask.id);
-
+        
         if (subtaskError) {
           console.error(`Error al actualizar la subtarea ${subtask.id}:`, subtaskError);
           throw subtaskError;
         }
       }
-
+      
       // Crear nuevas subtareas si existen
       if (newSubtasksInEdit.length > 0) {
         const currentSubtasksCount = subtasks[selectedTask.id]?.length || 0;
@@ -1996,7 +1909,7 @@ function Tasks() {
 
         if (newSubtasksError) {
           console.error("Error al crear nuevas subtareas:", newSubtasksError);
-          toast.error(`La tarea se actualizó pero hubo un error al crear las nuevas subtareas: ${newSubtasksError.message}`);
+          throw newSubtasksError;
         }
         if (user?.id && insertedSubtasks) {
           for (const st of insertedSubtasks as { id: string; title: string }[]) {
@@ -2005,7 +1918,7 @@ function Tasks() {
               entity_type: 'subtask',
               entity_id: st.id,
               action: 'create',
-              summary: `Subtarea creada (en edición): ${st.title}`,
+              summary: `Subtarea creada: ${st.title}`,
             });
           }
         }
@@ -2021,15 +1934,15 @@ function Tasks() {
                 .eq('id', editedTask.project_id)
                 .eq('is_archived', false)
                 .single();
-
+                
               if (projectData) {
                 projectName = projectData.name;
               }
             }
-
+            
             // Determinar qué subtareas están disponibles inmediatamente
             let availableSubtasks = [];
-
+            
             if (editedTask.is_sequential) {
               // Para tareas secuenciales, verificar cuál es el primer nivel disponible
               const { data: existingSubtasks } = await supabase
@@ -2037,7 +1950,7 @@ function Tasks() {
                 .select('sequence_order, status')
                 .eq('task_id', selectedTask.id)
                 .order('sequence_order');
-
+              
               if (existingSubtasks) {
                 // Agrupar todas las subtareas por nivel
                 const allSubtasks = [...existingSubtasks, ...insertedSubtasks.map(s => ({ sequence_order: s.sequence_order, status: s.status }))];
@@ -2047,7 +1960,7 @@ function Tasks() {
                   acc[level].push(st);
                   return acc;
                 }, {} as Record<number, any[]>);
-
+                
                 // Encontrar el primer nivel que no está completamente aprobado
                 let firstAvailableLevel = 1;
                 for (const level in groupedByLevel) {
@@ -2059,7 +1972,7 @@ function Tasks() {
                     break;
                   }
                 }
-
+                
                 // Solo notificar subtareas del primer nivel disponible
                 availableSubtasks = insertedSubtasks.filter(st => st.sequence_order === firstAvailableLevel);
               }
@@ -2067,7 +1980,7 @@ function Tasks() {
               // Para tareas paralelas, todas las nuevas subtareas están disponibles
               availableSubtasks = insertedSubtasks;
             }
-
+            
             // Enviar notificaciones a usuarios de subtareas disponibles
             for (const subtask of availableSubtasks) {
               if (subtask.assigned_to) {
@@ -2096,14 +2009,14 @@ function Tasks() {
           }
         }
       }
-
+      
       await fetchTasks();
       await fetchSubtasks();
       setShowTaskDetailModal(false);
       setEditMode(false);
       setEditedSubtasks({});
       setNewSubtasksInEdit([]);
-
+      
     } catch (error) {
       console.error('Error al actualizar la tarea y subtareas:', error);
       setError('Error al actualizar. Por favor, inténtalo de nuevo.');
@@ -2116,7 +2029,7 @@ function Tasks() {
 
   // Funciones para manejar la paginación
   const totalPages = Math.ceil(totalTasks / tasksPerPage);
-
+  
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
@@ -2154,67 +2067,67 @@ function Tasks() {
           <p className="text-gray-600">Gestiona tus tareas y asignaciones</p>
         </div>
         <div className="flex gap-2">
-          {isAdmin && (
+        {isAdmin && (
             <>
-              <button
-                onClick={() => setShowSupervisionTaskModal(true)}
-                className="bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 flex items-center gap-2"
-                title="Crear tarea de supervisión con checkpoints diarios en un solo paso"
-              >
-                <Sparkles className="w-5 h-5" />
-                Tarea supervisión
-              </button>
-              <button
-                onClick={() => setShowSelectTaskForDailyModal(true)}
-                className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 flex items-center gap-2"
-                title="Añadir subtareas diarias a una tarea existente"
-              >
-                <CalendarDays className="w-5 h-5" />
-                Subtareas diarias
-              </button>
-              <button
-                onClick={() => {
-                  setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
-                  setShowQuickCreateModal(true);
-                }}
-                className="bg-indigo-500 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Crear rápida
-              </button>
-              <button
-                onClick={() => csvInputRef.current?.click()}
-                className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center gap-2"
-              >
-                <Upload className="w-5 h-5" />
-                Importar CSV
-              </button>
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv"
-                onChange={handleCsvFileSelect}
-                className="hidden"
-              />
-              <button
-                onClick={() => {
-                  setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
-                  setBulkProjectId(null);
-                  setBulkDeadline(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
-                  setShowBulkCreateModal(true);
-                }}
-                className="bg-indigo-500/80 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Crear varias
-              </button>
-              <button
-                onClick={() => setShowModal(true)}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
-              >
-                <Plus className="w-5 h-5 mr-2" />
-                Nueva Tarea
-              </button>
+          <button
+            onClick={() => setShowSupervisionTaskModal(true)}
+            className="bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 flex items-center gap-2"
+            title="Crear tarea de supervisión con checkpoints diarios en un solo paso"
+          >
+            <Sparkles className="w-5 h-5" />
+            Tarea supervisión
+          </button>
+          <button
+            onClick={() => setShowSelectTaskForDailyModal(true)}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 flex items-center gap-2"
+            title="Añadir subtareas diarias a una tarea existente"
+          >
+            <CalendarDays className="w-5 h-5" />
+            Subtareas diarias
+          </button>
+          <button
+            onClick={() => {
+              setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
+              setShowQuickCreateModal(true);
+            }}
+            className="bg-indigo-500 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Crear rápida
+          </button>
+          <button
+            onClick={() => csvInputRef.current?.click()}
+            className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center gap-2"
+          >
+            <Upload className="w-5 h-5" />
+            Importar CSV
+          </button>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleCsvFileSelect}
+            className="hidden"
+          />
+          <button
+            onClick={() => {
+              setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
+              setBulkProjectId(null);
+              setBulkDeadline(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+              setShowBulkCreateModal(true);
+            }}
+            className="bg-indigo-500/80 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Crear varias
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Nueva Tarea
+          </button>
             </>
           )}
         </div>
@@ -2289,7 +2202,7 @@ function Tasks() {
               </button>
             </div>
           </div>
-
+          
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-700">Tareas por página:</label>
             <select
@@ -2315,10 +2228,11 @@ function Tasks() {
           <nav className="-mb-px flex space-x-8">
             <button
               onClick={() => setActiveTab('active')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'active'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'active'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
             >
               Tareas Activas
               <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
@@ -2327,10 +2241,11 @@ function Tasks() {
             </button>
             <button
               onClick={() => setActiveTab('approved')}
-              className={`py-2 px-1 border-b-2 font-medium text-sm ${activeTab === 'approved'
-                ? 'border-green-500 text-green-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'approved'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
             >
               Tareas Aprobadas
               <span className="ml-2 bg-green-100 text-green-600 py-0.5 px-2 rounded-full text-xs">
@@ -2343,369 +2258,372 @@ function Tasks() {
 
       <div className="grid gap-4">
         {pageLoading && <SkeletonInline rows={3} />}
-
+        
         {!pageLoading && tasks.length > 0 ? (
           (() => {
             return (
               <div key="all">
                 {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow"
+          <div
+            key={task.id}
+            className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  <h2 
+                    className="text-lg font-semibold text-gray-900 cursor-pointer hover:text-indigo-600"
+                    onClick={() => {
+                      setSelectedTask(task);
+                      setEditedTask({
+                        title: task.title,
+                        description: task.description || '',
+                        start_date: task.start_date ? task.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        deadline: task.deadline ? task.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        estimated_duration: task.estimated_duration,
+                        priority: task.priority,
+                        is_sequential: task.is_sequential,
+                        project_id: task.project_id || null,
+                        phase_id: task.phase_id ?? null,
+                        status: task.status,
+                        created_by: task.created_by,
+                        created_at: task.created_at,
+                        assigned_to: task.assigned_to,
+                        assigned_users: task.assigned_users,
+                        checklist: task.checklist || [],
+                        comments: task.comments || [],
+                      });
+                      setShowTaskDetailModal(true);
+                    }}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center">
-                        <h2
-                          className="text-lg font-semibold text-gray-900 cursor-pointer hover:text-indigo-600"
-                          onClick={() => {
-                            setSelectedTask(task);
-                            setEditedTask({
-                              title: task.title,
-                              description: task.description || '',
-                              start_date: task.start_date ? task.start_date.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                              deadline: task.deadline ? task.deadline.replace(" ", "T").substring(0, 16) : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                              estimated_duration: task.estimated_duration,
-                              priority: task.priority,
-                              is_sequential: task.is_sequential,
-                              project_id: task.project_id || null,
-                              phase_id: task.phase_id ?? null,
-                              status: task.status,
-                              created_by: task.created_by,
-                              created_at: task.created_at,
-                              assigned_to: task.assigned_to,
-                              assigned_users: task.assigned_users,
-                              checklist: task.checklist || [],
-                              comments: task.comments || [],
-                            });
-                            setShowTaskDetailModal(true);
-                          }}
-                        >
-                          {task.title}
-                        </h2>
-                        {task.project_id && (
-                          <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-                            {projects.find(p => p.id === task.project_id)?.name}
-                          </span>
-                        )}
-                        <PhaseBadge phaseName={filterPhases.find(p => p.id === task.phase_id)?.name} className="ml-2" />
-                      </div>
-                      <span className={`px-2 py-1 rounded text-sm ${task.priority === 'high'
-                        ? 'bg-red-100 text-red-800'
-                        : task.priority === 'medium'
-                          ? 'bg-yellow-100 text-yellow-800'
-                          : 'bg-green-100 text-green-800'
-                        }`}>
-                        {getPriorityText(task.priority)}
+                    {task.title}
+                  </h2>
+                  {task.project_id && (
+                    <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                      {projects.find(p => p.id === task.project_id)?.name}
+                    </span>
+                  )}
+                  <PhaseBadge phaseName={filterPhases.find(p => p.id === task.phase_id)?.name} className="ml-2" />
+                </div>
+              <span className={`px-2 py-1 rounded text-sm ${
+                task.priority === 'high' 
+                  ? 'bg-red-100 text-red-800'
+                  : task.priority === 'medium'
+                  ? 'bg-yellow-100 text-yellow-800'
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                {getPriorityText(task.priority)}
+              </span>
+            </div>
+            {task.description && (
+              <div className="mb-3">
+                <RichTextSummary 
+                  text={task.description} 
+                  className="text-sm"
+                  maxLength={150}
+                />
+              </div>
+            )}
+              <div className="flex items-center text-sm text-gray-500 mb-3">
+              <span>Fecha límite: {task.deadline && !isNaN(new Date(task.deadline).getTime()) ? new Date(task.deadline).toLocaleDateString() : '—'}</span>
+              <span className="mx-2">•</span>
+              <span>{(task.estimated_duration ?? 0)} minutos</span>
+              {task.is_sequential && (
+                <>
+                  <span className="mx-2">•</span>
+                  <span>Secuencial</span>
+                </>
+              )}
+            </div>
+            
+            {/* Mostrar usuarios asignados a la tarea principal */}
+            <div className="flex items-center mb-3">
+              <Users className="w-4 h-4 mr-1 text-indigo-500" />
+              <span className="text-sm text-gray-600 mr-1">Asignados:</span>
+              {task.assigned_users ? (
+                <div className="flex flex-wrap gap-1">
+                  {Array.isArray(task.assigned_users) ? 
+                    task.assigned_users.map(userId => (
+                      <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                        {users.find(u => u.id === userId)?.name || userId}
                       </span>
-                    </div>
-                    {task.description && (
-                      <div className="mb-3">
-                        <RichTextSummary
-                          text={task.description}
-                          className="text-sm"
-                          maxLength={150}
-                        />
-                      </div>
-                    )}
-                    <div className="flex items-center text-sm text-gray-500 mb-3">
-                      <span>Fecha límite: {task.deadline && !isNaN(new Date(task.deadline).getTime()) ? new Date(task.deadline).toLocaleDateString() : '—'}</span>
-                      <span className="mx-2">•</span>
-                      <span>{(task.estimated_duration ?? 0)} minutos</span>
-                      {task.is_sequential && (
-                        <>
-                          <span className="mx-2">•</span>
-                          <span>Secuencial</span>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Mostrar usuarios asignados a la tarea principal */}
-                    <div className="flex items-center mb-3">
-                      <Users className="w-4 h-4 mr-1 text-indigo-500" />
-                      <span className="text-sm text-gray-600 mr-1">Asignados:</span>
-                      {task.assigned_users ? (
-                        <div className="flex flex-wrap gap-1">
-                          {Array.isArray(task.assigned_users) ?
-                            task.assigned_users.map(userId => (
-                              <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
-                                {users.find(u => u.id === userId)?.name || userId}
-                              </span>
-                            ))
-                            :
-                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
-                              {users.find(u => u.id === String(task.assigned_users))?.name || task.assigned_users}
-                            </span>
-                          }
-                        </div>
-                      ) : task.assigned_to ? (
-                        <div className="flex flex-wrap gap-1">
-                          {Array.isArray(task.assigned_to) ?
-                            task.assigned_to.map(userId => (
-                              <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
-                                {users.find(u => u.id === userId)?.name || userId}
-                              </span>
-                            ))
-                            :
-                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
-                              {users.find(u => u.id === String(task.assigned_to))?.name || task.assigned_to}
-                            </span>
-                          }
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-500">Sin asignaciones</span>
-                      )}
-                    </div>
-
-                    {subtasks[task.id]?.length > 0 && (
-                      <div className="mt-2">
-                        <h3 className="text-sm font-medium text-gray-700 mb-2">Subtareas:</h3>
-                        <div className="space-y-2 pl-4 border-l-2 border-indigo-100">
+                    ))
+                    : 
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                      {users.find(u => u.id === String(task.assigned_users))?.name || task.assigned_users}
+                    </span>
+                  }
+                </div>
+              ) : task.assigned_to ? (
+                <div className="flex flex-wrap gap-1">
+                  {Array.isArray(task.assigned_to) ? 
+                    task.assigned_to.map(userId => (
+                      <span key={userId} className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                        {users.find(u => u.id === userId)?.name || userId}
+                      </span>
+                    ))
+                    : 
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-xs">
+                      {users.find(u => u.id === String(task.assigned_to))?.name || task.assigned_to}
+                    </span>
+                  }
+                </div>
+              ) : (
+                <span className="text-xs text-gray-500">Sin asignaciones</span>
+              )}
+            </div>
+              
+              {subtasks[task.id]?.length > 0 && (
+                <div className="mt-2">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Subtareas:</h3>
+                  <div className="space-y-2 pl-4 border-l-2 border-indigo-100">
                           {subtasks[task.id]
                             .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0))
-                            .map((subtask, index) => {
-                              const canUpdateStatus = !isAdmin && (subtask.assigned_to === user?.id);
-                              const isAssignedToCurrentUser = subtask.assigned_to === user?.id;
-
-                              return (
-                                <div
-                                  key={subtask.id}
-                                  className={`bg-gray-50 p-3 rounded-md transition-all ${isAssignedToCurrentUser ? 'border-l-4 border-indigo-400' : ''
-                                    }`}
-                                >
-                                  <div className="flex justify-between items-start">
+                      .map((subtask, index) => {
+                        const canUpdateStatus = !isAdmin && (subtask.assigned_to === user?.id);
+                        const isAssignedToCurrentUser = subtask.assigned_to === user?.id;
+                        
+                        return (
+                          <div
+                            key={subtask.id}
+                            className={`bg-gray-50 p-3 rounded-md transition-all ${
+                              isAssignedToCurrentUser ? 'border-l-4 border-indigo-400' : ''
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
                                     <div className="flex-1">
-                                      <div className="flex items-center mb-1">
-                                        {task.is_sequential && subtask.sequence_order && (
-                                          <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded mr-2">
-                                            Orden: {subtask.sequence_order}
-                                          </span>
-                                        )}
-                                        <h4
-                                          className="font-medium cursor-pointer hover:text-indigo-600"
-                                          onClick={() => {
-                                            setSelectedSubtask(subtask);
-                                            setEditedSubtask({
-                                              title: subtask.title,
-                                              description: subtask.description || '',
-                                              estimated_duration: subtask.estimated_duration,
-                                              sequence_order: subtask.sequence_order || 0,
-                                              assigned_to: subtask.assigned_to || '',
-                                              status: subtask.status || 'pending',
-                                              start_date: subtask.start_date ? subtask.start_date.replace(" ", "T").substring(0, 16) : null,
-                                              deadline: subtask.deadline ? subtask.deadline.replace(" ", "T").substring(0, 16) : null,
-                                              task_id: subtask.task_id,
-                                              created_by: subtask.created_by,
-                                              created_at: subtask.created_at,
-                                              checklist: subtask.checklist || [],
-                                              comments: subtask.comments || [],
-                                            });
-                                            setShowSubtaskDetailModal(true);
-                                          }}
-                                        >
-                                          {subtask.title || 'Sin título'}
-                                        </h4>
-                                      </div>
-
+                                <div className="flex items-center mb-1">
+                                  {task.is_sequential && subtask.sequence_order && (
+                                    <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded mr-2">
+                                      Orden: {subtask.sequence_order}
+                                    </span>
+                                  )}
+                                  <h4 
+                                    className="font-medium cursor-pointer hover:text-indigo-600"
+                                    onClick={() => {
+                                      setSelectedSubtask(subtask);
+                                      setEditedSubtask({
+                                        title: subtask.title,
+                                        description: subtask.description || '',
+                                        estimated_duration: subtask.estimated_duration,
+                                        sequence_order: subtask.sequence_order || 0,
+                                        assigned_to: subtask.assigned_to || '',
+                                        status: subtask.status || 'pending',
+                                        start_date: subtask.start_date ? subtask.start_date.replace(" ", "T").substring(0, 16) : null,
+                                        deadline: subtask.deadline ? subtask.deadline.replace(" ", "T").substring(0, 16) : null,
+                                        task_id: subtask.task_id,
+                                        created_by: subtask.created_by,
+                                        created_at: subtask.created_at,
+                                        checklist: subtask.checklist || [],
+                                        comments: subtask.comments || [],
+                                      });
+                                      setShowSubtaskDetailModal(true);
+                                    }}
+                                  >
+                                    {subtask.title || 'Sin título'}
+                                  </h4>
+                                </div>
+                                
                                       {subtask.description && (
-                                        <div className="mt-1">
-                                          <RichTextSummary
-                                            text={subtask.description}
-                                            className="text-sm"
-                                            maxLength={80}
-                                          />
-                                        </div>
-                                      )}
-
-                                      <div className="flex flex-wrap items-center text-xs text-gray-500 mt-2 gap-x-3 gap-y-1">
-                                        <div className="flex items-center">
-                                          <Clock className="w-3 h-3 mr-1" />
-                                          <span>{(subtask.estimated_duration ?? 0)} min</span>
-                                        </div>
-
-                                        {subtask.start_date && !isNaN(new Date(subtask.start_date).getTime()) && (
-                                          <div className="flex items-center">
-                                            <span>Inicio: {new Date(subtask.start_date).toLocaleDateString()}</span>
-                                          </div>
-                                        )}
-
-                                        {subtask.deadline && !isNaN(new Date(subtask.deadline).getTime()) && (
-                                          <div className="flex items-center">
-                                            <span>Fin: {new Date(subtask.deadline).toLocaleDateString()}</span>
-                                          </div>
-                                        )}
-
-                                        <div className="flex items-center">
-                                          <TaskStatusDisplay status={subtask.status} />
-                                        </div>
-
-                                        <div className="flex items-center text-indigo-600">
-                                          <span>Asignada a: {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignada'}</span>
-                                        </div>
-                                      </div>
-                                    </div>
-
+                                  <div className="mt-1">
+                                    <RichTextSummary 
+                                      text={subtask.description} 
+                                      className="text-sm"
+                                      maxLength={80}
+                                    />
+                                  </div>
+                                )}
+                                
+                                <div className="flex flex-wrap items-center text-xs text-gray-500 mt-2 gap-x-3 gap-y-1">
+                                  <div className="flex items-center">
+                                    <Clock className="w-3 h-3 mr-1" />
+                                    <span>{(subtask.estimated_duration ?? 0)} min</span>
+                                  </div>
+                                  
+                                  {subtask.start_date && !isNaN(new Date(subtask.start_date).getTime()) && (
                                     <div className="flex items-center">
-                                      {task.is_sequential && isAdmin && (
-                                        <div className="flex flex-col mr-2">
-                                          <button
-                                            type="button"
-                                            onClick={async () => {
-                                              try {
-                                                console.log('Moviendo subtarea hacia arriba:', subtask.id);
-
-                                                const orderedSubtasks = [...subtasks[task.id]].sort(
-                                                  (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)
-                                                );
-
-                                                const currentIndex = orderedSubtasks.findIndex(s => s.id === subtask.id);
-
-                                                if (currentIndex <= 0) {
-                                                  console.log('Ya es la primera subtarea');
-                                                  return;
-                                                }
-
-                                                const prevSubtask = orderedSubtasks[currentIndex - 1];
-
-                                                console.log('Intercambiando con:', prevSubtask.id);
-                                                console.log('Órdenes actuales:', {
-                                                  actual: subtask.sequence_order,
-                                                  anterior: prevSubtask.sequence_order
-                                                });
-
-                                                const tempOrder = -999;
-                                                const currentOrder = subtask.sequence_order || 0;
-                                                const prevOrder = prevSubtask.sequence_order || 0;
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: tempOrder })
-                                                  .eq('id', subtask.id);
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: currentOrder })
-                                                  .eq('id', prevSubtask.id);
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: prevOrder })
-                                                  .eq('id', subtask.id);
-
-                                                console.log('Intercambio finalizado');
-
-                                                await fetchSubtasks();
-                                              } catch (error) {
-                                                console.error('Error al mover la subtarea:', error);
-                                              }
-                                            }}
-                                            className="text-gray-500 hover:text-gray-700 disabled:opacity-50 p-1"
-                                            disabled={index === 0}
-                                          >
-                                            <ChevronUp className="w-4 h-4" />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={async () => {
-                                              try {
-                                                console.log('Moviendo subtarea hacia abajo:', subtask.id);
-
-                                                const orderedSubtasks = [...subtasks[task.id]].sort(
-                                                  (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)
-                                                );
-
-                                                const currentIndex = orderedSubtasks.findIndex(s => s.id === subtask.id);
-
-                                                if (currentIndex === -1 || currentIndex >= orderedSubtasks.length - 1) {
-                                                  console.log('Ya es la última subtarea');
-                                                  return;
-                                                }
-
-                                                const nextSubtask = orderedSubtasks[currentIndex + 1];
-
-                                                console.log('Intercambiando con:', nextSubtask.id);
-                                                console.log('Órdenes actuales:', {
-                                                  actual: subtask.sequence_order,
-                                                  siguiente: nextSubtask.sequence_order
-                                                });
-
-                                                const tempOrder = 9999;
-                                                const currentOrder = subtask.sequence_order || 0;
-                                                const nextOrder = nextSubtask.sequence_order || 0;
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: tempOrder })
-                                                  .eq('id', subtask.id);
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: currentOrder })
-                                                  .eq('id', nextSubtask.id);
-
-                                                await supabase
-                                                  .from('subtasks')
-                                                  .update({ sequence_order: nextOrder })
-                                                  .eq('id', subtask.id);
-
-                                                console.log('Intercambio finalizado');
-
-                                                await fetchSubtasks();
-                                              } catch (error) {
-                                                console.error('Error al mover la subtarea:', error);
-                                              }
-                                            }}
-                                            className="text-gray-500 hover:text-gray-700 disabled:opacity-50 p-1"
-                                            disabled={index === subtasks[task.id].length - 1}
-                                          >
-                                            <ChevronDown className="w-4 h-4" />
-                                          </button>
-                                        </div>
-                                      )}
-
-                                      {canUpdateStatus && (
-                                        <select
-                                          value={subtask.status}
-                                          onChange={(e) => handleStatusUpdate(subtask.id, e.target.value as 'pending' | 'in_progress' | 'completed')}
-                                          className="ml-2 text-sm border rounded-md px-2 py-1"
-                                        >
-                                          <option value="pending">Pendiente</option>
-                                          <option value="in_progress">En Progreso</option>
-                                          <option value="completed">Completada</option>
-                                          <option value="approved">Aprobada</option>
-                                        </select>
-                                      )}
-
-                                      {isAdmin && (
-                                        <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                          subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                                            'bg-gray-100 text-gray-800'
-                                          }`}>
-                                          <TaskStatusDisplay status={subtask.status} />
-                                        </span>
-                                      )}
+                                      <span>Inicio: {new Date(subtask.start_date).toLocaleDateString()}</span>
                                     </div>
+                                  )}
+                                  
+                                  {subtask.deadline && !isNaN(new Date(subtask.deadline).getTime()) && (
+                                    <div className="flex items-center">
+                                      <span>Fin: {new Date(subtask.deadline).toLocaleDateString()}</span>
+                                    </div>
+                                  )}
+                                  
+                                  <div className="flex items-center">
+                                    <TaskStatusDisplay status={subtask.status} />
+                                    </div>
+                                  
+                                  <div className="flex items-center text-indigo-600">
+                                    <span>Asignada a: {users.find(u => u.id === subtask.assigned_to)?.name || 'No asignada'}</span>
                                   </div>
                                 </div>
-                              );
-                            })}
+                              </div>
+                              
+                              <div className="flex items-center">
+                                {task.is_sequential && isAdmin && (
+                                  <div className="flex flex-col mr-2">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          console.log('Moviendo subtarea hacia arriba:', subtask.id);
+                                          
+                                          const orderedSubtasks = [...subtasks[task.id]].sort(
+                                            (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)
+                                          );
+                                          
+                                          const currentIndex = orderedSubtasks.findIndex(s => s.id === subtask.id);
+                                          
+                                          if (currentIndex <= 0) {
+                                            console.log('Ya es la primera subtarea');
+                                            return;
+                                          }
+                                          
+                                          const prevSubtask = orderedSubtasks[currentIndex - 1];
+                                          
+                                          console.log('Intercambiando con:', prevSubtask.id);
+                                          console.log('Órdenes actuales:', {
+                                            actual: subtask.sequence_order,
+                                            anterior: prevSubtask.sequence_order
+                                          });
+                                          
+                                          const tempOrder = -999;
+                                          const currentOrder = subtask.sequence_order || 0;
+                                          const prevOrder = prevSubtask.sequence_order || 0;
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: tempOrder })
+                                            .eq('id', subtask.id);
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: currentOrder })
+                                            .eq('id', prevSubtask.id);
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: prevOrder })
+                                            .eq('id', subtask.id);
+                                          
+                                          console.log('Intercambio finalizado');
+                                          
+                                          await fetchSubtasks();
+                                        } catch (error) {
+                                          console.error('Error al mover la subtarea:', error);
+                                        }
+                                      }}
+                                      className="text-gray-500 hover:text-gray-700 disabled:opacity-50 p-1"
+                                      disabled={index === 0}
+                                    >
+                                      <ChevronUp className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          console.log('Moviendo subtarea hacia abajo:', subtask.id);
+                                          
+                                          const orderedSubtasks = [...subtasks[task.id]].sort(
+                                            (a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)
+                                          );
+                                          
+                                          const currentIndex = orderedSubtasks.findIndex(s => s.id === subtask.id);
+                                          
+                                          if (currentIndex === -1 || currentIndex >= orderedSubtasks.length - 1) {
+                                            console.log('Ya es la última subtarea');
+                                            return;
+                                          }
+                                          
+                                          const nextSubtask = orderedSubtasks[currentIndex + 1];
+                                          
+                                          console.log('Intercambiando con:', nextSubtask.id);
+                                          console.log('Órdenes actuales:', {
+                                            actual: subtask.sequence_order,
+                                            siguiente: nextSubtask.sequence_order
+                                          });
+                                          
+                                          const tempOrder = 9999;
+                                          const currentOrder = subtask.sequence_order || 0;
+                                          const nextOrder = nextSubtask.sequence_order || 0;
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: tempOrder })
+                                            .eq('id', subtask.id);
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: currentOrder })
+                                            .eq('id', nextSubtask.id);
+                                          
+                                          await supabase
+                                            .from('subtasks')
+                                            .update({ sequence_order: nextOrder })
+                                            .eq('id', subtask.id);
+                                          
+                                          console.log('Intercambio finalizado');
+                                          
+                                          await fetchSubtasks();
+                                        } catch (error) {
+                                          console.error('Error al mover la subtarea:', error);
+                                        }
+                                      }}
+                                      className="text-gray-500 hover:text-gray-700 disabled:opacity-50 p-1"
+                                      disabled={index === subtasks[task.id].length - 1}
+                                    >
+                                      <ChevronDown className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                )}
+                                
+                                {canUpdateStatus && (
+                                      <select
+                                        value={subtask.status}
+                                        onChange={(e) => handleStatusUpdate(subtask.id, e.target.value as 'pending' | 'in_progress' | 'completed')}
+                                    className="ml-2 text-sm border rounded-md px-2 py-1"
+                                      >
+                                        <option value="pending">Pendiente</option>
+                                        <option value="in_progress">En Progreso</option>
+                                        <option value="completed">Completada</option>
+                                        <option value="approved">Aprobada</option>
+                                      </select>
+                                    )}
+                                
+                                {isAdmin && (
+                                  <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${
+                                    subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                                    subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    <TaskStatusDisplay status={subtask.status} />
+                                  </span>
+                                    )}
+                                  </div>
+                                </div>
                         </div>
-                      </div>
-                    )}
+                        );
+                      })}
                   </div>
-                ))}
+                </div>
+              )}
+            </div>
+          ))}
               </div>
             );
           })()
         ) : !pageLoading && (
           <div className="text-center py-12">
             <p className="text-gray-500">
-              {searchTerm.trim() && selectedProject
+              {searchTerm.trim() && selectedProject 
                 ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} que coincidan con "${searchTerm}" en este proyecto`
                 : searchTerm.trim()
-                  ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} que coincidan con "${searchTerm}"`
-                  : selectedProject
-                    ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} para este proyecto`
-                    : `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'}`}
+                ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} que coincidan con "${searchTerm}"`
+                : selectedProject 
+                ? `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'} para este proyecto` 
+                : `No se encontraron ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'}`}
             </p>
           </div>
         )}
@@ -2715,7 +2633,7 @@ function Tasks() {
       {totalPages > 1 && (
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-sm text-gray-700">
-            {searchTerm.trim()
+            {searchTerm.trim() 
               ? `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} resultados para "${searchTerm}"`
               : `Mostrando ${((currentPage - 1) * tasksPerPage) + 1} a ${Math.min(currentPage * tasksPerPage, totalTasks)} de ${totalTasks} ${activeTab === 'approved' ? 'tareas aprobadas' : 'tareas activas'}`
             }
@@ -2728,7 +2646,7 @@ function Tasks() {
             >
               Anterior
             </button>
-
+            
             {/* Mostrar números de página */}
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNumber;
@@ -2741,21 +2659,22 @@ function Tasks() {
               } else {
                 pageNumber = currentPage - 2 + i;
               }
-
+              
               return (
                 <button
                   key={pageNumber}
                   onClick={() => handlePageChange(pageNumber)}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${currentPage === pageNumber
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-gray-500 bg-white border border-gray-300 hover:bg-gray-50 hover:text-gray-700'
-                    }`}
+                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                    currentPage === pageNumber
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-gray-500 bg-white border border-gray-300 hover:bg-gray-50 hover:text-gray-700'
+                  }`}
                 >
                   {pageNumber}
                 </button>
               );
             })}
-
+            
             <button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
@@ -3049,44 +2968,13 @@ function Tasks() {
                   {error}
                 </div>
               )}
-              {(newTask.title?.trim() || newTask.subtasks.length > 0) && (
-                <div className="mb-4 flex items-center justify-between gap-2 bg-sky-50 border border-sky-200 text-sky-800 px-4 py-2 rounded text-sm">
-                  <span>Borrador guardado automáticamente en este navegador.</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      try {
-                        localStorage.removeItem(TASK_DRAFT_KEY);
-                      } catch (_) { }
-                      setNewTask({
-                        title: '',
-                        description: '',
-                        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                        estimated_duration: 30,
-                        priority: 'medium',
-                        is_sequential: false,
-                        phase_id: null,
-                        assigned_to: [],
-                        subtasks: [],
-                        project_id: null,
-                      });
-                      setProjectSelected(false);
-                      setSelectedProjectDates(null);
-                      toast.success('Borrador descartado. Puedes empezar de cero.');
-                    }}
-                    className="text-sky-600 hover:text-sky-800 underline font-medium"
-                  >
-                    Descartar borrador
-                  </button>
-                </div>
-              )}
+              
               <div className="space-y-4">
                 {!projectSelected ? (
                   <div className="bg-indigo-50 p-6 rounded-lg border border-indigo-100">
                     <h3 className="text-lg font-medium text-indigo-700 mb-4">Selecciona un proyecto</h3>
                     <p className="text-sm text-indigo-600 mb-4">Para comenzar, selecciona el proyecto al que pertenecerá esta tarea.</p>
-
+                    
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Proyecto <span className="text-red-500">*</span>
@@ -3096,19 +2984,19 @@ function Tasks() {
                         onChange={(e) => {
                           const projectId = e.target.value || null;
                           setNewTask({ ...newTask, project_id: projectId });
-
+                          
                           if (projectId) {
                             const selectedProject = projects.find(p => p.id === projectId);
                             if (selectedProject) {
                               // Ajustar fechas de la tarea según el proyecto
                               const projectStartDate = selectedProject.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
                               const projectEndDate = selectedProject.deadline || format(new Date(), "yyyy-MM-dd'T'HH:mm");
-
+                              
                               setSelectedProjectDates({
                                 start_date: projectStartDate.replace(" ", "T").substring(0, 16),
                                 deadline: projectEndDate.replace(" ", "T").substring(0, 16)
                               });
-
+                              
                               setNewTask(prev => ({
                                 ...prev,
                                 start_date: projectStartDate.replace(" ", "T").substring(0, 16),
@@ -3132,7 +3020,7 @@ function Tasks() {
                         ))}
                       </select>
                     </div>
-
+                    
                     {taskTemplates.length > 0 && (
                       <div className="mb-4 pt-4 border-t border-indigo-100">
                         <p className="text-sm font-medium text-indigo-700 mb-2">O crear desde plantilla de tarea</p>
@@ -3205,7 +3093,7 @@ function Tasks() {
                         Cambiar
                       </button>
                     </div>
-
+                    
                     {phases.length > 0 && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Fase</label>
@@ -3233,7 +3121,7 @@ function Tasks() {
                         required
                       />
                     </div>
-
+                    
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Descripción
@@ -3245,7 +3133,7 @@ function Tasks() {
                         minHeight="120px"
                       />
                     </div>
-
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3257,7 +3145,7 @@ function Tasks() {
                           onChange={(e) => {
                             const newValue = e.target.value;
                             setNewTask({ ...newTask, start_date: newValue });
-
+                            
                             // Cerrar automáticamente el datepicker ajustando el foco
                             e.target.blur();
                           }}
@@ -3282,7 +3170,7 @@ function Tasks() {
                           onChange={(e) => {
                             const newValue = e.target.value;
                             setNewTask({ ...newTask, deadline: newValue });
-
+                            
                             // Cerrar automáticamente el datepicker ajustando el foco
                             e.target.blur();
                           }}
@@ -3298,7 +3186,7 @@ function Tasks() {
                         )}
                       </div>
                     </div>
-
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3328,12 +3216,12 @@ function Tasks() {
                         </select>
                       </div>
                     </div>
-
+                    
                     <div className="flex items-center mb-4">
-                      <input
-                        type="checkbox"
+                        <input
+                          type="checkbox"
                         id="sequential"
-                        checked={newTask.is_sequential}
+                          checked={newTask.is_sequential}
                         onChange={(e) => setNewTask({ ...newTask, is_sequential: e.target.checked })}
                         className="mr-2"
                       />
@@ -3341,7 +3229,7 @@ function Tasks() {
                         Tareas secuenciales (las subtareas deben completarse en orden)
                       </label>
                     </div>
-
+                    
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Asignar a
@@ -3374,83 +3262,50 @@ function Tasks() {
                         ))}
                       </div>
                     </div>
-
+                    
                     <div className="border-t mt-6 pt-6">
                       <h3 className="text-lg font-medium text-gray-900 mb-4">Subtareas</h3>
                       <div className="space-y-4">
-                        {newTask.subtasks.map((subtask, index) => (
+                      {newTask.subtasks.map((subtask, index) => (
                           <div
                             key={`new-subtask-${index}`}
                             className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200"
                           >
-                            <div className="flex justify-between items-center mb-2">
-                              <div className="flex items-center flex-wrap gap-3">
-                                <div className="flex items-center gap-2">
+                          <div className="flex justify-between items-center mb-2">
+                              <div className="flex items-center">
+                                <div className="mr-2">
                                   <input
                                     type="number"
                                     value={index + 1}
                                     onChange={(e) => {
                                       const newPosition = parseInt(e.target.value) - 1;
                                       if (newPosition < 0 || newPosition >= newTask.subtasks.length) return;
-
+                                      
                                       const updatedSubtasks = [...newTask.subtasks];
                                       const movedSubtask = updatedSubtasks.splice(index, 1)[0];
                                       updatedSubtasks.splice(newPosition, 0, movedSubtask);
-
-                                      // Al reordenar visualmente, si es secuencial, actualizamos también los sequence_order
-                                      // para que correspondan a la nueva posición, a menos que el usuario haya definido
-                                      // niveles específicos (ej. 1, 1, 2) manualmente.
-                                      const finalSubtasks = updatedSubtasks.map((st, idx) => ({
-                                        ...st,
-                                        // Si no tiene orden o el orden coincidía con su posición anterior, lo actualizamos
-                                        sequence_order: (st.sequence_order === undefined || st.sequence_order === null)
-                                          ? idx + 1
-                                          : st.sequence_order
-                                      }));
-
-                                      setNewTask({ ...newTask, subtasks: finalSubtasks });
+                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
                                     }}
                                     className="w-12 p-1 border rounded text-center"
                                     min="1"
                                     max={newTask.subtasks.length}
                                   />
-                                  <span className="text-sm text-gray-500">Pos.</span>
                                 </div>
-                                {newTask.is_sequential && (
-                                  <div className="flex items-center gap-2">
-                                    <label className="text-xs font-medium text-gray-700">Nivel:</label>
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      value={subtask.sequence_order ?? index + 1}
-                                      onChange={(e) => {
-                                        const v = parseInt(e.target.value, 10);
-                                        if (Number.isNaN(v) || v < 1) return;
-                                        const updatedSubtasks = [...newTask.subtasks];
-                                        updatedSubtasks[index] = { ...subtask, sequence_order: v };
-                                        setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                      }}
-                                      className="w-14 p-1 border rounded text-center"
-                                      title="Varias subtareas pueden tener el mismo nivel (ej. dos con nivel 1)"
-                                    />
-                                    <span className="text-xs text-gray-500">(puede repetirse)</span>
-                                  </div>
-                                )}
                                 <h4 className="font-medium">Subtarea {index + 1}</h4>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updatedSubtasks = [...newTask.subtasks];
-                                  updatedSubtasks.splice(index, 1);
-                                  setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                }}
-                                className="text-red-600 hover:text-red-800"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <div className="space-y-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedSubtasks = [...newTask.subtasks];
+                                updatedSubtasks.splice(index, 1);
+                                setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                              }}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="space-y-3">
                               <div>
                                 <label className="block text-xs font-medium text-gray-700 mb-1">
                                   Título <span className="text-red-500">*</span>
@@ -3484,47 +3339,47 @@ function Tasks() {
                                   className="text-sm"
                                 />
                               </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                                    Duración (minutos) <span className="text-red-500">*</span>
-                                  </label>
-                                  <input
-                                    type="number"
-                                    value={subtask.estimated_duration}
-                                    onChange={(e) => {
-                                      const updatedSubtasks = [...newTask.subtasks];
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Duración (minutos) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="number"
+                                  value={subtask.estimated_duration}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
                                       updatedSubtasks[index] = { ...subtask, estimated_duration: Number(e.target.value) };
-                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                    }}
-                                    className="w-full p-2 border rounded-md"
-                                    min="1"
-                                    required
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                                    Asignar a <span className="text-red-500">*</span>
-                                  </label>
-                                  <select
-                                    value={subtask.assigned_to || ''}
-                                    onChange={(e) => {
-                                      const updatedSubtasks = [...newTask.subtasks];
-                                      updatedSubtasks[index] = { ...subtask, assigned_to: e.target.value };
-                                      setNewTask({ ...newTask, subtasks: updatedSubtasks });
-                                    }}
-                                    className="w-full p-2 border rounded-md"
-                                    required
-                                  >
-                                    <option value="">Seleccionar usuario</option>
-                                    {getAvailableUsers(newTask.project_id).map((user) => (
-                                      <option key={user.id} value={user.id}>
-                                        {user.name || user.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  className="w-full p-2 border rounded-md"
+                                  min="1"
+                                  required
+                                />
                               </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">
+                                  Asignar a <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={subtask.assigned_to || ''}
+                                  onChange={(e) => {
+                                    const updatedSubtasks = [...newTask.subtasks];
+                                    updatedSubtasks[index] = { ...subtask, assigned_to: e.target.value };
+                                    setNewTask({ ...newTask, subtasks: updatedSubtasks });
+                                  }}
+                                  className="w-full p-2 border rounded-md"
+                                  required
+                                >
+                                  <option value="">Seleccionar usuario</option>
+                                  {getAvailableUsers(newTask.project_id).map((user) => (
+                                    <option key={user.id} value={user.id}>
+                                      {user.name || user.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
                               <div className="grid grid-cols-2 gap-3">
                                 <div>
                                   <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -3539,11 +3394,11 @@ function Tasks() {
                                         alert("La fecha de inicio de la subtarea no puede ser anterior a la fecha de inicio de la tarea principal.");
                                         return;
                                       }
-
+                                      
                                       const updatedSubtasks = [...newTask.subtasks];
                                       updatedSubtasks[index] = { ...subtask, start_date: newStartDate };
                                       setNewTask({ ...newTask, subtasks: updatedSubtasks });
-
+                                      
                                       // Cerrar datepicker
                                       e.target.blur();
                                     }}
@@ -3566,16 +3421,16 @@ function Tasks() {
                                         alert("La fecha límite de la subtarea no puede ser posterior a la fecha límite de la tarea principal.");
                                         return;
                                       }
-
+                                      
                                       if (newDeadline < subtask.start_date) {
                                         alert("La fecha límite no puede ser anterior a la fecha de inicio de la subtarea.");
                                         return;
                                       }
-
+                                      
                                       const updatedSubtasks = [...newTask.subtasks];
                                       updatedSubtasks[index] = { ...subtask, deadline: newDeadline };
                                       setNewTask({ ...newTask, subtasks: updatedSubtasks });
-
+                                      
                                       // Cerrar datepicker
                                       e.target.blur();
                                     }}
@@ -3586,11 +3441,11 @@ function Tasks() {
                                   />
                                 </div>
                               </div>
-                            </div>
                           </div>
-                        ))}
+                        </div>
+                      ))}
                       </div>
-
+                      
                       <button
                         type="button"
                         onClick={() => {
@@ -3605,7 +3460,6 @@ function Tasks() {
                                 assigned_to: '',
                                 start_date: newTask.start_date,
                                 deadline: newTask.deadline,
-                                sequence_order: newTask.subtasks.length + 1,
                               },
                             ],
                           });
@@ -3619,42 +3473,41 @@ function Tasks() {
                   </>
                 )}
               </div>
-              <div className="p-6 border-t mt-auto">
-                <div className="flex justify-end space-x-3">
+            <div className="p-6 border-t mt-auto">
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setProjectSelected(false);
+                    setNewTask({
+                      title: '',
+                      description: '',
+                      start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                      estimated_duration: 30,
+                      priority: 'medium',
+                      is_sequential: false,
+                      phase_id: null,
+                      assigned_to: [],
+                      subtasks: [],
+                      project_id: null,
+                    });
+                  }}
+                  className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                {projectSelected && (
                   <button
-                    type="button"
-                    onClick={() => {
-                      setShowModal(false);
-                      setProjectSelected(false);
-                      setNewTask({
-                        title: '',
-                        description: '',
-                        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-                        estimated_duration: 30,
-                        priority: 'medium',
-                        is_sequential: false,
-                        phase_id: null,
-                        assigned_to: [],
-                        subtasks: [],
-                        project_id: null,
-                      });
-                    }}
-                    className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
                   >
-                    Cancelar
+                    Crear Tarea
                   </button>
-                  {projectSelected && (
-                    <button
-                      type="submit"
-                      disabled={creatingTask}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {creatingTask ? 'Creando...' : 'Crear Tarea'}
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
+            </div>
             </form>
           </div>
         </div>
@@ -3725,8 +3578,8 @@ function Tasks() {
                     />
                   ) : (
                     <div className="p-3 bg-gray-50 rounded-md min-h-[4rem] border">
-                      <RichTextDisplay
-                        text={selectedTask.description || ""}
+                      <RichTextDisplay 
+                        text={selectedTask.description || ""} 
                         className="text-gray-700 leading-relaxed"
                       />
                     </div>
@@ -3821,10 +3674,11 @@ function Tasks() {
                         <option value="high">Alta</option>
                       </select>
                     ) : (
-                      <p className={`p-2 rounded-md ${selectedTask.priority === 'high' ? 'bg-red-50 text-red-800' :
-                        selectedTask.priority === 'medium' ? 'bg-yellow-50 text-yellow-800' :
-                          'bg-green-50 text-green-800'
-                        }`}>
+                      <p className={`p-2 rounded-md ${
+                        selectedTask.priority === 'high' ? 'bg-red-50 text-red-800' : 
+                        selectedTask.priority === 'medium' ? 'bg-yellow-50 text-yellow-800' : 
+                        'bg-green-50 text-green-800'
+                      }`}>
                         {getPriorityText(selectedTask.priority)}
                       </p>
                     )}
@@ -3845,8 +3699,8 @@ function Tasks() {
                       </>
                     ) : (
                       <div className="p-2 bg-gray-50 rounded-md">
-                        {selectedTask.is_sequential ?
-                          "Las subtareas deben completarse en orden secuencial" :
+                        {selectedTask.is_sequential ? 
+                          "Las subtareas deben completarse en orden secuencial" : 
                           "Las subtareas pueden completarse en cualquier orden"}
                       </div>
                     )}
@@ -3865,11 +3719,11 @@ function Tasks() {
                     </div>
                   </div>
                 </div>
-
+                
                 {/* Mostrar usuarios asignados en el modal de detalles */}
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Usuarios asignados:</h3>
-
+                  
                   {editMode && isAdmin && (!subtasks[selectedTask.id] || subtasks[selectedTask.id].length === 0) ? (
                     <div className="bg-gray-50 p-4 rounded-md">
                       <p className="text-sm text-gray-600 mb-3">Selecciona los usuarios para esta tarea:</p>
@@ -3880,19 +3734,19 @@ function Tasks() {
                               type="checkbox"
                               id={`assign-task-${user.id}`}
                               checked={
-                                editedTask.assigned_users
-                                  ? Array.isArray(editedTask.assigned_users)
+                                editedTask.assigned_users 
+                                  ? Array.isArray(editedTask.assigned_users) 
                                     ? editedTask.assigned_users.includes(user.id)
                                     : editedTask.assigned_users === user.id
                                   : false
                               }
                               onChange={(e) => {
-                                let newAssignedUsers: string[] = Array.isArray(editedTask.assigned_users)
+                                let newAssignedUsers: string[] = Array.isArray(editedTask.assigned_users) 
                                   ? [...editedTask.assigned_users]
-                                  : editedTask.assigned_users
-                                    ? [String(editedTask.assigned_users)]
+                                  : editedTask.assigned_users 
+                                    ? [String(editedTask.assigned_users)] 
                                     : [];
-
+                                
                                 if (e.target.checked) {
                                   if (!newAssignedUsers.includes(user.id)) {
                                     newAssignedUsers.push(user.id);
@@ -3900,7 +3754,7 @@ function Tasks() {
                                 } else {
                                   newAssignedUsers = newAssignedUsers.filter(id => id !== user.id);
                                 }
-
+                                
                                 setEditedTask({
                                   ...editedTask,
                                   assigned_users: newAssignedUsers
@@ -3914,34 +3768,34 @@ function Tasks() {
                           </div>
                         ))}
                       </div>
-                      {(!editedTask.assigned_users ||
+                      {(!editedTask.assigned_users || 
                         (Array.isArray(editedTask.assigned_users) && editedTask.assigned_users.length === 0)) && (
-                          <p className="text-xs text-amber-600 mt-2">
-                            Nota: Si no asignas usuarios, la tarea quedará sin asignar.
-                          </p>
-                        )}
+                        <p className="text-xs text-amber-600 mt-2">
+                          Nota: Si no asignas usuarios, la tarea quedará sin asignar.
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {selectedTask.assigned_users ? (
-                        Array.isArray(selectedTask.assigned_users) ?
+                        Array.isArray(selectedTask.assigned_users) ? 
                           selectedTask.assigned_users.map(userId => (
                             <span key={userId} className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
                               {users.find(u => u.id === userId)?.name || userId}
                             </span>
                           ))
-                          :
+                          : 
                           <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
                             {users.find(u => u.id === String(selectedTask.assigned_users))?.name || selectedTask.assigned_users}
                           </span>
                       ) : selectedTask.assigned_to ? (
-                        Array.isArray(selectedTask.assigned_to) ?
+                        Array.isArray(selectedTask.assigned_to) ? 
                           selectedTask.assigned_to.map(userId => (
                             <span key={userId} className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
                               {users.find(u => u.id === userId)?.name || userId}
                             </span>
                           ))
-                          :
+                          : 
                           <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
                             {users.find(u => u.id === String(selectedTask.assigned_to))?.name || selectedTask.assigned_to}
                           </span>
@@ -3951,7 +3805,7 @@ function Tasks() {
                     </div>
                   )}
                 </div>
-
+                
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Subtareas asociadas:</h3>
                   <div className="space-y-2">
@@ -3960,11 +3814,6 @@ function Tasks() {
                         {editMode ? (
                           <div className="bg-gray-50 p-4 rounded-md">
                             <p className="text-sm text-gray-600 mb-3">Puedes cambiar el orden y asignación de las subtareas:</p>
-                            {selectedTask.is_sequential && (
-                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-3">
-                                Varias subtareas pueden tener el mismo nivel (ej. dos con nivel 1). El nivel indica el orden de ejecución; las del mismo nivel pueden hacerse en paralelo.
-                              </p>
-                            )}
                             <div className="space-y-4">
                               {subtasks[selectedTask.id]
                                 .sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0))
@@ -3978,7 +3827,7 @@ function Tasks() {
                                       }
                                     }));
                                   }
-
+                                  
                                   return (
                                     <div key={subtask.id} className="flex items-center gap-3 border border-gray-200 p-3 rounded-md">
                                       <div className="flex-none w-16">
@@ -3988,7 +3837,7 @@ function Tasks() {
                                             onClick={() => {
                                               const currentOrder = editedSubtasks[subtask.id]?.sequence_order || subtask.sequence_order || index + 1;
                                               if (currentOrder <= 1) return;
-
+                                              
                                               setEditedSubtasks(prev => ({
                                                 ...prev,
                                                 [subtask.id]: {
@@ -4071,7 +3920,7 @@ function Tasks() {
                             <div className="mt-3 text-xs text-gray-500">
                               Los cambios en el orden se aplicarán al guardar la tarea.
                             </div>
-
+                            
                             {/* Nuevas subtareas en modo edición */}
                             {newSubtasksInEdit.length > 0 && (
                               <div className="mt-4 pt-4 border-t border-gray-200">
@@ -4210,7 +4059,7 @@ function Tasks() {
                                 </div>
                               </div>
                             )}
-
+                            
                             {/* Botones para agregar subtareas */}
                             <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap gap-2">
                               <button
@@ -4250,10 +4099,11 @@ function Tasks() {
                                   <span className="text-xs text-indigo-600">
                                     {users.find(u => u.id === subtask.assigned_to)?.name || "No asignada"}
                                   </span>
-                                  <span className={`text-xs px-2 py-1 rounded ${subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                    subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                                      'bg-gray-100 text-gray-800'
-                                    }`}>
+                                  <span className={`text-xs px-2 py-1 rounded ${
+                                    subtask.status === 'completed' || subtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                                    subtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
                                     <TaskStatusDisplay status={subtask.status} />
                                   </span>
                                 </div>
@@ -4291,7 +4141,7 @@ function Tasks() {
                     </select>
                   ) : (
                     <p className="p-2 bg-gray-50 rounded-md">
-                      {selectedTask.project_id
+                      {selectedTask.project_id 
                         ? projects.find(p => p.id === selectedTask.project_id)?.name
                         : "No asignado a proyecto"}
                     </p>
@@ -4314,7 +4164,7 @@ function Tasks() {
                       </select>
                     ) : (
                       <p className="p-2 bg-gray-50 rounded-md">
-                        {selectedTask.phase_id
+                        {selectedTask.phase_id 
                           ? editPhases.find(p => p.id === selectedTask.phase_id)?.name
                           : "Sin fase"}
                       </p>
@@ -4843,8 +4693,8 @@ function Tasks() {
                     />
                   ) : (
                     <div className="p-3 bg-gray-50 rounded-md min-h-[4rem] border">
-                      <RichTextDisplay
-                        text={selectedSubtask.description || ""}
+                      <RichTextDisplay 
+                        text={selectedSubtask.description || ""} 
                         className="text-gray-700 leading-relaxed"
                       />
                     </div>
@@ -5032,10 +4882,11 @@ function Tasks() {
                         <option value="approved">Aprobada</option>
                       </select>
                     ) : (
-                      <p className={`p-2 rounded-md ${selectedSubtask.status === 'completed' || selectedSubtask.status === 'approved' ? 'bg-green-100 text-green-800' :
-                        selectedSubtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
+                      <p className={`p-2 rounded-md ${
+                        selectedSubtask.status === 'completed' || selectedSubtask.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                        selectedSubtask.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 
+                        'bg-gray-100 text-gray-800'
+                      }`}>
                         <TaskStatusDisplay status={selectedSubtask.status} />
                       </p>
                     )}
