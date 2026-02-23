@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles, Upload } from 'lucide-react';
+import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles } from 'lucide-react';
 import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -147,21 +147,7 @@ function Tasks() {
   const [phases, setPhases] = useState<{ id: string; name: string; order: number }[]>([]);
   const [editPhases, setEditPhases] = useState<{ id: string; name: string; order: number }[]>([]);
   const [error, setError] = useState('');
-  const [showGenerateDailyModal, setShowGenerateDailyModal] = useState(false);
-  const [dailySubtaskConfig, setDailySubtaskConfig] = useState({
-    startDate: format(new Date(), 'yyyy-MM-dd'),
-    endDate: format(addDays(new Date(), 6), 'yyyy-MM-dd'),
-    titlePrefix: '',
-    assignee: '',
-    duration: 15,
-    includeWeekends: false,
-  });
-  const [generatingDaily, setGeneratingDaily] = useState(false);
   const [projectSelected, setProjectSelected] = useState(false);
-  const [showSelectTaskForDailyModal, setShowSelectTaskForDailyModal] = useState(false);
-  const [tasksForDailyModal, setTasksForDailyModal] = useState<Task[]>([]);
-  const [dailyModalPhases, setDailyModalPhases] = useState<{ id: string; name: string; order: number }[]>([]);
-  const [dailyModalProjectFilter, setDailyModalProjectFilter] = useState<string | null>(null);
   const [showSupervisionTaskModal, setShowSupervisionTaskModal] = useState(false);
   const [supervisionTaskConfig, setSupervisionTaskConfig] = useState({
     project_id: '',
@@ -179,19 +165,21 @@ function Tasks() {
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
-  const [showBulkCreateModal, setShowBulkCreateModal] = useState(false);
-  const [bulkTasks, setBulkTasks] = useState<{ title: string; duration: number; assignee: string }[]>([
-    { title: '', duration: 60, assignee: '' },
-  ]);
-  const [bulkProjectId, setBulkProjectId] = useState<string | null>(null);
-  const [bulkDeadline, setBulkDeadline] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
-  const [creatingBulk, setCreatingBulk] = useState(false);
-  const [showCsvImportModal, setShowCsvImportModal] = useState(false);
-  const [csvImportData, setCsvImportData] = useState<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]>([]);
-  const [csvImportProject, setCsvImportProject] = useState<string | null>(null);
-  const [importingCsv, setImportingCsv] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
-  const csvInputRef = React.useRef<HTMLInputElement>(null);
+  const [showFloatingMenu, setShowFloatingMenu] = useState(false);
+  const floatingMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (floatingMenuRef.current && !floatingMenuRef.current.contains(e.target as Node)) {
+        setShowFloatingMenu(false);
+      }
+    }
+    if (showFloatingMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showFloatingMenu]);
 
   const TASK_DRAFT_KEY = 'dailys_newTask_draft';
   const draftSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -363,44 +351,6 @@ function Tasks() {
     }
     fetchEditPhases();
   }, [selectedTask?.project_id, editedTask?.project_id]);
-
-  useEffect(() => {
-    if (showSelectTaskForDailyModal) {
-      async function fetchForModal() {
-        try {
-          const { data: tasksData, error } = await supabase
-            .from('tasks')
-            .select(`
-              id, title, start_date, deadline, project_id, phase_id, status,
-              projects!inner(id, is_archived)
-            `)
-            .eq('projects.is_archived', false)
-            .in('status', ['pending', 'in_progress', 'completed', 'in_review', 'returned', 'blocked'])
-            .order('created_at', { ascending: false })
-            .limit(100);
-          if (error) throw error;
-          const tasks = (tasksData || []) as Task[];
-          setTasksForDailyModal(tasks);
-          const projectIds = [...new Set(tasks.map((t) => t.project_id).filter(Boolean))] as string[];
-          if (projectIds.length > 0) {
-            const { data: phasesData } = await supabase
-              .from('phases')
-              .select('id, name, order')
-              .in('project_id', projectIds)
-              .order('order', { ascending: true });
-            setDailyModalPhases((phasesData || []) as { id: string; name: string; order: number }[]);
-          } else {
-            setDailyModalPhases([]);
-          }
-        } catch (e) {
-          console.error('Error fetching tasks for daily modal:', e);
-          setTasksForDailyModal([]);
-          setDailyModalPhases([]);
-        }
-      }
-      fetchForModal();
-    }
-  }, [showSelectTaskForDailyModal]);
 
   useEffect(() => {
     setCurrentPage(1); // Resetear a la primera página cuando cambie el filtro
@@ -1117,56 +1067,6 @@ function Tasks() {
     }
   }
 
-  async function handleGenerateDailySubtasks() {
-    if (!selectedTask || !user) return;
-    const { startDate, endDate, titlePrefix, assignee, duration, includeWeekends } = dailySubtaskConfig;
-    const dates = getDailyDates(startDate, endDate, includeWeekends);
-    if (dates.length === 0) {
-      toast.error('No hay días en el rango seleccionado. Revisa las fechas o activa "Incluir fines de semana".');
-      return;
-    }
-    if (dates.length > 90) {
-      toast.error('Máximo 90 días por generación. Reduce el rango.');
-      return;
-    }
-    const prefix = (titlePrefix || selectedTask.title).trim().slice(0, 40);
-    const currentCount = subtasks[selectedTask.id]?.length || 0;
-    setGeneratingDaily(true);
-    try {
-      const subtasksToInsert = dates.map((date, i) => ({
-        task_id: selectedTask.id,
-        title: `${prefix} – ${format(date, 'd MMM', { locale: es })}`,
-        description: '',
-        estimated_duration: duration,
-        sequence_order: currentCount + i + 1,
-        assigned_to: assignee || user.id,
-        status: 'pending',
-        start_date: format(date, "yyyy-MM-dd'T'09:00:00"),
-        deadline: format(date, "yyyy-MM-dd'T'18:00:00"),
-      }));
-      const { error } = await supabase.from('subtasks').insert(subtasksToInsert);
-      if (error) throw error;
-      if (user?.id) {
-        await logAudit({
-          user_id: user.id,
-          entity_type: 'subtask',
-          entity_id: selectedTask.id,
-          action: 'create',
-          summary: `${dates.length} subtareas diarias creadas para tarea: ${selectedTask.title}`,
-        });
-      }
-      toast.success(`${dates.length} subtareas diarias creadas correctamente`);
-      setShowGenerateDailyModal(false);
-      await fetchSubtasks();
-      setEditedSubtasks({});
-    } catch (err) {
-      console.error('Error generando subtareas diarias:', err);
-      toast.error('Error al crear las subtareas. Inténtalo de nuevo.');
-    } finally {
-      setGeneratingDaily(false);
-    }
-  }
-
   async function handleUpdateTask() {
     if (!selectedTask || !editedTask) return;
 
@@ -1606,174 +1506,6 @@ function Tasks() {
     }
   }
 
-  function parseCsvFile(file: File): Promise<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const text = (e.target?.result as string) || '';
-          const lines = text.split(/\r?\n/).filter((l) => l.trim());
-          if (lines.length < 2) {
-            resolve([]);
-            return;
-          }
-          const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-          const titleIdx = headers.findIndex((h) => h === 'titulo' || h === 'title');
-          const durationIdx = headers.findIndex((h) => h === 'duracion' || h === 'duration' || h === 'duration_min');
-          const assigneeIdx = headers.findIndex((h) => h === 'asignado' || h === 'assignee' || h === 'email');
-          const deadlineIdx = headers.findIndex((h) => h === 'fecha_limite' || h === 'deadline' || h === 'fecha');
-          const result: { title: string; project_id: string; deadline: string; duration: number; assignee: string }[] = [];
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
-            const title = titleIdx >= 0 ? cols[titleIdx] || '' : cols[0] || '';
-            if (!title) continue;
-            const duration = durationIdx >= 0 ? Number(cols[durationIdx]) || 60 : 60;
-            const assignee = assigneeIdx >= 0 ? cols[assigneeIdx] || '' : '';
-            let deadline = deadlineIdx >= 0 ? cols[deadlineIdx] || '' : '';
-            if (deadline && !deadline.includes('T')) {
-              deadline = deadline.length === 10 ? `${deadline}T18:00:00` : deadline;
-            }
-            if (!deadline) deadline = format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm");
-            result.push({ title, project_id: '', deadline, duration, assignee });
-          }
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(new Error('Error leyendo archivo'));
-      reader.readAsText(file, 'UTF-8');
-    });
-  }
-
-  async function handleCsvFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const rows = await parseCsvFile(file);
-      setCsvImportData(rows);
-      setShowCsvImportModal(true);
-      if (!csvImportProject && projects.length > 0) setCsvImportProject(projects[0].id);
-    } catch (err) {
-      toast.error('Error al leer el CSV');
-    }
-    e.target.value = '';
-  }
-
-  async function handleCsvImport(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user || !csvImportProject) {
-      toast.error('Selecciona un proyecto');
-      return;
-    }
-    const valid = csvImportData.filter((r) => r.title?.trim());
-    if (valid.length === 0) {
-      toast.error('No hay filas válidas');
-      return;
-    }
-    setImportingCsv(true);
-    try {
-      const proj = projects.find((p) => p.id === csvImportProject);
-      const startDate = proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
-      const tasksToInsert = valid.map((r) => {
-        let assigneeId = user.id;
-        if (r.assignee) {
-          const u = users.find((us) => us.email === r.assignee || us.id === r.assignee || us.name === r.assignee);
-          if (u) assigneeId = u.id;
-        }
-        return {
-          title: r.title.trim(),
-          description: '',
-          start_date: startDate,
-          deadline: r.deadline,
-          estimated_duration: r.duration,
-          priority: 'medium',
-          is_sequential: false,
-          created_by: user.id,
-          assigned_users: [assigneeId],
-          project_id: csvImportProject,
-          status: 'pending',
-        };
-      });
-      const { data, error } = await supabase.from('tasks').insert(tasksToInsert).select();
-      if (error) throw error;
-      for (const d of (data || []) as { id: string; title: string }[]) {
-        if (user?.id) {
-          await logAudit({
-            user_id: user.id,
-            entity_type: 'task',
-            entity_id: d.id,
-            action: 'create',
-            summary: `Tarea creada (CSV): ${d.title}`,
-          });
-        }
-      }
-      toast.success(`${valid.length} tareas importadas`);
-      setShowCsvImportModal(false);
-      setCsvImportData([]);
-      await fetchTasks();
-    } catch (err) {
-      console.error('Error importando CSV:', err);
-      toast.error('Error al importar');
-    } finally {
-      setImportingCsv(false);
-    }
-  }
-
-  async function handleBulkCreateTasks(e: React.FormEvent) {
-    e.preventDefault();
-    if (!user || !bulkProjectId) {
-      toast.error('Selecciona un proyecto');
-      return;
-    }
-    const valid = bulkTasks.filter((t) => t.title?.trim());
-    if (valid.length === 0) {
-      toast.error('Añade al menos una tarea con título');
-      return;
-    }
-    setCreatingBulk(true);
-    try {
-      const proj = projects.find((p) => p.id === bulkProjectId);
-      const startDate = proj?.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
-      const tasksToInsert = valid.map((t) => ({
-        title: t.title.trim(),
-        description: '',
-        start_date: startDate,
-        deadline: bulkDeadline,
-        estimated_duration: t.duration,
-        priority: 'medium',
-        is_sequential: false,
-        created_by: user.id,
-        assigned_users: t.assignee ? [t.assignee] : [user.id],
-        project_id: bulkProjectId,
-        status: 'pending',
-      }));
-      const { data, error } = await supabase.from('tasks').insert(tasksToInsert).select();
-      if (error) throw error;
-      for (const d of (data || []) as { id: string; title: string }[]) {
-        if (user?.id) {
-          await logAudit({
-            user_id: user.id,
-            entity_type: 'task',
-            entity_id: d.id,
-            action: 'create',
-            summary: `Tarea creada: ${d.title}`,
-          });
-        }
-      }
-      toast.success(`${valid.length} tareas creadas`);
-      setShowBulkCreateModal(false);
-      setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
-      setBulkProjectId(null);
-      await fetchTasks();
-    } catch (err) {
-      console.error('Error creando tareas:', err);
-      toast.error('Error al crear las tareas');
-    } finally {
-      setCreatingBulk(false);
-    }
-  }
-
   async function handleDeleteTask() {
     if (!selectedTask) return;
 
@@ -2156,86 +1888,50 @@ function Tasks() {
   return (
     <div className="p-6 relative">
       {isAdmin && (
-        <button
-          onClick={() => {
-            setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
-            setShowQuickCreateModal(true);
-          }}
-          className="fixed bottom-8 right-8 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center z-40 transition-transform hover:scale-110"
-          title="Crear tarea rápida (Ctrl+N)"
-        >
-          <Plus className="w-7 h-7" />
-        </button>
-      )}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tareas</h1>
-          <p className="text-gray-600">Gestiona tus tareas y asignaciones</p>
-        </div>
-        <div className="flex gap-2">
-          {isAdmin && (
-            <>
+        <div ref={floatingMenuRef} className="fixed bottom-8 right-8 z-40">
+          {showFloatingMenu && (
+            <div className="absolute bottom-16 right-0 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2">
               <button
-                onClick={() => setShowSupervisionTaskModal(true)}
-                className="bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 flex items-center gap-2"
-                title="Crear tarea de supervisión con checkpoints diarios en un solo paso"
+                onClick={() => { setShowModal(true); setShowFloatingMenu(false); }}
+                className="w-full px-4 py-2.5 text-left hover:bg-indigo-50 flex items-center gap-2 text-gray-700"
               >
-                <Sparkles className="w-5 h-5" />
-                Tarea supervisión
-              </button>
-              <button
-                onClick={() => setShowSelectTaskForDailyModal(true)}
-                className="bg-emerald-600 text-white px-4 py-2 rounded-md hover:bg-emerald-700 flex items-center gap-2"
-                title="Añadir subtareas diarias a una tarea existente"
-              >
-                <CalendarDays className="w-5 h-5" />
-                Subtareas diarias
+                <Plus className="w-5 h-5 text-indigo-600" />
+                Nueva Tarea
               </button>
               <button
                 onClick={() => {
                   setQuickTask({ title: '', project_id: null, assigned_to: null, deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm") });
                   setShowQuickCreateModal(true);
+                  setShowFloatingMenu(false);
                 }}
-                className="bg-indigo-500 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
+                className="w-full px-4 py-2.5 text-left hover:bg-indigo-50 flex items-center gap-2 text-gray-700"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-5 h-5 text-indigo-600" />
                 Crear rápida
               </button>
               <button
-                onClick={() => csvInputRef.current?.click()}
-                className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center gap-2"
+                onClick={() => { setShowSupervisionTaskModal(true); setShowFloatingMenu(false); }}
+                className="w-full px-4 py-2.5 text-left hover:bg-teal-50 flex items-center gap-2 text-gray-700"
+                title="Crear tarea de supervisión con checkpoints diarios"
               >
-                <Upload className="w-5 h-5" />
-                Importar CSV
+                <Sparkles className="w-5 h-5 text-teal-600" />
+                Tarea supervisión
               </button>
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv"
-                onChange={handleCsvFileSelect}
-                className="hidden"
-              />
-              <button
-                onClick={() => {
-                  setBulkTasks([{ title: '', duration: 60, assignee: '' }]);
-                  setBulkProjectId(null);
-                  setBulkDeadline(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
-                  setShowBulkCreateModal(true);
-                }}
-                className="bg-indigo-500/80 text-white px-4 py-2 rounded-md hover:bg-indigo-600 flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Crear varias
-              </button>
-              <button
-                onClick={() => setShowModal(true)}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center"
-              >
-                <Plus className="w-5 h-5 mr-2" />
-                Nueva Tarea
-              </button>
-            </>
+            </div>
           )}
+          <button
+            onClick={() => setShowFloatingMenu((v) => !v)}
+            className="w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-110"
+            title="Crear tarea (Ctrl+N)"
+          >
+            <Plus className="w-7 h-7" />
+          </button>
+        </div>
+      )}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Tareas</h1>
+          <p className="text-gray-600">Gestiona tus tareas y asignaciones</p>
         </div>
       </div>
 
@@ -2786,166 +2482,6 @@ function Tasks() {
         </div>
       )}
 
-
-      {/* Modal Importar CSV */}
-      {showCsvImportModal && csvImportData.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleCsvImport} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b">
-              <h2 className="text-lg font-semibold">Importar desde CSV</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                {csvImportData.length} filas detectadas. Columnas: titulo, duracion, asignado (email), fecha_limite
-              </p>
-            </div>
-            <div className="p-5 overflow-y-auto flex-1">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Proyecto para todas las tareas *</label>
-                <select
-                  value={csvImportProject || ''}
-                  onChange={(e) => setCsvImportProject(e.target.value || null)}
-                  className="w-full p-2 border rounded-lg"
-                  required
-                >
-                  <option value="">Seleccionar</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="max-h-48 overflow-y-auto border rounded-lg p-2 text-sm">
-                {csvImportData.slice(0, 20).map((r, i) => (
-                  <div key={i} className="flex gap-2 py-1">
-                    <span className="flex-1 truncate">{r.title || '(sin título)'}</span>
-                    <span className="text-gray-500">{r.duration}min</span>
-                    <span className="text-gray-500 truncate w-24">{r.assignee || '—'}</span>
-                  </div>
-                ))}
-                {csvImportData.length > 20 && (
-                  <p className="text-gray-500 py-2">... y {csvImportData.length - 20} más</p>
-                )}
-              </div>
-            </div>
-            <div className="p-4 border-t flex justify-end gap-2">
-              <button type="button" onClick={() => { setShowCsvImportModal(false); setCsvImportData([]); }} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                Cancelar
-              </button>
-              <button type="submit" disabled={importingCsv} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {importingCsv ? 'Importando...' : `Importar ${csvImportData.filter((r) => r.title?.trim()).length} tareas`}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Modal Crear varias tareas */}
-      {showBulkCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleBulkCreateTasks} className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b">
-              <h2 className="text-lg font-semibold">Crear varias tareas</h2>
-              <p className="text-sm text-gray-500 mt-0.5">Añade filas y crea todas a la vez</p>
-            </div>
-            <div className="p-5 overflow-y-auto flex-1">
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Proyecto *</label>
-                  <select
-                    value={bulkProjectId || ''}
-                    onChange={(e) => setBulkProjectId(e.target.value || null)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
-                    required
-                  >
-                    <option value="">Seleccionar</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Fecha límite</label>
-                  <input
-                    type="datetime-local"
-                    value={bulkDeadline}
-                    onChange={(e) => setBulkDeadline(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex text-xs font-medium text-gray-500">
-                  <span className="flex-1">Título</span>
-                  <span className="w-20">Duración</span>
-                  <span className="w-36">Asignar a</span>
-                  <span className="w-8" />
-                </div>
-                {bulkTasks.map((row, i) => (
-                  <div key={i} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={row.title}
-                      onChange={(e) => {
-                        const next = [...bulkTasks];
-                        next[i] = { ...next[i], title: e.target.value };
-                        setBulkTasks(next);
-                      }}
-                      placeholder="Título de la tarea"
-                      className="flex-1 px-3 py-2 border rounded-lg text-sm"
-                    />
-                    <input
-                      type="number"
-                      min={5}
-                      value={row.duration}
-                      onChange={(e) => {
-                        const next = [...bulkTasks];
-                        next[i] = { ...next[i], duration: Number(e.target.value) || 60 };
-                        setBulkTasks(next);
-                      }}
-                      className="w-20 px-2 py-2 border rounded-lg text-sm"
-                    />
-                    <select
-                      value={row.assignee}
-                      onChange={(e) => {
-                        const next = [...bulkTasks];
-                        next[i] = { ...next[i], assignee: e.target.value };
-                        setBulkTasks(next);
-                      }}
-                      className="w-36 px-2 py-2 border rounded-lg text-sm"
-                    >
-                      <option value="">Yo</option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>{u.name || u.email}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setBulkTasks((p) => p.filter((_, j) => j !== i))}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setBulkTasks((p) => [...p, { title: '', duration: 60, assignee: '' }])}
-                  className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800"
-                >
-                  <Plus className="w-4 h-4" />
-                  Añadir fila
-                </button>
-              </div>
-            </div>
-            <div className="p-4 border-t flex justify-end gap-2">
-              <button type="button" onClick={() => setShowBulkCreateModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                Cancelar
-              </button>
-              <button type="submit" disabled={creatingBulk} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {creatingBulk ? 'Creando...' : `Crear ${bulkTasks.filter((t) => t.title?.trim()).length} tareas`}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Modal Crear rápida */}
       {showQuickCreateModal && (
@@ -4634,205 +4170,6 @@ function Tasks() {
               </button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* Modal seleccionar tarea para subtareas diarias (acceso directo) */}
-      {showSelectTaskForDailyModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-white">
-                  <CalendarDays className="w-6 h-6" />
-                  <h2 className="text-lg font-semibold">Generar subtareas diarias</h2>
-                </div>
-                <button
-                  onClick={() => setShowSelectTaskForDailyModal(false)}
-                  className="text-white/80 hover:text-white p-1"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <p className="text-emerald-100 text-sm mt-1">
-                Selecciona la tarea a la que añadir checkpoints diarios (supervisión, revisiones, etc.)
-              </p>
-            </div>
-            <div className="p-6 max-h-[60vh] overflow-y-auto">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Proyecto (opcional)</label>
-                <select
-                  value={dailyModalProjectFilter || ''}
-                  onChange={(e) => setDailyModalProjectFilter(e.target.value || null)}
-                  className="w-full p-2 border rounded-lg"
-                >
-                  <option value="">Todos los proyectos</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Tarea padre</label>
-                <div className="space-y-1 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
-                  {tasksForDailyModal
-                    .filter((t) => !dailyModalProjectFilter || t.project_id === dailyModalProjectFilter)
-                    .map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedTask(t);
-                          setDailySubtaskConfig((prev) => ({
-                            ...prev,
-                            startDate: t.start_date?.slice(0, 10) || format(new Date(), 'yyyy-MM-dd'),
-                            endDate: t.deadline?.slice(0, 10) || format(addDays(new Date(), 6), 'yyyy-MM-dd'),
-                            titlePrefix: t.title?.slice(0, 40) || '',
-                          }));
-                          setShowSelectTaskForDailyModal(false);
-                          setShowGenerateDailyModal(true);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-md hover:bg-emerald-50 hover:border-emerald-200 border border-transparent transition-colors flex justify-between items-center"
-                      >
-                        <span className="font-medium text-gray-800 truncate flex-1">{t.title}</span>
-                        <span className="text-xs text-gray-500 ml-2 shrink-0 flex items-center gap-1">
-                          {projects.find((p) => p.id === t.project_id)?.name || 'Sin proyecto'}
-                          <PhaseBadge phaseName={dailyModalPhases.find(p => p.id === t.phase_id)?.name} />
-                        </span>
-                      </button>
-                    ))}
-                  {tasksForDailyModal.filter((t) => !dailyModalProjectFilter || t.project_id === dailyModalProjectFilter).length === 0 && (
-                    <p className="text-gray-500 text-sm py-4 text-center">No hay tareas activas para seleccionar.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Generar subtareas diarias */}
-      {showGenerateDailyModal && selectedTask && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4">
-              <div className="flex items-center gap-2 text-white">
-                <Sparkles className="w-6 h-6" />
-                <h2 className="text-lg font-semibold">Generar subtareas diarias</h2>
-              </div>
-              <p className="text-emerald-100 text-sm mt-1">
-                Crea una subtarea por cada día del rango. Ideal para revisiones diarias, supervisión de embudo, etc.
-              </p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha inicio</label>
-                  <input
-                    type="date"
-                    value={dailySubtaskConfig.startDate}
-                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, startDate: e.target.value }))}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha fin</label>
-                  <input
-                    type="date"
-                    value={dailySubtaskConfig.endDate}
-                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, endDate: e.target.value }))}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Prefijo del título</label>
-                <input
-                  type="text"
-                  value={dailySubtaskConfig.titlePrefix}
-                  onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, titlePrefix: e.target.value }))}
-                  placeholder={selectedTask.title || 'Ej: Revisión embudo'}
-                  className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">Se añadirá la fecha a cada subtarea (ej: "Revisión embudo – 3 feb")</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Asignar a</label>
-                  <select
-                    value={dailySubtaskConfig.assignee}
-                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, assignee: e.target.value }))}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">Yo (actual)</option>
-                    {getAvailableUsers(selectedTask.project_id || null).map((u) => (
-                      <option key={u.id} value={u.id}>{u.name || u.email}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Duración (min)</label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={480}
-                    value={dailySubtaskConfig.duration}
-                    onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, duration: Number(e.target.value) || 15 }))}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={dailySubtaskConfig.includeWeekends}
-                  onChange={(e) => setDailySubtaskConfig(prev => ({ ...prev, includeWeekends: e.target.checked }))}
-                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="text-sm text-gray-700">Incluir fines de semana</span>
-              </label>
-              <div className="bg-gray-50 rounded-lg p-3 text-sm">
-                <p className="font-medium text-gray-700 mb-1">Vista previa</p>
-                {(() => {
-                  const dates = getDailyDates(dailySubtaskConfig.startDate, dailySubtaskConfig.endDate, dailySubtaskConfig.includeWeekends);
-                  const prefix = (dailySubtaskConfig.titlePrefix || selectedTask.title || 'Día').trim().slice(0, 40);
-                  const sample = dates.slice(0, 3).map(d => `${prefix} – ${format(d, 'd MMM', { locale: es })}`);
-                  return (
-                    <p className="text-gray-600">
-                      Se crearán <strong>{dates.length}</strong> subtareas
-                      {dates.length > 0 && (
-                        <>: {sample.join(', ')}{dates.length > 3 ? '...' : ''}</>
-                      )}
-                    </p>
-                  );
-                })()}
-              </div>
-            </div>
-            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowGenerateDailyModal(false)}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleGenerateDailySubtasks}
-                disabled={generatingDaily}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {generatingDaily ? (
-                  <>Generando...</>
-                ) : (
-                  <>
-                    <CalendarDays className="w-4 h-4" />
-                    Generar
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
