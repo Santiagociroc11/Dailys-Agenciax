@@ -235,7 +235,7 @@ function Tasks() {
         localStorage.setItem(TASK_DRAFT_KEY, JSON.stringify(draft));
       } catch (_) { }
       draftSaveTimeoutRef.current = null;
-    }, 800);
+    }, 400);
     return () => {
       if (draftSaveTimeoutRef.current) {
         clearTimeout(draftSaveTimeoutRef.current);
@@ -2577,6 +2577,18 @@ function Tasks() {
               <h2 className="text-xl font-semibold">Crear Nueva Tarea</h2>
               <button
                 onClick={() => {
+                  // Guardar borrador al cerrar (por si cerró antes de los 800ms del debounce)
+                  const hasContent = (newTask.title?.trim()) || newTask.subtasks.length > 0;
+                  if (hasContent) {
+                    try {
+                      localStorage.setItem(TASK_DRAFT_KEY, JSON.stringify({
+                        newTask,
+                        projectSelected,
+                        selectedProjectDates,
+                        savedAt: Date.now(),
+                      }));
+                    } catch (_) { }
+                  }
                   setShowModal(false);
                   setProjectSelected(false);
                   setError('');
@@ -2678,30 +2690,27 @@ function Tasks() {
                         value={newTask.project_id || ''}
                         onChange={(e) => {
                           const projectId = e.target.value || null;
-                          setNewTask({ ...newTask, project_id: projectId });
+                          const proj = projectId ? projects.find(p => p.id === projectId) : null;
 
-                          if (projectId) {
-                            const selectedProject = projects.find(p => p.id === projectId);
-                            if (selectedProject) {
-                              // Ajustar fechas de la tarea según el proyecto
-                              const projectStartDate = selectedProject.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm");
-                              const projectEndDate = selectedProject.deadline || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+                          if (projectId && proj) {
+                            const toDatetimeLocal = (s: string) => {
+                              const base = (s || '').replace(' ', 'T').substring(0, 16);
+                              return base.includes('T') ? base : `${base}T00:00`;
+                            };
+                            const projectStartDate = toDatetimeLocal(proj.start_date || format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+                            const projectEndDate = toDatetimeLocal(proj.deadline || format(new Date(), "yyyy-MM-dd'T'HH:mm"));
 
-                              setSelectedProjectDates({
-                                start_date: projectStartDate.replace(" ", "T").substring(0, 16),
-                                deadline: projectEndDate.replace(" ", "T").substring(0, 16)
-                              });
-
-                              setNewTask(prev => ({
-                                ...prev,
-                                start_date: projectStartDate.replace(" ", "T").substring(0, 16),
-                                deadline: projectEndDate.replace(" ", "T").substring(0, 16),
-                                phase_id: null,
-                              }));
-                            }
+                            setSelectedProjectDates({ start_date: projectStartDate, deadline: projectEndDate });
+                            setNewTask(prev => ({
+                              ...prev,
+                              project_id: projectId,
+                              start_date: projectStartDate,
+                              deadline: projectEndDate,
+                              phase_id: null,
+                            }));
                           } else {
                             setSelectedProjectDates(null);
-                            setNewTask(prev => ({ ...prev, phase_id: null }));
+                            setNewTask(prev => ({ ...prev, project_id: null, phase_id: null }));
                           }
                         }}
                         className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
