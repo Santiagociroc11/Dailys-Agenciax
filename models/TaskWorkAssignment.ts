@@ -6,7 +6,7 @@ const taskWorkAssignmentSchema = new mongoose.Schema(
     ...idField,
     user_id: { type: String, required: true, ref: 'User' },
     date: { type: String, required: true },
-    task_id: { type: String, required: true, ref: 'Task' },
+    task_id: { type: String, required: false, ref: 'Task' },
     task_type: { type: String, required: true },
     project_id: { type: String, default: null, ref: 'Project' },
     subtask_id: { type: String, default: null, ref: 'Subtask' },

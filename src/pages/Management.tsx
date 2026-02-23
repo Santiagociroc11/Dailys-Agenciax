@@ -2073,25 +2073,36 @@ function Management() {
     setIsUnassigning(true);
     try {
       const taskType = isSubtask ? 'subtask' : 'task';
-      let assignmentQuery = supabase
-        .from('task_work_assignments')
-        .select('id, date')
-        .eq('task_type', taskType)
-        .eq('user_id', userId);
-      assignmentQuery = isSubtask ? assignmentQuery.eq('subtask_id', itemId) : assignmentQuery.eq('task_id', itemId);
-      const { data: assignments, error: fetchErr } = await assignmentQuery.order('date', { ascending: false }).limit(5);
-      if (fetchErr) throw fetchErr;
-      if (!assignments || assignments.length === 0) {
-        toast.error('No hay asignación del día para esta tarea');
-        setIsUnassigning(false);
-        return;
+      let assignments: { id: string; date?: string }[] | null = null;
+      let fetchErr: { message: string } | null = null;
+
+      if (isSubtask) {
+        const q1 = supabase.from('task_work_assignments').select('id, date').eq('task_type', taskType).eq('user_id', userId).eq('subtask_id', itemId);
+        const r1 = await q1.order('date', { ascending: false }).limit(5);
+        fetchErr = r1.error as { message: string } | null;
+        assignments = Array.isArray(r1.data) ? r1.data : r1.data ? [r1.data] : null;
+        if ((!assignments || assignments.length === 0) && !fetchErr) {
+          const q2 = supabase.from('task_work_assignments').select('id, date').eq('task_type', taskType).eq('user_id', userId).eq('task_id', itemId);
+          const r2 = await q2.order('date', { ascending: false }).limit(5);
+          fetchErr = r2.error as { message: string } | null;
+          assignments = Array.isArray(r2.data) ? r2.data : r2.data ? [r2.data] : null;
+        }
+      } else {
+        const q = supabase.from('task_work_assignments').select('id, date').eq('task_type', taskType).eq('user_id', userId).eq('task_id', itemId);
+        const r = await q.order('date', { ascending: false }).limit(5);
+        fetchErr = r.error as { message: string } | null;
+        assignments = Array.isArray(r.data) ? r.data : r.data ? [r.data] : null;
       }
-      const toRemove = assignments[0];
-      const { error: delErr } = await supabase
-        .from('task_work_assignments')
-        .delete()
-        .eq('id', toRemove.id);
-      if (delErr) throw delErr;
+
+      if (fetchErr) throw fetchErr;
+      const toRemove = assignments && assignments.length > 0 ? assignments[0] : null;
+      if (toRemove) {
+        const { error: delErr } = await supabase
+          .from('task_work_assignments')
+          .delete()
+          .eq('id', toRemove.id);
+        if (delErr) throw delErr;
+      }
       const { error: updErr } = await supabase
         .from(table)
         .update({ status: 'pending' })
@@ -2108,7 +2119,7 @@ function Management() {
           }
         }
       }
-      toast.success('Tarea desasignada del día correctamente');
+      toast.success(toRemove ? 'Tarea desasignada del día correctamente' : 'Estado revertido a pendiente');
       fetchData();
     } catch (err) {
       console.error('Error al desasignar del día:', err);

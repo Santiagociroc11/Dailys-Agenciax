@@ -1505,17 +1505,18 @@ export default function UserProjectView() {
             }
          }
 
-         // 2. Obtener las tareas principales de las subtareas
+         // 2. Obtener las tareas principales de las subtareas (y mapa subtaskId -> parentTaskId para MongoDB)
+         const parentTaskIdBySubtaskId: Record<string, string> = {};
          if (subtaskIdsToUpdate.length > 0) {
-            const { data: subtasks, error: subtasksError } = await supabase.from("subtasks").select("task_id").in("id", subtaskIdsToUpdate);
+            const { data: subtasks, error: subtasksError } = await supabase.from("subtasks").select("id, task_id").in("id", subtaskIdsToUpdate);
 
             if (subtasksError) {
                console.error("Error al obtener tareas principales:", subtasksError);
             } else if (subtasks) {
-               // Agregar los IDs de tareas principales al conjunto
                subtasks.forEach((subtask) => {
                   if (subtask.task_id) {
                      parentTasksOfSubtasks.add(subtask.task_id);
+                     parentTaskIdBySubtaskId[subtask.id] = subtask.task_id;
                   }
                });
             }
@@ -1526,20 +1527,22 @@ export default function UserProjectView() {
             const task = taskItems.find((t) => t.id === taskId)!;
             const isSubtask = task.type === "subtask";
             const originalId = isSubtask ? task.id.replace("subtask-", "") : task.id;
-            
+            const parentTaskId = isSubtask ? parentTaskIdBySubtaskId[originalId] : null;
+            if (isSubtask && !parentTaskId) {
+               console.warn("[SAVE] Subtarea sin tarea padre en mapa:", originalId, parentTaskIdBySubtaskId);
+            }
+
             // Obtener horarios programados para esta tarea
             const schedule = taskSchedules[taskId];
             let startTime = null;
             let endTime = null;
-            
+
             if (schedule) {
-               // Crear timestamps completos con la fecha de hoy
                const todayStr = format(new Date(), "yyyy-MM-dd");
                startTime = `${todayStr}T${schedule.startTime}:00`;
                endTime = `${todayStr}T${schedule.endTime}:00`;
             }
 
-            // Duración: personalizada (si el usuario la ingresó) o estimado del admin
             const customDuration = customDurations[taskId];
             const customMinutes = customDuration?.value
                ? (customDuration.unit === "hours" ? customDuration.value * 60 : customDuration.value)
@@ -1550,7 +1553,7 @@ export default function UserProjectView() {
                user_id: user.id,
                date: today,
                task_type: isSubtask ? "subtask" : "task",
-               task_id: isSubtask ? null : originalId,
+               task_id: isSubtask ? (parentTaskId || originalId) : originalId,
                subtask_id: isSubtask ? originalId : null,
                project_id: task.project_id,
                estimated_duration: finalDuration,
@@ -1562,10 +1565,8 @@ export default function UserProjectView() {
             };
          });
 
-         // 4. Insertar en task_work_assignments
-
-         // 4.1 Upsert solo tareas
-         const taskRows = tasksToSave.filter((r) => r.task_id !== null);
+         // 4. Insertar en task_work_assignments (MongoDB requiere task_id; para subtareas usamos el task_id padre)
+         const taskRows = tasksToSave.filter((r) => r.task_type === "task");
          if (taskRows.length) {
             const { error: err1 } = await supabase.from("task_work_assignments").upsert(taskRows, {
                onConflict: "user_id,date,task_type,task_id",
@@ -1573,18 +1574,13 @@ export default function UserProjectView() {
             if (err1) throw err1;
          }
 
-         // 4.2 Upsert solo subtareas
-         const subtaskRows = tasksToSave
-            .filter((r) => r.subtask_id !== null)
-            .map((r) => {
-               // crea un nuevo objeto sin la propiedad task_id
-               const { task_id, ...onlySub } = r;
-               return onlySub;
+         const subtaskRows = tasksToSave.filter((r) => r.subtask_id !== null);
+         if (subtaskRows.length) {
+            const { error: err2 } = await supabase.from("task_work_assignments").upsert(subtaskRows, {
+               onConflict: "user_id,date,task_type,subtask_id",
             });
-
-         await supabase.from("task_work_assignments").upsert(subtaskRows, {
-            onConflict: "user_id,date,task_type,subtask_id",
-         });
+            if (err2) throw err2;
+         }
 
          // 5. Actualizar estado de subtareas a "assigned" (NO sobrescribir estimated_duration: el estimado del admin se mantiene)
          if (subtaskIdsToUpdate.length > 0) {
