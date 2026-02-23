@@ -800,8 +800,10 @@ function Tasks() {
         throw error;
       }
 
-      if (data && data[0]) {
-        const taskId = data[0].id;
+      // El API devuelve un documento cuando single:true, no un array
+      const taskDoc = Array.isArray(data) ? data[0] : data;
+      if (taskDoc) {
+        const taskId = taskDoc.id;
         if (user?.id) {
           await logAudit({
             user_id: user.id,
@@ -854,7 +856,8 @@ function Tasks() {
             return;
           }
           if (user?.id && createdSubtasks) {
-            for (const st of createdSubtasks as { id: string; title: string }[]) {
+            const subs = Array.isArray(createdSubtasks) ? createdSubtasks : [createdSubtasks];
+            for (const st of subs as { id: string; title: string }[]) {
               await logAudit({
                 user_id: user.id,
                 entity_type: 'subtask',
@@ -867,7 +870,8 @@ function Tasks() {
         }
 
         // Cerrar modal y resetear formulario de inmediato (no depender del refresco de lista)
-        setTasks([...(data || []), ...tasks]);
+        const taskArray = Array.isArray(data) ? data : (data ? [data] : []);
+        setTasks([...taskArray, ...tasks]);
         try {
           localStorage.removeItem(TASK_DRAFT_KEY);
         } catch (_) { }
@@ -892,7 +896,7 @@ function Tasks() {
 
         // 🔔 Notificar a usuarios sobre tareas/subtareas disponibles inmediatamente
         try {
-          const createdTask = data[0];
+          const createdTask = taskDoc;
 
           // Obtener nombre del proyecto
           let projectName = "Proyecto sin nombre";
