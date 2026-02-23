@@ -812,6 +812,9 @@ function Tasks() {
           });
         }
         if (newTask.subtasks.length > 0) {
+          const taskStart = taskToCreate.start_date?.trim() || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+          const taskDeadline = taskToCreate.deadline?.trim() || format(new Date(), "yyyy-MM-dd'T'HH:mm");
+
           const subtasksToInsert = newTask.subtasks.map((subtask, index) => {
             const assignedTo = subtask.assigned_to && subtask.assigned_to.trim() !== ''
               ? subtask.assigned_to
@@ -819,18 +822,17 @@ function Tasks() {
             const order = (subtask.sequence_order != null && subtask.sequence_order >= 1)
               ? subtask.sequence_order
               : index + 1;
-            // start_date y deadline son NOT NULL en la tabla; usar fechas de la tarea si la subtarea no tiene
-            const startDate = subtask.start_date?.trim() ? subtask.start_date : taskToCreate.start_date;
-            const endDate = subtask.deadline?.trim() ? subtask.deadline : taskToCreate.deadline;
-
-            // Log para debug de secuencia
-            console.log(`Preparando subtarea ${index}: ${subtask.title}, Orden final: ${order}`);
+            // start_date y deadline son NOT NULL en la tabla; formato ISO para Postgres
+            const rawStart = subtask.start_date?.trim() || taskStart;
+            const rawEnd = subtask.deadline?.trim() || taskDeadline;
+            const startDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawStart) ? rawStart + ':00' : rawStart;
+            const endDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawEnd) ? rawEnd + ':00' : rawEnd;
 
             return {
               task_id: taskId,
-              title: subtask.title.trim(),
+              title: (subtask.title || '').trim() || `Subtarea ${index + 1}`,
               description: subtask.description || '',
-              estimated_duration: subtask.estimated_duration || 0,
+              estimated_duration: Number(subtask.estimated_duration) || 30,
               sequence_order: order,
               assigned_to: assignedTo,
               status: 'pending',
@@ -839,7 +841,6 @@ function Tasks() {
             };
           });
 
-          console.log("Insertando subtareas:", subtasksToInsert);
           const { data: createdSubtasks, error: subtaskError } = await supabase
             .from('subtasks')
             .insert(subtasksToInsert)
@@ -847,8 +848,10 @@ function Tasks() {
 
           if (subtaskError) {
             console.error("Error detallado de subtareas:", subtaskError);
-            toast.error(`La tarea se creó pero hubo un error con las subtareas: ${subtaskError.message}`);
-            // No lanzamos error aquí para permitir que la tarea principal se mantenga creada
+            setError(`Error al crear las subtareas: ${subtaskError.message}. La tarea principal sí se creó. Revisa permisos o formato de datos.`);
+            toast.error(`Las subtareas no se crearon: ${subtaskError.message}`);
+            setCreatingTask(false);
+            return;
           }
           if (user?.id && createdSubtasks) {
             for (const st of createdSubtasks as { id: string; title: string }[]) {
