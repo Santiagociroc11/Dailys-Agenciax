@@ -1,5 +1,5 @@
 import React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
@@ -190,7 +190,12 @@ function Tasks() {
   const [csvImportData, setCsvImportData] = useState<{ title: string; project_id: string; deadline: string; duration: number; assignee: string }[]>([]);
   const [csvImportProject, setCsvImportProject] = useState<string | null>(null);
   const [importingCsv, setImportingCsv] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
   const csvInputRef = React.useRef<HTMLInputElement>(null);
+
+  const TASK_DRAFT_KEY = 'dailys_newTask_draft';
+  const draftSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [quickTask, setQuickTask] = useState({
     title: '',
     project_id: '' as string | null,
@@ -219,6 +224,69 @@ function Tasks() {
     fetchTasks();
     fetchProjects();
   }, []);
+
+  // Autoguardado local del borrador de nueva tarea (evita perder muchas subtareas por un error)
+  useEffect(() => {
+    if (!showModal) return;
+    const hasContent = (newTask.title && newTask.title.trim()) || newTask.subtasks.length > 0;
+    if (!hasContent) {
+      try {
+        localStorage.removeItem(TASK_DRAFT_KEY);
+      } catch (_) {}
+      return;
+    }
+    if (draftSaveTimeoutRef.current) clearTimeout(draftSaveTimeoutRef.current);
+    draftSaveTimeoutRef.current = setTimeout(() => {
+      try {
+        const draft = {
+          newTask,
+          projectSelected,
+          selectedProjectDates,
+          savedAt: Date.now(),
+        };
+        localStorage.setItem(TASK_DRAFT_KEY, JSON.stringify(draft));
+      } catch (_) {}
+      draftSaveTimeoutRef.current = null;
+    }, 800);
+    return () => {
+      if (draftSaveTimeoutRef.current) {
+        clearTimeout(draftSaveTimeoutRef.current);
+        draftSaveTimeoutRef.current = null;
+      }
+    };
+  }, [showModal, newTask, projectSelected, selectedProjectDates]);
+
+  // Restaurar borrador al abrir el modal de crear tarea (solo si hay borrador y el formulario está vacío)
+  useEffect(() => {
+    if (!showModal) return;
+    const formEmpty = !(newTask.title?.trim()) && newTask.subtasks.length === 0;
+    if (!formEmpty) return;
+    try {
+      const raw = localStorage.getItem(TASK_DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw) as { newTask?: NewTask; projectSelected?: boolean; selectedProjectDates?: { start_date: string; deadline: string } };
+      if (!d.newTask) return;
+      const hasContent = (d.newTask.title && String(d.newTask.title).trim()) || (d.newTask.subtasks?.length ?? 0) > 0;
+      if (!hasContent) return;
+      setNewTask({
+        ...d.newTask,
+        title: d.newTask.title ?? '',
+        description: d.newTask.description ?? '',
+        start_date: d.newTask.start_date ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        deadline: d.newTask.deadline ?? format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        estimated_duration: d.newTask.estimated_duration ?? 30,
+        priority: (d.newTask.priority as 'low' | 'medium' | 'high') ?? 'medium',
+        is_sequential: d.newTask.is_sequential ?? false,
+        phase_id: d.newTask.phase_id ?? null,
+        assigned_to: Array.isArray(d.newTask.assigned_to) ? d.newTask.assigned_to : [],
+        subtasks: Array.isArray(d.newTask.subtasks) ? d.newTask.subtasks : [],
+        project_id: d.newTask.project_id ?? null,
+      });
+      setProjectSelected(d.projectSelected ?? !!d.newTask.project_id);
+      if (d.selectedProjectDates) setSelectedProjectDates(d.selectedProjectDates);
+      toast.info('Borrador restaurado. Puedes seguir editando o descartar para empezar de cero.');
+    } catch (_) {}
+  }, [showModal]);
 
   useEffect(() => {
     async function loadTaskTemplates() {
@@ -646,6 +714,7 @@ function Tasks() {
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
+    if (creatingTask) return;
     setError('');
 
     // Validar que se haya seleccionado un proyecto
@@ -660,6 +729,7 @@ function Tasks() {
       return;
     }
 
+    setCreatingTask(true);
     try {
       let taskToCreate = { ...newTask };
       
@@ -720,8 +790,6 @@ function Tasks() {
         phase_id: taskToCreate.phase_id || null,
       };
 
-      console.log("Enviando datos de tarea:", taskData);
-
       const { data, error } = await supabase
         .from('tasks')
         .insert([taskData])
@@ -751,20 +819,21 @@ function Tasks() {
             const order = subtask.sequence_order != null && subtask.sequence_order >= 1
               ? subtask.sequence_order
               : index + 1;
+            // start_date y deadline son NOT NULL en la tabla; usar fechas de la tarea si la subtarea no tiene
+            const startDate = subtask.start_date?.trim() ? subtask.start_date : taskToCreate.start_date;
+            const endDate = subtask.deadline?.trim() ? subtask.deadline : taskToCreate.deadline;
             return {
-            task_id: taskId,
-            title: subtask.title,
+              task_id: taskId,
+              title: subtask.title,
               description: subtask.description || '',
               estimated_duration: subtask.estimated_duration || 0,
               sequence_order: order,
               assigned_to: assignedTo,
               status: 'pending',
-              start_date: subtask.start_date || null,
-              deadline: subtask.deadline || null
+              start_date: startDate,
+              deadline: endDate
             };
           });
-
-          console.log("Enviando datos de subtareas:", subtasksToInsert);
 
           const { data: createdSubtasks, error: subtaskError } = await supabase
             .from('subtasks')
@@ -788,9 +857,30 @@ function Tasks() {
           }
         }
 
-        await fetchTasks();
-        await fetchSubtasks();
-        
+        // Cerrar modal y resetear formulario de inmediato (no depender del refresco de lista)
+        setTasks([...(data || []), ...tasks]);
+        try {
+          localStorage.removeItem(TASK_DRAFT_KEY);
+        } catch (_) {}
+        setShowModal(false);
+        setProjectSelected(false);
+        setNewTask({
+          title: '',
+          description: '',
+          start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+          deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+          estimated_duration: 30,
+          priority: 'medium',
+          is_sequential: false,
+          phase_id: null,
+          assigned_to: [],
+          subtasks: [],
+          project_id: null,
+        });
+
+        // Refrescar lista en segundo plano (no bloquear el cierre del modal)
+        fetchTasks().then(() => fetchSubtasks()).catch((err) => console.error('Error refrescando lista:', err));
+
         // 🔔 Notificar a usuarios sobre tareas/subtareas disponibles inmediatamente
         try {
           const createdTask = data[0];
@@ -883,25 +973,12 @@ function Tasks() {
         } catch (notificationError) {
           console.error('🚨 [NOTIFICATION] Error preparando notificaciones de tarea creada:', notificationError);
         }
-
-      setTasks([...(data || []), ...tasks]);
-      setShowModal(false);
-      setNewTask({
-        title: '',
-        description: '',
-        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        estimated_duration: 30,
-        priority: 'medium',
-        is_sequential: false,
-          assigned_to: [],
-        subtasks: [],
-          project_id: null,
-      });
       }
     } catch (error) {
       console.error('Error al crear la tarea:', error);
       setError('Error al crear la tarea. Por favor, inténtalo de nuevo.');
+    } finally {
+      setCreatingTask(false);
     }
   }
 
@@ -2972,7 +3049,38 @@ function Tasks() {
                   {error}
                 </div>
               )}
-              
+              {(newTask.title?.trim() || newTask.subtasks.length > 0) && (
+                <div className="mb-4 flex items-center justify-between gap-2 bg-sky-50 border border-sky-200 text-sky-800 px-4 py-2 rounded text-sm">
+                  <span>Borrador guardado automáticamente en este navegador.</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem(TASK_DRAFT_KEY);
+                      } catch (_) {}
+                      setNewTask({
+                        title: '',
+                        description: '',
+                        start_date: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                        estimated_duration: 30,
+                        priority: 'medium',
+                        is_sequential: false,
+                        phase_id: null,
+                        assigned_to: [],
+                        subtasks: [],
+                        project_id: null,
+                      });
+                      setProjectSelected(false);
+                      setSelectedProjectDates(null);
+                      toast.success('Borrador descartado. Puedes empezar de cero.');
+                    }}
+                    className="text-sky-600 hover:text-sky-800 underline font-medium"
+                  >
+                    Descartar borrador
+                  </button>
+                </div>
+              )}
               <div className="space-y-4">
                 {!projectSelected ? (
                   <div className="bg-indigo-50 p-6 rounded-lg border border-indigo-100">
@@ -3527,9 +3635,10 @@ function Tasks() {
                 {projectSelected && (
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                    disabled={creatingTask}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Crear Tarea
+                    {creatingTask ? 'Creando...' : 'Crear Tarea'}
                   </button>
                 )}
               </div>
