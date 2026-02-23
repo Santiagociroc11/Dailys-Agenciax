@@ -53,6 +53,30 @@ class QueryBuilder {
     return this;
   }
 
+  gte(column: string, value: unknown) {
+    this.pending.filters.gte = this.pending.filters.gte ?? {};
+    (this.pending.filters.gte as Record<string, unknown>)[column] = value;
+    return this;
+  }
+
+  lte(column: string, value: unknown) {
+    this.pending.filters.lte = this.pending.filters.lte ?? {};
+    (this.pending.filters.lte as Record<string, unknown>)[column] = value;
+    return this;
+  }
+
+  gt(column: string, value: unknown) {
+    this.pending.filters.gt = this.pending.filters.gt ?? {};
+    (this.pending.filters.gt as Record<string, unknown>)[column] = value;
+    return this;
+  }
+
+  lt(column: string, value: unknown) {
+    this.pending.filters.lt = this.pending.filters.lt ?? {};
+    (this.pending.filters.lt as Record<string, unknown>)[column] = value;
+    return this;
+  }
+
   or(expr: string) {
     const conditions = parseOrExpression(expr);
     if (conditions.length > 0) {

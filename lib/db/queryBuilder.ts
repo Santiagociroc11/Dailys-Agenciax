@@ -50,6 +50,58 @@ export function buildMongoFilter(filters: QueryFilter): FilterQuery<unknown> {
     }
   }
 
+  if (filters.gte) {
+    for (const [key, value] of Object.entries(filters.gte)) {
+      if (value !== undefined && value !== null) {
+        const existing = (query as Record<string, unknown>)[key];
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+          (existing as Record<string, unknown>).$gte = value;
+        } else {
+          (query as Record<string, unknown>)[key] = { $gte: value };
+        }
+      }
+    }
+  }
+
+  if (filters.lte) {
+    for (const [key, value] of Object.entries(filters.lte)) {
+      if (value !== undefined && value !== null) {
+        const existing = (query as Record<string, unknown>)[key];
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+          (existing as Record<string, unknown>).$lte = value;
+        } else {
+          (query as Record<string, unknown>)[key] = { $lte: value };
+        }
+      }
+    }
+  }
+
+  if (filters.gt) {
+    for (const [key, value] of Object.entries(filters.gt)) {
+      if (value !== undefined && value !== null) {
+        const existing = (query as Record<string, unknown>)[key];
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+          (existing as Record<string, unknown>).$gt = value;
+        } else {
+          (query as Record<string, unknown>)[key] = { $gt: value };
+        }
+      }
+    }
+  }
+
+  if (filters.lt) {
+    for (const [key, value] of Object.entries(filters.lt)) {
+      if (value !== undefined && value !== null) {
+        const existing = (query as Record<string, unknown>)[key];
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+          (existing as Record<string, unknown>).$lt = value;
+        } else {
+          (query as Record<string, unknown>)[key] = { $lt: value };
+        }
+      }
+    }
+  }
+
   if (filters.or && filters.or.length > 0) {
     (query as Record<string, unknown>).$or = filters.or;
   }

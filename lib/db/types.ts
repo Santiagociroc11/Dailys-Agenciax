@@ -6,6 +6,10 @@ export interface QueryFilter {
   contains?: Record<string, unknown[]>;
   not?: Record<string, { op: string; value: unknown }>;
   or?: Array<Record<string, unknown>>;
+  gte?: Record<string, unknown>;
+  lte?: Record<string, unknown>;
+  gt?: Record<string, unknown>;
+  lt?: Record<string, unknown>;
 }
 
 export interface QueryRequest {
