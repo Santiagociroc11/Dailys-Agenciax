@@ -12,7 +12,7 @@ export interface LookupConfig {
   foreignField: string;
   as: string;
   inner?: boolean;
-  nested?: LookupConfig[];
+  nested?: (LookupConfig & { addToPath?: string })[];
 }
 
 /** Relaciones conocidas: tabla -> relación -> config */
@@ -40,6 +40,99 @@ const LOOKUP_CONFIG: Record<string, Record<string, LookupConfig>> = {
           foreignField: 'id',
           as: 'projects',
           inner: true,
+        },
+      ],
+    },
+  },
+  task_work_assignments: {
+    tasks: {
+      from: 'tasks',
+      localField: 'task_id',
+      foreignField: 'id',
+      as: 'tasks',
+      inner: false,
+      nested: [
+        {
+          from: 'projects',
+          localField: 'project_id',
+          foreignField: 'id',
+          as: 'projects',
+          inner: false,
+        },
+      ],
+    },
+    subtasks: {
+      from: 'subtasks',
+      localField: 'subtask_id',
+      foreignField: 'id',
+      as: 'subtasks',
+      inner: false,
+      nested: [
+        {
+          from: 'tasks',
+          localField: 'task_id',
+          foreignField: 'id',
+          as: 'tasks',
+          inner: false,
+        },
+        {
+          from: 'projects',
+          localField: 'tasks.project_id',
+          foreignField: 'id',
+          as: 'projects',
+          inner: false,
+          addToPath: 'tasks.projects',
+        },
+      ],
+    },
+  },
+  work_sessions: {
+    task_work_assignments: {
+      from: 'task_work_assignments',
+      localField: 'assignment_id',
+      foreignField: 'id',
+      as: 'task_work_assignments',
+      inner: true,
+      nested: [
+        {
+          from: 'tasks',
+          localField: 'task_id',
+          foreignField: 'id',
+          as: 'tasks',
+          inner: false,
+          nested: [
+            {
+              from: 'projects',
+              localField: 'project_id',
+              foreignField: 'id',
+              as: 'projects',
+              inner: false,
+            },
+          ],
+        },
+        {
+          from: 'subtasks',
+          localField: 'subtask_id',
+          foreignField: 'id',
+          as: 'subtasks',
+          inner: false,
+          nested: [
+            {
+              from: 'tasks',
+              localField: 'task_id',
+              foreignField: 'id',
+              as: 'tasks',
+              inner: false,
+            },
+            {
+              from: 'projects',
+              localField: 'tasks.project_id',
+              foreignField: 'id',
+              as: 'projects',
+              inner: false,
+              addToPath: 'tasks.projects',
+            },
+          ],
         },
       ],
     },
@@ -123,10 +216,11 @@ function buildLookupStages(
             preserveNullAndEmptyArrays: !nested.inner,
           },
         });
-        // Mover el resultado al objeto padre (tasks.projects)
+        // Mover el resultado al objeto padre (tasks.projects o el path indicado)
+        const addPath = (nested as { addToPath?: string }).addToPath ?? nested.as;
         stages.push({
           $addFields: {
-            [`${config.as}.${nested.as}`]: `$${config.as}_${nested.as}`,
+            [`${config.as}.${addPath}`]: `$${config.as}_${nested.as}`,
           },
         });
         stages.push({

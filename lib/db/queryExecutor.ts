@@ -6,6 +6,9 @@ import { hasJoinSyntax, buildAggregationPipeline } from './aggregationBuilder.js
 const JOIN_RELATIONS: Record<string, Record<string, { table: string; localField: string; foreignField: string }>> = {
   tasks: { projects: { table: 'projects', localField: 'project_id', foreignField: 'id' } },
   subtasks: { tasks: { table: 'tasks', localField: 'task_id', foreignField: 'id' } },
+  work_sessions: {
+    task_work_assignments: { table: 'task_work_assignments', localField: 'assignment_id', foreignField: 'id' },
+  },
 };
 
 /**
