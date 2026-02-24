@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -299,7 +299,43 @@ export default function UserProjectView() {
    const [sortBy, setSortBy] = useState<"deadline" | "priority" | "duration">("deadline");
    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
    const [selectedPhaseFilter, setSelectedPhaseFilter] = useState<string | null>(null);
+   const [selectedProjectFilter, setSelectedProjectFilter] = useState<string | null>(null);
    const [phasesForProject, setPhasesForProject] = useState<{ id: string; name: string; order: number }[]>([]);
+
+   // Proyectos únicos para el filtro (extraídos de los datos cargados)
+   const availableProjects = useMemo(() => {
+      const seen = new Set<string>();
+      const result: { id: string; name: string }[] = [];
+      const addFrom = (items: { project_id?: string; projectName?: string }[]) => {
+         items.forEach((t) => {
+            const pid = t.project_id || "";
+            if (pid && !seen.has(pid)) {
+               seen.add(pid);
+               result.push({ id: pid, name: t.projectName || "Sin proyecto" });
+            }
+         });
+      };
+      addFrom(taskItems);
+      addFrom(assignedTaskItems);
+      addFrom(delayedTaskItems);
+      addFrom(completedTaskItems);
+      addFrom(inReviewTaskItems);
+      addFrom(approvedTaskItems);
+      addFrom(returnedTaskItems);
+      addFrom(blockedTaskItems);
+      return result.sort((a, b) => a.name.localeCompare(b.name));
+   }, [taskItems, assignedTaskItems, delayedTaskItems, completedTaskItems, inReviewTaskItems, approvedTaskItems, returnedTaskItems, blockedTaskItems]);
+
+   // Listas filtradas por proyecto (para Gestión)
+   const filterByProject = <T extends { project_id?: string }>(items: T[]) =>
+      selectedProjectFilter ? items.filter((t) => t.project_id === selectedProjectFilter) : items;
+   const filteredAssignedTaskItems = filterByProject(assignedTaskItems);
+   const filteredDelayedTaskItems = filterByProject(delayedTaskItems);
+   const filteredCompletedTaskItems = filterByProject(completedTaskItems);
+   const filteredInReviewTaskItems = filterByProject(inReviewTaskItems);
+   const filteredApprovedTaskItems = filterByProject(approvedTaskItems);
+   const filteredReturnedTaskItems = filterByProject(returnedTaskItems);
+   const filteredBlockedTaskItems = filterByProject(blockedTaskItems);
 
    // Estados para carga
    const [loading, setLoading] = useState(true);
@@ -395,13 +431,10 @@ export default function UserProjectView() {
 
    useEffect(() => {
       if (projectId && user) {
-         // Validar permisos: usuarios no-admin solo pueden ver proyectos asignados
-         if (!isAdmin && projectId !== "all") {
-            const allowed = user.assigned_projects ?? [];
-            if (allowed.length > 0 && !allowed.includes(projectId)) {
-               navigate("/user/projects/all", { replace: true });
-               return;
-            }
+         // Siempre usar "all" - el filtro por proyecto se hace en el listado
+         if (projectId !== "all") {
+            navigate("/user/projects/all", { replace: true });
+            return;
          }
 
          // Resetear estados importantes al cambiar de proyecto
@@ -3548,12 +3581,6 @@ export default function UserProjectView() {
             .gte("date", startDate)
             .lte("date", endDate);
 
-         // 🔍 DEBUG Gantt: ver qué devuelve la consulta de asignaciones
-         console.log("[Gantt DEBUG] Semana:", startDate, "->", endDate);
-         console.log("[Gantt DEBUG] task_work_assignments error:", error);
-         console.log("[Gantt DEBUG] task_work_assignments count:", assignments?.length ?? 0);
-         console.log("[Gantt DEBUG] task_work_assignments raw:", assignments);
-
          if (error) throw error;
 
          // Agrupar por tarea
@@ -3612,10 +3639,6 @@ export default function UserProjectView() {
                notes: assignment.notes
             });
          });
-
-         // 🔍 DEBUG Gantt: taskGroups construidos
-         console.log("[Gantt DEBUG] taskGroups count:", Object.keys(taskGroups).length);
-         console.log("[Gantt DEBUG] taskGroups keys:", Object.keys(taskGroups));
 
          // ✅ NUEVO: Obtener sesiones reales de trabajo desde work_sessions
          const workSessionsData = await getWorkSessionsForGantt(startDate, endDate);
@@ -3941,9 +3964,24 @@ export default function UserProjectView() {
 
                {error && <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-md">{error}</div>}
 
-               {/* Opciones de ordenamiento */}
+               {/* Opciones de ordenamiento y filtros */}
                <div className="mb-4 p-3 bg-white rounded-md shadow-sm border border-gray-200">
                   <div className="flex flex-wrap items-center gap-4">
+                     {availableProjects.length > 0 && (
+                        <div>
+                           <p className="text-sm font-medium text-gray-700 mb-1">Filtrar por proyecto:</p>
+                           <select
+                              value={selectedProjectFilter || ''}
+                              onChange={(e) => setSelectedProjectFilter(e.target.value || null)}
+                              className="p-2 border rounded-md text-sm"
+                           >
+                              <option value="">Todos los proyectos</option>
+                              {availableProjects.map((p) => (
+                                 <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                           </select>
+                        </div>
+                     )}
                      {phasesForProject.length > 0 && (
                         <div>
                            <p className="text-sm font-medium text-gray-700 mb-1">Filtrar por fase:</p>
@@ -4002,11 +4040,15 @@ export default function UserProjectView() {
                         </div>
                      ) : isDataInitialized && taskItems.length > 0 ? (
                         (() => {
-                           const filtered = selectedPhaseFilter
-                              ? selectedPhaseFilter === "__no_phase__"
-                                 ? taskItems.filter((t) => !t.phase_id)
-                                 : taskItems.filter((t) => t.phase_id === selectedPhaseFilter)
-                              : taskItems;
+                           let filtered = taskItems;
+                           if (selectedProjectFilter) {
+                              filtered = filtered.filter((t) => t.project_id === selectedProjectFilter);
+                           }
+                           if (selectedPhaseFilter) {
+                              filtered = selectedPhaseFilter === "__no_phase__"
+                                 ? filtered.filter((t) => !t.phase_id)
+                                 : filtered.filter((t) => t.phase_id === selectedPhaseFilter);
+                           }
                            return filtered.map((task) => (
                            <div key={task.id} className="grid grid-cols-6 gap-4 py-3 items-center bg-white hover:bg-gray-50 px-3">
                               <div className="text-center">
@@ -4142,7 +4184,23 @@ export default function UserProjectView() {
                         )}
                      </div>
                   </div>
-                  <div className="flex-shrink-0">
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
+                     {availableProjects.length > 0 && (
+                        <div className="flex items-center gap-2">
+                           <label htmlFor="gestion-project-filter" className="text-sm font-medium text-gray-700">Filtrar por proyecto:</label>
+                           <select
+                              id="gestion-project-filter"
+                              value={selectedProjectFilter || ''}
+                              onChange={(e) => setSelectedProjectFilter(e.target.value || null)}
+                              className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                           >
+                              <option value="">Todos los proyectos</option>
+                              {availableProjects.map((p) => (
+                                 <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                           </select>
+                        </div>
+                     )}
                      <button
                         onClick={() => setShowEventsModal(true)}
                         className="bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium shadow-md hover:shadow-lg hover:from-violet-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:ring-offset-2 transition-all duration-200 flex items-center gap-2"
@@ -4158,14 +4216,14 @@ export default function UserProjectView() {
                      <div className="flex min-w-max border-b border-gray-200 -mb-px px-2">
                         <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "en_proceso" ? "border-b-2 border-blue-500 text-blue-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("en_proceso")}>
                            En proceso
-                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600 font-medium">{(returnedTaskItems.length + delayedTaskItems.length + assignedTaskItems.length + completedTaskItems.length + inReviewTaskItems.length).toString()}</span>
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600 font-medium">{(filteredReturnedTaskItems.length + filteredDelayedTaskItems.length + filteredAssignedTaskItems.length + filteredCompletedTaskItems.length + filteredInReviewTaskItems.length).toString()}</span>
                         </button>
                         <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "gantt_semanal" ? "border-b-2 border-violet-500 text-violet-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("gantt_semanal")}>
                            Gantt semanal
                         </button>
                         <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "bloqueadas" ? "border-b-2 border-red-500 text-red-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("bloqueadas")}>
                            Bloqueadas
-                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600 font-medium">{blockedTaskItems.length}</span>
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-600 font-medium">{filteredBlockedTaskItems.length}</span>
                         </button>
                         <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "actividades" ? "border-b-2 border-violet-500 text-violet-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("actividades")}>
                            Actividades
@@ -4173,7 +4231,7 @@ export default function UserProjectView() {
                         </button>
                         <button className={`py-3 px-4 text-sm font-medium flex items-center whitespace-nowrap transition-colors ${activeGestionSubTab === "aprobadas" ? "border-b-2 border-green-500 text-green-600" : "text-gray-500 hover:text-gray-700"}`} onClick={() => setActiveGestionSubTab("aprobadas")}>
                            Aprobadas
-                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-600 font-medium">{approvedTaskItems.length}</span>
+                           <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-600 font-medium">{filteredApprovedTaskItems.length}</span>
                         </button>
                      </div>
                   </div>
@@ -4190,13 +4248,13 @@ export default function UserProjectView() {
                                  <div className="w-3 h-3 bg-purple-500 rounded-full mr-2"></div>
                                  Asignada para trabajo
                                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-600">
-                                    {(assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length)}
+                                    {(filteredAssignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + filteredDelayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length)}
                                  </span>
                               </h3>
                            </div>
                            <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {/* Tareas retrasadas sin avances */}
-                              {delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
+                              {filteredDelayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`delayed-assigned-${task.id}`} className="bg-red-50 border border-red-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4277,7 +4335,7 @@ export default function UserProjectView() {
                               })}
                               
                               {/* Tareas asignadas normales sin avances */}
-                              {assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
+                              {filteredAssignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`assigned-normal-${task.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4357,7 +4415,7 @@ export default function UserProjectView() {
                                  );
                               })}
                               
-                              {(assignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + delayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length) === 0 && (
+                              {(filteredAssignedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length + filteredDelayedTaskItems.filter(task => !taskProgress[task.id] || taskProgress[task.id].length === 0).length) === 0 && (
                                  <div className="text-center py-8 text-gray-500 text-sm">
                                     No hay tareas asignadas para trabajo
                                  </div>
@@ -4372,13 +4430,13 @@ export default function UserProjectView() {
                                  <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
                                  En Proceso
                                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-600">
-                                    {(returnedTaskItems.length + delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length)}
+                                    {(filteredReturnedTaskItems.length + filteredDelayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + filteredAssignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length)}
                                  </span>
                               </h3>
                            </div>
                            <div className="p-3 space-y-2 h-screen overflow-y-auto">
                               {/* Tareas devueltas (prioridad) */}
-                              {returnedTaskItems.map((task) => {
+                              {filteredReturnedTaskItems.map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`returned-${task.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4469,7 +4527,7 @@ export default function UserProjectView() {
                               })}
                               
                               {/* Tareas retrasadas con avances */}
-                              {delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
+                              {filteredDelayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`delayed-progress-${task.id}`} className="bg-red-50 border border-red-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4552,7 +4610,7 @@ export default function UserProjectView() {
                               })}
                               
                               {/* Tareas asignadas normales con avances */}
-                              {assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
+                              {filteredAssignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`assigned-progress-${task.id}`} className="bg-blue-50 border border-blue-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4634,7 +4692,7 @@ export default function UserProjectView() {
                                  );
                               })}
                               
-                              {(returnedTaskItems.length + delayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + assignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length) === 0 && (
+                              {(filteredReturnedTaskItems.length + filteredDelayedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length + filteredAssignedTaskItems.filter(task => taskProgress[task.id] && taskProgress[task.id].length > 0).length) === 0 && (
                                  <div className="text-center py-8 text-gray-500 text-sm">
                                     No hay tareas con avances reportados
                                  </div>
@@ -4649,12 +4707,12 @@ export default function UserProjectView() {
                                  <div className="w-3 h-3 bg-gray-500 rounded-full mr-2"></div>
                                  Entregadas
                                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
-                                    {completedTaskItems.length}
+                                    {filteredCompletedTaskItems.length}
                                  </span>
                               </h3>
                                        </div>
                            <div className="p-3 space-y-2 h-screen overflow-y-auto">
-                              {completedTaskItems.map((task) => {
+                              {filteredCompletedTaskItems.map((task) => {
                                  const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`completed-${task.id}`} className="bg-gray-50 border border-gray-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4707,7 +4765,7 @@ export default function UserProjectView() {
                                  );
                               })}
                               
-                              {completedTaskItems.length === 0 && (
+                              {filteredCompletedTaskItems.length === 0 && (
                                  <div className="text-center py-8 text-gray-500 text-sm">
                                     No hay tareas entregadas
                            </div>
@@ -4722,12 +4780,12 @@ export default function UserProjectView() {
                                  <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
                                  En Revisión
                                  <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-yellow-100 text-yellow-600">
-                                    {inReviewTaskItems.length}
+                                    {filteredInReviewTaskItems.length}
                                  </span>
                               </h3>
                            </div>
                            <div className="p-3 space-y-2 h-screen overflow-y-auto">
-                              {inReviewTaskItems.map((task) => {
+                              {filteredInReviewTaskItems.map((task) => {
                                                 const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
                                  return (
                                     <div key={`review-${task.id}`} className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
@@ -4781,7 +4839,7 @@ export default function UserProjectView() {
                                  );
                               })}
                               
-                              {inReviewTaskItems.length === 0 && (
+                              {filteredInReviewTaskItems.length === 0 && (
                                  <div className="text-center py-8 text-gray-500 text-sm">
                                     No hay tareas en revisión
                                                 </div>
@@ -5277,7 +5335,7 @@ export default function UserProjectView() {
                      <div className="mb-2">
                         <div className="flex items-center mb-2">
                            <div className="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
-                           <h3 className="text-lg font-semibold text-red-700">Tareas Bloqueadas ({blockedTaskItems.length})</h3>
+                           <h3 className="text-lg font-semibold text-red-700">Tareas Bloqueadas ({filteredBlockedTaskItems.length})</h3>
                         </div>
                         <p className="text-sm text-gray-600 mb-4">Estas tareas requieren que un administrador las revise y desbloquee para que puedas continuar.</p>
                      </div>
@@ -5298,8 +5356,8 @@ export default function UserProjectView() {
                                     <div key={i} className="h-12 bg-gray-200 rounded w-full" />
                                  ))}
                               </div>
-                           ) : blockedTaskItems.length > 0 ? (
-                              blockedTaskItems.map((task) => {
+                           ) : filteredBlockedTaskItems.length > 0 ? (
+                              filteredBlockedTaskItems.map((task) => {
                                  const blockReason = (typeof task.notes === 'object' && task.notes?.razon_bloqueo) ? task.notes.razon_bloqueo : (typeof task.notes === 'string' ? task.notes : 'No especificado');
 
                                  return (
@@ -5354,11 +5412,11 @@ export default function UserProjectView() {
                               <div key={i} className="h-12 bg-gray-200 rounded w-full" />
                            ))}
                         </div>
-                     ) : approvedTaskItems.length > 0 ? (
+                     ) : filteredApprovedTaskItems.length > 0 ? (
                         <div className="mb-8">
                            <div className="flex items-center mb-3">
                               <div className="w-4 h-4 bg-green-500 rounded-full mr-3 flex-shrink-0"></div>
-                              <h3 className="text-lg font-semibold text-green-700">Aprobadas ({approvedTaskItems.length})</h3>
+                              <h3 className="text-lg font-semibold text-green-700">Aprobadas ({filteredApprovedTaskItems.length})</h3>
                            </div>
                            <div className="bg-green-50 rounded-md shadow-sm border border-green-200 overflow-hidden">
                               <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
@@ -5372,7 +5430,7 @@ export default function UserProjectView() {
                                  <div>ESTADO</div>
                               </div>
                               <div className="divide-y divide-green-200">
-                                 {approvedTaskItems.map((task) => (
+                                 {filteredApprovedTaskItems.map((task) => (
                                     <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
                                        <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {

@@ -29,7 +29,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/user': 'Usuario',
   '/user/mi-dia': 'Mi día',
   '/user/projects': 'Proyectos',
-  '/user/projects/all': 'Todos los proyectos',
+  '/user/projects/all': 'Gestión de tareas',
   '/user/settings': 'Ajustes',
 };
 
