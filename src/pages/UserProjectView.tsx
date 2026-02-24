@@ -3548,6 +3548,12 @@ export default function UserProjectView() {
             .gte("date", startDate)
             .lte("date", endDate);
 
+         // 🔍 DEBUG Gantt: ver qué devuelve la consulta de asignaciones
+         console.log("[Gantt DEBUG] Semana:", startDate, "->", endDate);
+         console.log("[Gantt DEBUG] task_work_assignments error:", error);
+         console.log("[Gantt DEBUG] task_work_assignments count:", assignments?.length ?? 0);
+         console.log("[Gantt DEBUG] task_work_assignments raw:", assignments);
+
          if (error) throw error;
 
          // Agrupar por tarea
@@ -3606,6 +3612,10 @@ export default function UserProjectView() {
                notes: assignment.notes
             });
          });
+
+         // 🔍 DEBUG Gantt: taskGroups construidos
+         console.log("[Gantt DEBUG] taskGroups count:", Object.keys(taskGroups).length);
+         console.log("[Gantt DEBUG] taskGroups keys:", Object.keys(taskGroups));
 
          // ✅ NUEVO: Obtener sesiones reales de trabajo desde work_sessions
          const workSessionsData = await getWorkSessionsForGantt(startDate, endDate);
