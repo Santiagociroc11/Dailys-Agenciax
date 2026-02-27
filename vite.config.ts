@@ -2,28 +2,23 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { writeFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BUILD_TIMESTAMP = Date.now();
+const versionPath = path.join(__dirname, 'public', 'version.json');
+
+// Usar el mismo timestamp que set-deploy-version.js (prebuild)
+const BUILD_TIMESTAMP =
+  existsSync(versionPath)
+    ? JSON.parse(readFileSync(versionPath, 'utf-8')).timestamp
+    : Date.now();
 
 // https://vitejs.dev/config/
 export default defineConfig({
   define: {
     __BUILD_TIMESTAMP__: JSON.stringify(BUILD_TIMESTAMP),
   },
-  plugins: [
-    react(),
-    {
-      name: 'version-file',
-      buildStart() {
-        writeFileSync(
-          path.join(__dirname, 'public', 'version.json'),
-          JSON.stringify({ timestamp: BUILD_TIMESTAMP })
-        );
-      },
-    },
-  ],
+  plugins: [react()],
   optimizeDeps: {
     exclude: ['lucide-react'],
   },

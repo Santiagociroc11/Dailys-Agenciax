@@ -12,6 +12,7 @@
     "dev:server": "tsx watch server.ts",
     "build:frontend": "vite build",
     "build:server": "tsc --project tsconfig.server.json",
+    "prebuild": "node scripts/set-deploy-version.js",
     "build": "rm -rf dist && npm run build:frontend && npm run build:server",
     "start": "node dist/server/server.js",
     "preview": "vite preview"

@@ -21,8 +21,11 @@ export default function VersionUpdateChecker() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const serverTimestamp = String(data?.timestamp ?? '');
-        if (serverTimestamp && serverTimestamp !== currentBuildTimestamp) {
+        const serverTs = Number(data?.timestamp);
+        const currentTs = Number(currentBuildTimestamp);
+        if (!serverTs || !currentTs) return;
+        // Solo mostrar cuando el servidor tiene una versión MÁS NUEVA (timestamp mayor)
+        if (serverTs > currentTs) {
           if (sessionStorage.getItem(VERSION_CHECK_KEY)) return;
           showUpdateToast();
         }
