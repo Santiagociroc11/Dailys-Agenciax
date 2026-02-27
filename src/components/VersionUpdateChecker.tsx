@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
-const VERSION_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
+const VERSION_CHECK_INTERVAL = 60 * 1000; // 1 minuto
 const VERSION_CHECK_KEY = 'dailys_version_update_dismissed';
 
 export default function VersionUpdateChecker() {
