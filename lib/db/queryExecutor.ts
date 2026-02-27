@@ -36,7 +36,25 @@ export async function executeQuery<T = unknown>(
         request.filters.eq as Record<string, unknown>
       );
       if (Object.keys(resolved).length > 0) {
-        filters = { ...filters, ...resolved };
+        // No sobrescribir filtros que el usuario ya especificó (ej: project_id)
+        for (const [key, value] of Object.entries(resolved)) {
+          if (filters[key] === undefined) {
+            (filters as Record<string, unknown>)[key] = value;
+          } else if (
+            key === 'project_id' &&
+            typeof filters[key] === 'string' &&
+            value &&
+            typeof value === 'object' &&
+            '$in' in (value as object)
+          ) {
+            // Intersectar: si el usuario eligió un proyecto, debe estar en la lista de no archivados
+            const ids = (value as { $in: unknown[] }).$in;
+            const userProject = filters[key] as string;
+            (filters as Record<string, unknown>)[key] = ids.includes(userProject)
+              ? userProject
+              : { $in: [] };
+          }
+        }
       }
     }
     if (request.filters?.in) {
@@ -45,7 +63,25 @@ export async function executeQuery<T = unknown>(
         request.filters.in as Record<string, unknown[]>
       );
       if (Object.keys(resolved).length > 0) {
-        filters = { ...filters, ...resolved };
+        for (const [key, value] of Object.entries(resolved)) {
+          if (filters[key] === undefined) {
+            (filters as Record<string, unknown>)[key] = value;
+          } else if (
+            key === 'project_id' &&
+            value &&
+            typeof value === 'object' &&
+            '$in' in (value as object)
+          ) {
+            const joinIds = (value as { $in: unknown[] }).$in;
+            const existing = filters[key];
+            const userIds = existing && typeof existing === 'object' && '$in' in (existing as object)
+              ? (existing as { $in: unknown[] }).$in
+              : [existing];
+            const intersection = userIds.filter((id) => joinIds.includes(id));
+            (filters as Record<string, unknown>)[key] =
+              intersection.length > 0 ? { $in: intersection } : { $in: [] };
+          }
+        }
       }
     }
     const projection = buildProjection(request.select);
