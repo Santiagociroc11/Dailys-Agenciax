@@ -372,7 +372,7 @@ function Tasks() {
 
   useEffect(() => {
     fetchTasks();
-  }, [currentPage, tasksPerPage]);
+  }, [currentPage, tasksPerPage, selectedProject, selectedPhase]);
 
   // Efecto para manejar cambios en la búsqueda con debounce
   useEffect(() => {
