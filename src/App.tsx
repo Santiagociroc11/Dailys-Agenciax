@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import UserLayout from './components/UserLayout';
 import Loading from './components/Loading';
+import VersionUpdateChecker from './components/VersionUpdateChecker';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tasks = lazy(() => import('./pages/Tasks'));
@@ -58,6 +59,7 @@ function App() {
             },
           }}
         />
+        <VersionUpdateChecker />
 
         <Routes>
           <Route path="/" element={
