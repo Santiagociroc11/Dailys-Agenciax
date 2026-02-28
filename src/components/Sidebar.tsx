@@ -163,6 +163,17 @@ export default function Sidebar() {
               Nómina
             </NavLink>
             <NavLink
+              to="/timeline"
+              className={({ isActive }) =>
+                `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+                  isActive ? 'bg-gray-100' : ''
+                }`
+              }
+            >
+              <History className="w-5 h-5 mr-3" />
+              Timeline
+            </NavLink>
+            <NavLink
               to="/settings"
               className={({ isActive }) =>
                 `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${

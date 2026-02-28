@@ -187,13 +187,17 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         hours_consumed: Math.round((r.total_minutes / 60) * 100) / 100,
       }));
     } else if (fn === 'get_project_cost_consumed') {
+      const startDate = params.start_date as string | undefined;
+      const endDate = params.end_date as string | undefined;
+      const matchStage: Record<string, unknown> = {
+        project_id: { $ne: null },
+        actual_duration: { $exists: true, $gt: 0 },
+      };
+      if (startDate && endDate) {
+        matchStage.date = { $gte: startDate, $lte: endDate };
+      }
       const pipeline = [
-        {
-          $match: {
-            project_id: { $ne: null } as Record<string, unknown>,
-            actual_duration: { $exists: true, $gt: 0 } as Record<string, unknown>,
-          },
-        },
+        { $match: matchStage },
         { $group: { _id: { project_id: '$project_id', user_id: '$user_id' }, total_minutes: { $sum: '$actual_duration' } } },
       ];
       const results = await TaskWorkAssignment.aggregate(pipeline).exec();

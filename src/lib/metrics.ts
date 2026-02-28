@@ -998,10 +998,16 @@ export interface ProjectCostConsumedRow {
   currency: string;
 }
 
-/** Obtiene coste consumido por proyecto (horas × tarifa de usuarios) */
-export async function getProjectCostConsumed(): Promise<ProjectCostConsumedRow[]> {
+/** Obtiene coste consumido por proyecto (horas × tarifa de usuarios). Opcional: startDate y endDate para filtrar por período. */
+export async function getProjectCostConsumed(
+  startDate?: string,
+  endDate?: string
+): Promise<ProjectCostConsumedRow[]> {
   try {
-    const { data, error } = await supabase.rpc('get_project_cost_consumed', {});
+    const params: Record<string, unknown> = {};
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+    const { data, error } = await supabase.rpc('get_project_cost_consumed', params);
     if (error) throw error;
     return (data as ProjectCostConsumedRow[]) || [];
   } catch (error) {

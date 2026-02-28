@@ -443,6 +443,18 @@ export default function Payroll() {
           const util = (u.hours / 160) * 100;
           return util < 80;
         });
+        const utilizationAssignedByCur = utilizationData.reduce((acc, r) => {
+          if (r.total_cost != null && r.total_cost > 0) {
+            const cur = r.currency || 'COP';
+            acc[cur] = (acc[cur] || 0) + r.total_cost;
+          }
+          return acc;
+        }, {} as Record<string, number>);
+        const mainCur = Object.keys(totalSalaryByCur)[0] || 'COP';
+        const paidAmount = totalSalaryByCur[mainCur] ?? totalSalaryPaid;
+        const utilizedAmount = utilizationAssignedByCur[mainCur] ?? 0;
+        const utilVsPaidPct = paidAmount > 0 ? Math.round((utilizedAmount / paidAmount) * 100) : 0;
+        const diff = paidAmount - utilizedAmount;
         return (
           <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-5">
             <h3 className="text-lg font-semibold text-amber-900 flex items-center gap-2 mb-3">
@@ -452,7 +464,26 @@ export default function Payroll() {
             <p className="text-sm text-amber-800 mb-4">
               Con salario fijo pagas lo mismo trabajen o no. Aquí ves cuánto pagas vs cuántas horas obtienes.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            {/* Comparación directa: Pago vs utilización asignada */}
+            <div className="bg-white border-2 border-amber-300 rounded-lg p-4 mb-4">
+              <p className="text-sm font-medium text-amber-900 mb-2">Pago vs utilización asignada</p>
+              <p className="text-base text-gray-800">
+                Pagamos <span className="font-bold text-emerald-700">{paidAmount.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {mainCur}</span>
+                {' '}pero la utilización asignada (coste en proyectos) es{' '}
+                <span className="font-bold text-indigo-700">{utilizedAmount.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {mainCur}</span>
+              </p>
+              <div className="flex flex-wrap gap-3 mt-2 text-sm">
+                <span className={utilVsPaidPct < 80 ? 'text-amber-700 font-medium' : 'text-gray-600'}>
+                  {utilVsPaidPct}% de la nómina asignada a proyectos
+                </span>
+                {diff !== 0 && (
+                  <span className="text-gray-500">
+                    (diferencia: {diff > 0 ? '+' : ''}{diff.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {mainCur})
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
               <div className="bg-white rounded-lg p-3 text-sm">
                 <p className="text-gray-600">Nómina fija ({userList.length} empleados)</p>
                 <p className="font-bold text-amber-900">
@@ -462,11 +493,22 @@ export default function Payroll() {
                 </p>
               </div>
               <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-gray-600">Utilización asignada</p>
+                <p className="font-bold text-indigo-700">
+                  {Object.keys(utilizationAssignedByCur).length > 0
+                    ? Object.entries(utilizationAssignedByCur).map(([cur, tot], i) => (
+                        <span key={cur}>{i > 0 && ' · '}{tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}</span>
+                      ))
+                    : '—'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">Coste en proyectos (h × tarifa)</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-sm">
                 <p className="text-gray-600">Horas trabajadas</p>
                 <p className="font-bold text-amber-900">{totalHoursWorked.toFixed(1)}h / {expectedHours}h esperadas</p>
               </div>
               <div className="bg-white rounded-lg p-3 text-sm">
-                <p className="text-gray-600">Utilización</p>
+                <p className="text-gray-600">Utilización (horas)</p>
                 <p className={`font-bold ${utilizationPct < 80 ? 'text-red-600' : 'text-amber-900'}`}>{utilizationPct}%</p>
               </div>
               <div className="bg-white rounded-lg p-3 text-sm">

@@ -43,6 +43,7 @@ Para que los costos funcionen en todo el sistema necesitas:
 | **Reportes → Facturación** | Coste por usuario, coste por cliente, coste por área |
 | **Reportes → Áreas** | Coste total por área en el período |
 | **Áreas** | Coste por área (este mes) en cada tarjeta y total |
+| **Timeline** | Pagos y utilización mes a mes por cliente y proyecto; **Resumen del mes actual** con pago + utilización + comparación |
 | **Alertas de presupuesto** | Horas consumidas vs budget_hours, coste consumido y presupuesto monto |
 
 ---
@@ -83,13 +84,27 @@ El coste se calcula como: para cada asignación de trabajo en proyectos del clie
 
 En **Nómina** hay una sección **"Utilización de la nómina"** que te ayuda a revisar este problema:
 
+- **Pago vs utilización asignada**: Comparación directa: "Pagamos X pero la utilización asignada es Y". Muestra cuánto pagas (nómina fija) vs cuánto se asignó a proyectos (coste en horas × tarifa).
 - **Nómina fija**: Lo que pagas a empleados con salario mensual (no cambia con las horas).
+- **Utilización asignada**: Coste total asignado a proyectos (horas × tarifa de cada usuario).
 - **Horas trabajadas vs esperadas**: Cuántas horas registraron vs 160h/mes por persona.
 - **% Utilización**: Si es bajo, pagas mucho por pocas horas.
 - **Coste efectivo por hora**: Nómina ÷ horas reales — cuanto más alto, más "caro" cada hora productiva.
 - **Empleados con subutilización**: Lista de quienes trabajaron menos del 80% de la jornada.
 
 Así puedes ver quién está subutilizado y tomar decisiones (redistribuir trabajo, revisar asignaciones, etc.).
+
+---
+
+## 6.1. Vista resumen del mes actual (Timeline)
+
+En **Timeline** (`/timeline`) hay una tarjeta **"Resumen del mes actual"** al inicio que muestra todo junto:
+
+- **Pagado / Nómina estimada**: Lo que pagaste (de `payroll_payments`) o la nómina activa estimada si aún no hay pagos registrados.
+- **Utilización asignada**: Coste total asignado a proyectos en el mes (horas × tarifa).
+- **Comparación**: "Pagamos X pero la utilización asignada es Y" — con el % de nómina asignada a proyectos y la diferencia en monto.
+
+Cada mes en el timeline también muestra ahora **Pagado** y **Utilización** en la misma línea para comparar rápidamente.
 
 ---
 
