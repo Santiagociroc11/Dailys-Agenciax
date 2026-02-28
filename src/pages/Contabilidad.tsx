@@ -27,6 +27,149 @@ import { es } from 'date-fns/locale';
 type MainTab = 'libro' | 'balance' | 'config';
 type ConfigTab = 'entities' | 'categories' | 'accounts';
 
+type PygDetailSort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
+
+function PygDetailPanel({
+  transactions,
+  groupBy,
+  sortBy,
+  onGroupChange,
+  onSortChange,
+}: {
+  transactions: AcctTransaction[];
+  groupBy: 'month' | 'category';
+  sortBy: PygDetailSort;
+  onGroupChange: (v: 'month' | 'category') => void;
+  onSortChange: (v: PygDetailSort) => void;
+}) {
+  const sortTx = (list: AcctTransaction[], isPositive: boolean) => {
+    const [by, dir] = sortBy.includes('date') ? ['date', sortBy === 'date-desc' ? 'desc' : 'asc'] : ['amount', sortBy === 'amount-desc' ? 'desc' : 'asc'];
+    return [...list].sort((a, b) => {
+      if (by === 'date') {
+        const da = new Date(a.date).getTime();
+        const db = new Date(b.date).getTime();
+        return dir === 'desc' ? db - da : da - db;
+      }
+      const aa = Math.abs(a.amount ?? 0);
+      const ab = Math.abs(b.amount ?? 0);
+      return dir === 'desc' ? ab - aa : aa - ab;
+    });
+  };
+
+  const groupByKey = (t: AcctTransaction, isPositive: boolean) =>
+    groupBy === 'month'
+      ? format(new Date(t.date), 'yyyy-MM', { locale: es })
+      : (t.category_name || 'Sin categoría');
+
+  const renderList = (list: AcctTransaction[], isPositive: boolean, colorClass: string) => {
+    const sorted = sortTx(list, isPositive);
+    const groups = new Map<string, AcctTransaction[]>();
+    for (const t of sorted) {
+      const k = groupByKey(t, isPositive);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(t);
+    }
+    const groupLabels = new Map<string, string>();
+    for (const k of groups.keys()) {
+      if (groupBy === 'month') {
+        const [y, m] = k.split('-');
+        groupLabels.set(k, format(new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1), 'MMM yyyy', { locale: es }));
+      } else {
+        groupLabels.set(k, k);
+      }
+    }
+    const order = Array.from(groups.keys()).sort((a, b) => {
+      if (groupBy === 'month') return b.localeCompare(a);
+      const sumA = groups.get(a)!.reduce((s, t) => s + (t.amount ?? 0), 0);
+      const sumB = groups.get(b)!.reduce((s, t) => s + (t.amount ?? 0), 0);
+      return Math.abs(sumB) - Math.abs(sumA);
+    });
+
+    return (
+      <ul className="space-y-3 text-sm">
+        {order.map((k) => {
+          const items = groups.get(k)!;
+          const byCurr = items.reduce((acc, t) => {
+            const c = t.currency || 'USD';
+            acc[c] = (acc[c] ?? 0) + (t.amount ?? 0);
+            return acc;
+          }, {} as Record<string, number>);
+          const subtotalStr = Object.entries(byCurr)
+            .map(([c, v]) => `${isPositive && v > 0 ? '+' : ''}${v.toLocaleString(c === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: c === 'COP' ? 0 : 2 })} ${c}`)
+            .join(' · ');
+          return (
+            <li key={k}>
+              <div className="font-medium text-gray-600 mb-1 flex justify-between items-baseline gap-2">
+                <span>{groupLabels.get(k)}</span>
+                <span className={`${colorClass} text-right shrink-0`}>{subtotalStr}</span>
+              </div>
+              <ul className="space-y-0.5 pl-2 border-l border-gray-200">
+                {items.map((t) => (
+                  <li key={t.id} className="flex justify-between items-center py-0.5 text-gray-700">
+                    <span className="truncate max-w-[280px]">
+                      {format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
+                    </span>
+                    <span className={`font-medium shrink-0 ml-2 ${colorClass}`}>
+                      {isPositive ? '+' : ''}{(t.amount ?? 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
+  const entradas = transactions.filter((t) => (t.amount ?? 0) > 0);
+  const salidas = transactions.filter((t) => (t.amount ?? 0) < 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-3 items-center text-xs">
+        <span className="text-gray-500">Agrupar:</span>
+        <button
+          type="button"
+          onClick={() => onGroupChange('month')}
+          className={`px-2 py-1 rounded ${groupBy === 'month' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          Por mes
+        </button>
+        <button
+          type="button"
+          onClick={() => onGroupChange('category')}
+          className={`px-2 py-1 rounded ${groupBy === 'category' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          Por categoría
+        </button>
+        <span className="text-gray-400">|</span>
+        <span className="text-gray-500">Ordenar:</span>
+        <select
+          value={sortBy}
+          onChange={(e) => onSortChange(e.target.value as PygDetailSort)}
+          className="px-2 py-1 border rounded text-gray-700 bg-white"
+        >
+          <option value="date-desc">Fecha (reciente)</option>
+          <option value="date-asc">Fecha (antiguo)</option>
+          <option value="amount-desc">Monto (mayor)</option>
+          <option value="amount-asc">Monto (menor)</option>
+        </select>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h4 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">Entradas</h4>
+          {entradas.length === 0 ? <p className="text-gray-500 py-1">Ninguna</p> : renderList(entradas, true, 'text-emerald-600')}
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">Salidas</h4>
+          {salidas.length === 0 ? <p className="text-gray-500 py-1">Ninguna</p> : renderList(salidas, false, 'text-red-600')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Contabilidad() {
   const { isAdmin, user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<MainTab>('libro');
@@ -87,6 +230,8 @@ export default function Contabilidad() {
   const [pygExpandedEntity, setPygExpandedEntity] = useState<string | null>(null);
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
+  const [pygDetailGroup, setPygDetailGroup] = useState<'month' | 'category'>('month');
+  const [pygDetailSort, setPygDetailSort] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -863,50 +1008,13 @@ export default function Contabilidad() {
                               ) : pygDetailTransactions.length === 0 ? (
                                 <div className="text-sm text-gray-500 py-2">No hay transacciones en este período.</div>
                               ) : (
-                                <div className="space-y-4">
-                                  <div>
-                                    <h4 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">Entradas (ingresos)</h4>
-                                    <ul className="space-y-1 text-sm">
-                                      {pygDetailTransactions
-                                        .filter((t) => (t.amount ?? 0) > 0)
-                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                        .map((t) => (
-                                          <li key={t.id} className="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
-                                            <span className="text-gray-700">
-                                              {format(new Date(t.date), 'dd MMM yyyy', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
-                                            </span>
-                                            <span className="font-medium text-emerald-600">
-                                              +{(t.amount || 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
-                                            </span>
-                                          </li>
-                                        ))}
-                                      {pygDetailTransactions.filter((t) => (t.amount ?? 0) > 0).length === 0 && (
-                                        <li className="text-gray-500 py-1">Ninguna</li>
-                                      )}
-                                    </ul>
-                                  </div>
-                                  <div>
-                                    <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">Salidas (gastos)</h4>
-                                    <ul className="space-y-1 text-sm">
-                                      {pygDetailTransactions
-                                        .filter((t) => (t.amount ?? 0) < 0)
-                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                        .map((t) => (
-                                          <li key={t.id} className="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
-                                            <span className="text-gray-700">
-                                              {format(new Date(t.date), 'dd MMM yyyy', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
-                                            </span>
-                                            <span className="font-medium text-red-600">
-                                              {(t.amount || 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
-                                            </span>
-                                          </li>
-                                        ))}
-                                      {pygDetailTransactions.filter((t) => (t.amount ?? 0) < 0).length === 0 && (
-                                        <li className="text-gray-500 py-1">Ninguna</li>
-                                      )}
-                                    </ul>
-                                  </div>
-                                </div>
+                                <PygDetailPanel
+                                  transactions={pygDetailTransactions}
+                                  groupBy={pygDetailGroup}
+                                  sortBy={pygDetailSort}
+                                  onGroupChange={setPygDetailGroup}
+                                  onSortChange={setPygDetailSort}
+                                />
                               )}
                             </td>
                           </tr>
