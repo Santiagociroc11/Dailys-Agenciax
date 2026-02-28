@@ -310,7 +310,8 @@ function PygDetailPanel({
       <table className="w-full text-sm min-w-[600px]">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10">Categoría</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 w-[1%] max-w-[160px]">Categoría</th>
+            <th colSpan={colsTotal} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
             {months.map((m) => {
               const [y, mo] = m.split('-');
               const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
@@ -320,13 +321,20 @@ function PygDetailPanel({
                 </th>
               );
             })}
-            <th colSpan={colsTotal} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
           </tr>
           <tr className="bg-gray-50">
             <th className="px-3 py-1 text-xs text-gray-500 sticky left-0 bg-gray-50 z-10"></th>
+            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
+            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+            {hasCop && (
+              <>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+              </>
+            )}
             {months.map((m) => (
               <React.Fragment key={m}>
-                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
                 <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
                 {hasCop && (
                   <>
@@ -336,22 +344,9 @@ function PygDetailPanel({
                 )}
               </React.Fragment>
             ))}
-            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
-            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-            {hasCop && (
-              <>
-                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
-                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-              </>
-            )}
           </tr>
           <tr className="bg-gray-50 text-xs text-gray-500">
             <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10"></th>
-            {months.flatMap((m) => [
-              <th key={`${m}-u1`} className="px-1 py-0.5 text-right">USD</th>,
-              <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
-              ...(hasCop ? [<th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>, <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>] : []),
-            ])}
             <th className="px-1 py-0.5 text-right border-l">USD</th>
             <th className="px-1 py-0.5 text-right">USD</th>
             {hasCop && (
@@ -360,6 +355,11 @@ function PygDetailPanel({
                 <th className="px-1 py-0.5 text-right">COP</th>
               </>
             )}
+            {months.flatMap((m) => [
+              <th key={`${m}-u1`} className="px-1 py-0.5 text-right border-l">USD</th>,
+              <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
+              ...(hasCop ? [<th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>, <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>] : []),
+            ])}
           </tr>
         </thead>
         <tbody>
@@ -374,23 +374,11 @@ function PygDetailPanel({
                   className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none group"
                 >
                   <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50">
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex items-center gap-1 truncate max-w-[140px]">
                       {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
                       {cat}
                     </span>
                   </td>
-                  {months.map((m) => (
-                    <React.Fragment key={m}>
-                      <td className="px-1 py-2 text-right text-emerald-600">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
-                      <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
-                      {hasCop && (
-                        <>
-                          <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
-                          <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
-                        </>
-                      )}
-                    </React.Fragment>
-                  ))}
                   <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
                     {fmt(months.reduce((s, m) => s + (ing[m]?.usd ?? 0), 0), 'usd')}
                   </td>
@@ -407,6 +395,18 @@ function PygDetailPanel({
                       </td>
                     </>
                   )}
+                  {months.map((m) => (
+                    <React.Fragment key={m}>
+                      <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
+                      {hasCop && (
+                        <>
+                          <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                          <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                        </>
+                      )}
+                    </React.Fragment>
+                  ))}
                 </tr>
                 {isExpanded &&
                   items.map((t) => {
@@ -417,13 +417,14 @@ function PygDetailPanel({
                     return (
                       <tr key={t.id} className="border-t border-gray-50 bg-gray-50/50">
                         <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50" onClick={(e) => e.stopPropagation()}>
-                          <span className="flex items-center gap-2">
+                          <span className="flex items-center gap-2 truncate max-w-[140px]">
                             {format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || 'Sin descripción'}
                             {onEditTransaction && (
-                              <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-0.5" title="Editar"><Edit className="w-3.5 h-3.5 inline" /></button>
+                              <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-0.5 shrink-0" title="Editar"><Edit className="w-3.5 h-3.5 inline" /></button>
                             )}
                           </span>
                         </td>
+                        <td colSpan={colsTotal} className="px-1 py-1.5 border-l" />
                         {months.map((mo) => (
                           <React.Fragment key={mo}>
                             {mo === m ? (
@@ -451,7 +452,6 @@ function PygDetailPanel({
                             )}
                           </React.Fragment>
                         ))}
-                        <td colSpan={colsTotal} className="px-1 py-1.5 border-l" />
                       </tr>
                     );
                   })}
@@ -462,11 +462,19 @@ function PygDetailPanel({
         <tfoot className="bg-gray-100 font-semibold">
           <tr>
             <td className="px-3 py-2 sticky left-0 bg-gray-100">Total mes</td>
+            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
+            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
+            {hasCop && (
+              <>
+                <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
+                <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
+              </>
+            )}
             {months.map((m) => {
               const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
               return (
                 <React.Fragment key={m}>
-                  <td className="px-1 py-2 text-right text-emerald-700">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
+                  <td className="px-1 py-2 text-right text-emerald-700 border-l">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
                   <td className="px-1 py-2 text-right text-red-700">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
                   {hasCop && (
                     <>
@@ -477,34 +485,9 @@ function PygDetailPanel({
                 </React.Fragment>
               );
             })}
-            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
-            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
-            {hasCop && (
-              <>
-                <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
-                <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
-              </>
-            )}
           </tr>
           <tr className="bg-indigo-50">
             <td className="px-3 py-2 sticky left-0 bg-indigo-50 font-medium">Balance global</td>
-            {months.map((m) => {
-              const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
-              const balUsd = ing[m].usd - sal[m].usd;
-              const balCop = ing[m].cop - sal[m].cop;
-              return (
-                <React.Fragment key={m}>
-                  <td colSpan={2} className={`px-1 py-2 text-right font-medium ${balUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {balUsd >= 0 ? '+' : ''}{fmt(balUsd, 'usd')} USD
-                  </td>
-                  {hasCop && (
-                    <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${balCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {balCop >= 0 ? '+' : ''}{fmt(balCop, 'cop')} COP
-                    </td>
-                  )}
-                </React.Fragment>
-              );
-            })}
             <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
               {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
             </td>
@@ -513,12 +496,26 @@ function PygDetailPanel({
                 {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
               </td>
             )}
+            {months.map((m) => {
+              const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
+              const balUsd = ing[m].usd - sal[m].usd;
+              const balCop = ing[m].cop - sal[m].cop;
+              return (
+                <React.Fragment key={m}>
+                  <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${balUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {balUsd >= 0 ? '+' : ''}{fmt(balUsd, 'usd')} USD
+                  </td>
+                  {hasCop && (
+                    <td colSpan={2} className={`px-1 py-2 text-right font-medium ${balCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {balCop >= 0 ? '+' : ''}{fmt(balCop, 'cop')} COP
+                    </td>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tr>
           <tr className="bg-amber-50">
             <td className="px-3 py-2 sticky left-0 bg-amber-50 font-medium">Pendiente por liquidar</td>
-            {months.map((m) => (
-              <td key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center text-gray-500 border-l text-xs">—</td>
-            ))}
             <td colSpan={colsTotal} className="px-1 py-2 border-l">
               <span className={`font-medium ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                 {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
@@ -529,6 +526,9 @@ function PygDetailPanel({
                 </span>
               )}
             </td>
+            {months.map((m) => (
+              <td key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center text-gray-400 border-l text-xs">—</td>
+            ))}
           </tr>
         </tfoot>
       </table>
