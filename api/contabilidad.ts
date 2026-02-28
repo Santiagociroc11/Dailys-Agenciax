@@ -787,8 +787,9 @@ router.post('/import', async (req: Request, res: Response) => {
     const idxFecha = headers.findIndex((h) => /FECHA/i.test(h));
     const idxProyecto = headers.findIndex((h) => /PROYECTO/i.test(h));
     const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
-    const idxDescripcion = headers.findIndex((h) => /DESCRIPCION/i.test(h));
-    const idxCategoria = headers.findIndex((h) => /CATEGORIA|DETALLE/i.test(h));
+    let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
+    if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
+    const idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A|DETALLE/i.test(h));
     const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
 
     if (idxFecha < 0 || idxProyecto < 0) {
