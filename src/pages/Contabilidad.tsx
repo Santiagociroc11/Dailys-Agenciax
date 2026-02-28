@@ -310,7 +310,7 @@ function PygDetailPanel({
       <table className="w-full text-sm min-w-[600px]">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 w-[1%] max-w-[160px]">Categoría</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 w-[1%] max-w-[200px]">Categoría</th>
             {months.map((m) => {
               const [y, mo] = m.split('-');
               const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
@@ -373,10 +373,10 @@ function PygDetailPanel({
                   onClick={() => toggleCategory(cat)}
                   className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none group"
                 >
-                  <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50">
-                    <span className="inline-flex items-center gap-1 truncate max-w-[140px]">
-                      {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
-                      {cat}
+                  <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50 align-top">
+                    <span className="inline-flex items-start gap-1 max-w-[180px]">
+                      {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" /> : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />}
+                      <span className="break-words leading-tight line-clamp-2">{cat}</span>
                     </span>
                   </td>
                   {months.map((m) => (
@@ -416,9 +416,9 @@ function PygDetailPanel({
                     const curr = t.currency || 'USD';
                     return (
                       <tr key={t.id} className="border-t border-gray-50 bg-gray-50/50">
-                        <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50" onClick={(e) => e.stopPropagation()}>
-                          <span className="flex items-center gap-2 truncate max-w-[140px]">
-                            {format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || 'Sin descripción'}
+                        <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50 align-top" onClick={(e) => e.stopPropagation()}>
+                          <span className="flex items-start gap-2 max-w-[180px]">
+                            <span className="break-words leading-tight line-clamp-2">{format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || 'Sin descripción'}</span>
                             {onEditTransaction && (
                               <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-0.5 shrink-0" title="Editar"><Edit className="w-3.5 h-3.5 inline" /></button>
                             )}
@@ -592,7 +592,6 @@ export default function Contabilidad() {
   const [mergeSourceCategory, setMergeSourceCategory] = useState<AcctCategory | null>(null);
   const [mergeCategoryTargetId, setMergeCategoryTargetId] = useState('');
   const [sortDateOrder, setSortDateOrder] = useState<'asc' | 'desc'>('desc');
-  const [pygExpandedEntity, setPygExpandedEntity] = useState<string | null>(null);
   const [pygSortBy, setPygSortBy] = useState<'entity' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
   const [pygSortOrder, setPygSortOrder] = useState<'asc' | 'desc'>('desc');
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
@@ -749,15 +748,11 @@ export default function Contabilidad() {
     }
   }
 
-  function togglePygExpand(row: PygRow) {
-    const key = row.entity_id ?? 'sin-asignar';
-    if (pygExpandedEntity === key) {
-      setPygExpandedEntity(null);
-      setPygDetailTransactions([]);
-    } else {
-      setPygExpandedEntity(key);
-      fetchPygDetail(row.entity_id ?? null);
-    }
+  const [pygDetailModalEntity, setPygDetailModalEntity] = useState<PygRow | null>(null);
+
+  function openPygDetailModal(row: PygRow) {
+    setPygDetailModalEntity(row);
+    fetchPygDetail(row.entity_id ?? null);
   }
 
   async function fetchConfigDetail(type: 'entity' | 'category', id: string) {
@@ -1551,21 +1546,15 @@ export default function Contabilidad() {
                 <tbody>
                   {sortedPygRows.map((r) => {
                     const rowKey = r.entity_id ?? 'sin-asignar';
-                    const isExpanded = pygExpandedEntity === rowKey;
-                    const isThisRowDetail = pygExpandedEntity === rowKey;
                     return (
                       <React.Fragment key={rowKey}>
                         <tr
-                          onClick={() => togglePygExpand(r)}
+                          onClick={() => openPygDetailModal(r)}
                           className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none"
                         >
                           <td className="px-6 py-3 font-medium">
                             <span className="inline-flex items-center gap-1">
-                              {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
-                              ) : (
-                                <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
-                              )}
+                              <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
                               {r.entity_name}
                             </span>
                           </td>
@@ -1584,22 +1573,6 @@ export default function Contabilidad() {
                             </>
                           )}
                         </tr>
-                        {isThisRowDetail && (
-                          <tr className="border-t border-gray-100 bg-gray-50/80">
-                            <td colSpan={hasCopPyg ? 7 : 4} className="px-6 py-4">
-                              {pygDetailLoading ? (
-                                <div className="text-sm text-gray-500 py-4">Cargando detalle…</div>
-                              ) : pygDetailTransactions.length === 0 ? (
-                                <div className="text-sm text-gray-500 py-2">No hay transacciones en este período.</div>
-                              ) : (
-                                <PygDetailPanel
-                                  transactions={pygDetailTransactions}
-                                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
-                                />
-                              )}
-                            </td>
-                          </tr>
-                        )}
                       </React.Fragment>
                     );
                   })}
@@ -1943,6 +1916,29 @@ export default function Contabilidad() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {pygDetailModalEntity && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPygDetailModalEntity(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b shrink-0">
+              <h3 className="font-semibold text-lg">P&G — {pygDetailModalEntity.entity_name}</h3>
+              <button onClick={() => setPygDetailModalEntity(null)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              {pygDetailLoading ? (
+                <div className="text-sm text-gray-500 py-8">Cargando detalle…</div>
+              ) : pygDetailTransactions.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">No hay transacciones en este período.</div>
+              ) : (
+                <PygDetailPanel
+                  transactions={pygDetailTransactions}
+                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
 
