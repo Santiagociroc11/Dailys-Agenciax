@@ -6,10 +6,33 @@ import { apiUrl } from '../lib/apiBase';
 
 const ADMIN_TELEGRAM_ID_KEY = 'admin_telegram_chat_id';
 
+interface LogEntry {
+  id: string;
+  timestamp: string;
+  type: string;
+  recipient: string;
+  recipientLabel?: string;
+  status: string;
+  details?: string;
+  error?: string;
+}
+
+interface LogStats {
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  byType: Record<string, { success: number; failed: number; skipped: number }>;
+}
+
 const Settings = () => {
   const [telegramId, setTelegramId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [testLoading, setTestLoading] = useState<string | null>(null);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [logStats, setLogStats] = useState<LogStats | null>(null);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState<{ type?: string; status?: string }>({});
   const { user } = useAuth();
 
   useEffect(() => {
@@ -33,6 +56,29 @@ const Settings = () => {
 
     fetchAdminId();
   }, []);
+
+  const fetchLog = async () => {
+    setLogLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      if (logFilter.type) params.set('type', logFilter.type);
+      if (logFilter.status) params.set('status', logFilter.status);
+      const res = await fetch(apiUrl(`/api/telegram/log?${params}`));
+      const data = await res.json();
+      if (data.success) {
+        setLogEntries(data.entries || []);
+        setLogStats(data.stats || null);
+      } else {
+        toast.error('Error al cargar el log.');
+      }
+    } catch (e) {
+      toast.error('Error al cargar el log.');
+      console.error(e);
+    } finally {
+      setLogLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     setIsLoading(true);
@@ -118,6 +164,7 @@ const Settings = () => {
         } else {
           toast.success(result.message || 'Notificación enviada correctamente.');
         }
+        fetchLog();
       } else {
         toast.error(result.error || 'Error al enviar.');
       }
@@ -539,6 +586,117 @@ const Settings = () => {
           </div>
         </div>
       )}
+
+      {/* Log de notificaciones Telegram */}
+      <div className="mt-10 pt-8 border-t border-gray-200">
+        <h2 className="text-xl font-bold mb-2">📋 Log de notificaciones Telegram</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Historial de envíos (últimos 30 días). Los registros se eliminan automáticamente después de 30 días.
+        </p>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          <select
+            value={logFilter.type || ''}
+            onChange={(e) => setLogFilter((f) => ({ ...f, type: e.target.value || undefined }))}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">Todos los tipos</option>
+            <option value="test">test</option>
+            <option value="admin-notification">admin-notification</option>
+            <option value="task-available">task-available</option>
+            <option value="user-task-in-review">user-task-in-review</option>
+            <option value="deadline-reminder">deadline-reminder</option>
+            <option value="daily-summary">daily-summary</option>
+            <option value="budget-alert">budget-alert</option>
+          </select>
+          <select
+            value={logFilter.status || ''}
+            onChange={(e) => setLogFilter((f) => ({ ...f, status: e.target.value || undefined }))}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">Todos los estados</option>
+            <option value="success">success</option>
+            <option value="failed">failed</option>
+            <option value="skipped">skipped</option>
+          </select>
+          <button
+            onClick={fetchLog}
+            disabled={logLoading}
+            className="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm"
+          >
+            {logLoading ? 'Cargando...' : 'Cargar log'}
+          </button>
+        </div>
+
+        {logStats && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <p className="text-xs text-gray-500">Total</p>
+              <p className="text-lg font-semibold">{logStats.total}</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+              <p className="text-xs text-green-600">Enviadas</p>
+              <p className="text-lg font-semibold text-green-700">{logStats.success}</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-3 border border-red-200">
+              <p className="text-xs text-red-600">Fallidas</p>
+              <p className="text-lg font-semibold text-red-700">{logStats.failed}</p>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+              <p className="text-xs text-amber-600">Omitidas</p>
+              <p className="text-lg font-semibold text-amber-700">{logStats.skipped}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-gray-700">Fecha</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-700">Tipo</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-700">Destinatario</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-700">Estado</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-700">Detalle</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {logEntries.length === 0 && !logLoading && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-8 text-center text-gray-500">
+                    Haz clic en &quot;Cargar log&quot; para ver el historial.
+                  </td>
+                </tr>
+              )}
+              {logEntries.map((e) => (
+                <tr key={e.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                    {new Date(e.timestamp).toLocaleString('es-ES')}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs">{e.type}</td>
+                  <td className="px-3 py-2">{e.recipientLabel || e.recipient}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs ${
+                        e.status === 'success'
+                          ? 'bg-green-100 text-green-700'
+                          : e.status === 'failed'
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}
+                    >
+                      {e.status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 max-w-xs truncate" title={e.error || e.details || ''}>
+                    {e.error || e.details || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
