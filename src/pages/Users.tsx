@@ -480,7 +480,7 @@ export default function Users() {
         </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-lg shadow overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -495,6 +495,9 @@ export default function Users() {
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Telegram
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Salario
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Rol
@@ -537,6 +540,19 @@ export default function Users() {
                       </div>
                     )}
                   </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                  {user.monthly_salary != null && user.monthly_salary > 0 ? (
+                    <span>
+                      {(user.monthly_salary as number).toLocaleString('es-CO')} {user.currency || 'COP'}
+                    </span>
+                  ) : user.hourly_rate != null && user.hourly_rate > 0 ? (
+                    <span>
+                      {(user.hourly_rate as number).toLocaleString('es-CO')} {user.currency || 'COP'}/h
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
