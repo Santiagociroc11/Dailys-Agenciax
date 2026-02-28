@@ -302,10 +302,37 @@ const Settings = () => {
 
   const isTestDisabled = !telegramId || isLoading;
 
+  const tabs = [
+    { id: 'config' as const, label: 'Configuración', icon: '⚙️' },
+    { id: 'pruebas' as const, label: 'Pruebas', icon: '🧪' },
+    { id: 'log' as const, label: 'Log', icon: '📋' },
+  ];
+  const [activeTab, setActiveTab] = useState<'config' | 'pruebas' | 'log'>('config');
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Configuración de Administrador</h1>
+
+      {/* Pestañas */}
+      <div className="flex border-b border-gray-200 mb-6">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === tab.id
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
       
+      {/* Contenido: Configuración */}
+      {activeTab === 'config' && (
+        <>
       {/* Estado de configuración */}
       {telegramId ? (
         <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
@@ -475,10 +502,14 @@ const Settings = () => {
             </button>
         </div>
       </div>
+        </>
+      )}
 
-      {/* Panel de pruebas de todas las notificaciones */}
-      {telegramId && (
-        <div className="mt-10 pt-8 border-t border-gray-200">
+      {/* Contenido: Pruebas */}
+      {activeTab === 'pruebas' && (
+        <>
+        {telegramId ? (
+        <div>
           <h2 className="text-xl font-bold mb-2">🧪 Panel de pruebas de notificaciones</h2>
           <p className="text-sm text-gray-600 mb-4">
             Prueba cada tipo de notificación del sistema. Las de <strong>admin</strong> van al chat configurado arriba. Las de <strong>usuario</strong> van a tu Telegram si tienes <code className="bg-gray-100 px-1 rounded">telegram_chat_id</code> en tu perfil.
@@ -585,10 +616,17 @@ const Settings = () => {
             />
           </div>
         </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+            <p className="text-amber-800">Configura el ID de Telegram en la pestaña <strong>Configuración</strong> para poder probar las notificaciones.</p>
+          </div>
+        )}
+        </>
       )}
 
-      {/* Log de notificaciones Telegram */}
-      <div className="mt-10 pt-8 border-t border-gray-200">
+      {/* Contenido: Log */}
+      {activeTab === 'log' && (
+      <div>
         <h2 className="text-xl font-bold mb-2">📋 Log de notificaciones Telegram</h2>
         <p className="text-sm text-gray-600 mb-4">
           Historial de envíos (últimos 30 días). Los registros se eliminan automáticamente después de 30 días.
@@ -697,6 +735,7 @@ const Settings = () => {
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 };
