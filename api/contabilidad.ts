@@ -783,11 +783,18 @@ router.get('/pyg', async (req: Request, res: Response) => {
       c.gastos += gas;
       c.resultado += res;
     }
-    const rows = Array.from(rowMap.values()).map((r) => ({
+    let rows = Array.from(rowMap.values()).map((r) => ({
       ...r,
       usd: { ingresos: Math.round(r.usd.ingresos * 100) / 100, gastos: Math.round(r.usd.gastos * 100) / 100, resultado: Math.round(r.usd.resultado * 100) / 100 },
       cop: { ingresos: Math.round(r.cop.ingresos * 100) / 100, gastos: Math.round(r.cop.gastos * 100) / 100, resultado: Math.round(r.cop.resultado * 100) / 100 },
-    })).sort((a, b) => (b.usd.resultado + b.cop.resultado) - (a.usd.resultado + a.cop.resultado));
+    }));
+
+    const projectsOnly = req.query.projects_only === 'true';
+    if (projectsOnly) {
+      rows = rows.filter((r) => r.entity_type === 'project');
+    }
+
+    rows.sort((a, b) => (b.usd.resultado + b.cop.resultado) - (a.usd.resultado + a.cop.resultado));
 
     const totalUsd = { ingresos: rows.reduce((a, r) => a + r.usd.ingresos, 0), gastos: rows.reduce((a, r) => a + r.usd.gastos, 0), resultado: rows.reduce((a, r) => a + r.usd.resultado, 0) };
     const totalCop = { ingresos: rows.reduce((a, r) => a + r.cop.ingresos, 0), gastos: rows.reduce((a, r) => a + r.cop.gastos, 0), resultado: rows.reduce((a, r) => a + r.cop.resultado, 0) };

@@ -311,7 +311,6 @@ function PygDetailPanel({
         <thead className="bg-gray-50">
           <tr>
             <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 w-[1%] max-w-[160px]">Categoría</th>
-            <th colSpan={colsTotal} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
             {months.map((m) => {
               const [y, mo] = m.split('-');
               const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
@@ -321,17 +320,10 @@ function PygDetailPanel({
                 </th>
               );
             })}
+            <th colSpan={colsTotal} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
           </tr>
           <tr className="bg-gray-50">
             <th className="px-3 py-1 text-xs text-gray-500 sticky left-0 bg-gray-50 z-10"></th>
-            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
-            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-            {hasCop && (
-              <>
-                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
-                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-              </>
-            )}
             {months.map((m) => (
               <React.Fragment key={m}>
                 <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
@@ -344,9 +336,22 @@ function PygDetailPanel({
                 )}
               </React.Fragment>
             ))}
+            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
+            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+            {hasCop && (
+              <>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+              </>
+            )}
           </tr>
           <tr className="bg-gray-50 text-xs text-gray-500">
             <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10"></th>
+            {months.flatMap((m) => [
+              <th key={`${m}-u1`} className="px-1 py-0.5 text-right border-l">USD</th>,
+              <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
+              ...(hasCop ? [<th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>, <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>] : []),
+            ])}
             <th className="px-1 py-0.5 text-right border-l">USD</th>
             <th className="px-1 py-0.5 text-right">USD</th>
             {hasCop && (
@@ -355,11 +360,6 @@ function PygDetailPanel({
                 <th className="px-1 py-0.5 text-right">COP</th>
               </>
             )}
-            {months.flatMap((m) => [
-              <th key={`${m}-u1`} className="px-1 py-0.5 text-right border-l">USD</th>,
-              <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
-              ...(hasCop ? [<th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>, <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>] : []),
-            ])}
           </tr>
         </thead>
         <tbody>
@@ -379,6 +379,18 @@ function PygDetailPanel({
                       {cat}
                     </span>
                   </td>
+                  {months.map((m) => (
+                    <React.Fragment key={m}>
+                      <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
+                      {hasCop && (
+                        <>
+                          <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                          <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                        </>
+                      )}
+                    </React.Fragment>
+                  ))}
                   <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
                     {fmt(months.reduce((s, m) => s + (ing[m]?.usd ?? 0), 0), 'usd')}
                   </td>
@@ -395,18 +407,6 @@ function PygDetailPanel({
                       </td>
                     </>
                   )}
-                  {months.map((m) => (
-                    <React.Fragment key={m}>
-                      <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
-                      <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
-                      {hasCop && (
-                        <>
-                          <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
-                          <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
-                        </>
-                      )}
-                    </React.Fragment>
-                  ))}
                 </tr>
                 {isExpanded &&
                   items.map((t) => {
@@ -424,7 +424,6 @@ function PygDetailPanel({
                             )}
                           </span>
                         </td>
-                        <td colSpan={colsTotal} className="px-1 py-1.5 border-l" />
                         {months.map((mo) => (
                           <React.Fragment key={mo}>
                             {mo === m ? (
@@ -452,6 +451,7 @@ function PygDetailPanel({
                             )}
                           </React.Fragment>
                         ))}
+                        <td colSpan={colsTotal} className="px-1 py-1.5 border-l" />
                       </tr>
                     );
                   })}
@@ -462,14 +462,6 @@ function PygDetailPanel({
         <tfoot className="bg-gray-100 font-semibold">
           <tr>
             <td className="px-3 py-2 sticky left-0 bg-gray-100">Total mes</td>
-            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
-            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
-            {hasCop && (
-              <>
-                <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
-                <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
-              </>
-            )}
             {months.map((m) => {
               const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
               return (
@@ -485,17 +477,17 @@ function PygDetailPanel({
                 </React.Fragment>
               );
             })}
+            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
+            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
+            {hasCop && (
+              <>
+                <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
+                <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
+              </>
+            )}
           </tr>
           <tr className="bg-indigo-50">
             <td className="px-3 py-2 sticky left-0 bg-indigo-50 font-medium">Balance global</td>
-            <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-              {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
-            </td>
-            {hasCop && (
-              <td colSpan={2} className={`px-1 py-2 text-right font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
-              </td>
-            )}
             {months.map((m) => {
               const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
               const balUsd = ing[m].usd - sal[m].usd;
@@ -513,9 +505,20 @@ function PygDetailPanel({
                 </React.Fragment>
               );
             })}
+            <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+              {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
+            </td>
+            {hasCop && (
+              <td colSpan={2} className={`px-1 py-2 text-right font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
+              </td>
+            )}
           </tr>
           <tr className="bg-amber-50">
             <td className="px-3 py-2 sticky left-0 bg-amber-50 font-medium">Pendiente por liquidar</td>
+            {months.map((m) => (
+              <td key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center text-gray-400 border-l text-xs">—</td>
+            ))}
             <td colSpan={colsTotal} className="px-1 py-2 border-l">
               <span className={`font-medium ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                 {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
@@ -526,9 +529,6 @@ function PygDetailPanel({
                 </span>
               )}
             </td>
-            {months.map((m) => (
-              <td key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center text-gray-400 border-l text-xs">—</td>
-            ))}
           </tr>
         </tfoot>
       </table>
@@ -593,6 +593,9 @@ export default function Contabilidad() {
   const [mergeCategoryTargetId, setMergeCategoryTargetId] = useState('');
   const [sortDateOrder, setSortDateOrder] = useState<'asc' | 'desc'>('desc');
   const [pygExpandedEntity, setPygExpandedEntity] = useState<string | null>(null);
+  const [pygSortBy, setPygSortBy] = useState<'entity' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
+  const [pygSortOrder, setPygSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
   const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
@@ -642,7 +645,7 @@ export default function Contabilidad() {
       else if (balanceView === 'pyg') fetchPyg();
       else fetchAccountBalances();
     }
-  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd]);
+  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly]);
 
   async function fetchEntities() {
     try {
@@ -710,9 +713,10 @@ export default function Contabilidad() {
   async function fetchPyg() {
     setLoading(true);
     try {
-      const params: { start?: string; end?: string } = {};
+      const params: { start?: string; end?: string; projects_only?: boolean } = {};
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
+      params.projects_only = pygProjectsOnly;
       const data = await contabilidadApi.getPyg(params);
       setPygData(data);
     } catch (e) {
@@ -1420,6 +1424,17 @@ export default function Contabilidad() {
                 onPreset={(id) => applyPeriodPreset(id, 'balance')}
               />
             )}
+            {balanceView === 'pyg' && (
+              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pygProjectsOnly}
+                  onChange={(e) => setPygProjectsOnly(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                Solo proyectos (excluir Hotmart, Fondo libre, etc.)
+              </label>
+            )}
             {balanceView === 'accounts' && (
               <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
             )}
@@ -1479,6 +1494,30 @@ export default function Contabilidad() {
             (() => {
               const hasCopPyg = pygData.total_cop.ingresos !== 0 || pygData.total_cop.gastos !== 0 || pygData.total_cop.resultado !== 0 ||
                 pygData.rows.some((r) => r.cop.ingresos !== 0 || r.cop.gastos !== 0 || r.cop.resultado !== 0);
+              const sortedPygRows = [...pygData.rows].sort((a, b) => {
+                let cmp = 0;
+                if (pygSortBy === 'entity') {
+                  cmp = (a.entity_name ?? '').localeCompare(b.entity_name ?? '', 'es');
+                } else if (pygSortBy === 'ing_usd') cmp = a.usd.ingresos - b.usd.ingresos;
+                else if (pygSortBy === 'gastos_usd') cmp = a.usd.gastos - b.usd.gastos;
+                else if (pygSortBy === 'resultado_usd') cmp = a.usd.resultado - b.usd.resultado;
+                else if (pygSortBy === 'ing_cop') cmp = a.cop.ingresos - b.cop.ingresos;
+                else if (pygSortBy === 'gastos_cop') cmp = a.cop.gastos - b.cop.gastos;
+                else cmp = a.cop.resultado - b.cop.resultado;
+                return pygSortOrder === 'asc' ? cmp : -cmp;
+              });
+              const handlePygSort = (col: typeof pygSortBy) => {
+                const isSame = pygSortBy === col;
+                const newOrder = isSame ? (pygSortOrder === 'asc' ? 'desc' : 'asc') : (col === 'entity' ? 'asc' : 'desc');
+                setPygSortBy(col);
+                setPygSortOrder(newOrder);
+              };
+              const PygSortBtn = ({ col, label }: { col: typeof pygSortBy; label: string }) => (
+                <button type="button" onClick={() => handlePygSort(col)} className="flex items-center gap-1 hover:text-indigo-600 w-full justify-end">
+                  {label}
+                  {pygSortBy === col && (pygSortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                </button>
+              );
               return (
             <div className="bg-white rounded-lg shadow overflow-x-auto">
               <table className="w-full text-sm min-w-[600px]">
@@ -1489,21 +1528,26 @@ export default function Contabilidad() {
                     {hasCopPyg && <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">COP</th>}
                   </tr>
                   <tr className="bg-gray-50">
-                    <th></th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Ingresos</th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
+                    <th>
+                      <button type="button" onClick={() => handlePygSort('entity')} className="flex items-center gap-1 hover:text-indigo-600">
+                        Proyecto
+                        {pygSortBy === 'entity' && (pygSortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                      </button>
+                    </th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygSortBtn col="ing_usd" label="Ingresos" /></th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygSortBtn col="gastos_usd" label="Gastos" /></th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygSortBtn col="resultado_usd" label="Resultado" /></th>
                     {hasCopPyg && (
                       <>
-                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l">Ingresos</th>
-                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
-                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l"><PygSortBtn col="ing_cop" label="Ingresos" /></th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygSortBtn col="gastos_cop" label="Gastos" /></th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygSortBtn col="resultado_cop" label="Resultado" /></th>
                       </>
                     )}
                   </tr>
                 </thead>
                 <tbody>
-                  {pygData.rows.map((r) => {
+                  {sortedPygRows.map((r) => {
                     const rowKey = r.entity_id ?? 'sin-asignar';
                     const isExpanded = pygExpandedEntity === rowKey;
                     const isThisRowDetail = pygExpandedEntity === rowKey;

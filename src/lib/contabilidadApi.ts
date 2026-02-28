@@ -228,10 +228,11 @@ export const contabilidadApi = {
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
   },
 
-  async getPyg(params?: { start?: string; end?: string }): Promise<PygResponse> {
+  async getPyg(params?: { start?: string; end?: string; projects_only?: boolean }): Promise<PygResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
+    if (params?.projects_only) search.projects_only = 'true';
     return fetchJson<PygResponse>(url('/pyg', Object.keys(search).length > 0 ? search : undefined));
   },
 
