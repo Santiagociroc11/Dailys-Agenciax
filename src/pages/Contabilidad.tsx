@@ -13,6 +13,7 @@ import {
   Building2,
   Tag,
   CreditCard,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -65,6 +66,11 @@ export default function Contabilidad() {
     description: '',
   });
   const [error, setError] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importCsvText, setImportCsvText] = useState('');
+  const [importCurrency, setImportCurrency] = useState('USD');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; entities: number; categories: number; accounts: number } | null>(null);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -315,6 +321,28 @@ export default function Contabilidad() {
     }
   }
 
+  async function handleImportCsv() {
+    if (!importCsvText.trim()) {
+      toast.error('Pega el contenido del CSV');
+      return;
+    }
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await contabilidadApi.importCsv(importCsvText, { default_currency: importCurrency }, currentUser?.id);
+      setImportResult(result);
+      toast.success(`Importadas ${result.created} transacciones`);
+      fetchEntities();
+      fetchCategories();
+      fetchAccounts();
+      fetchTransactions();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al importar');
+    } finally {
+      setImporting(false);
+    }
+  }
+
   if (!isAdmin) {
     return (
       <div className="p-6">
@@ -425,6 +453,13 @@ export default function Contabilidad() {
                 ))}
               </select>
             </div>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2"
+            >
+              <Upload className="w-5 h-5" />
+              Importar CSV
+            </button>
             <button
               onClick={() => {
                 if (accounts.length === 0) {
@@ -768,10 +803,6 @@ export default function Contabilidad() {
                       <option value="internal">Interno</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Orden</label>
-                    <input type="number" value={currentEntity.sort_order ?? 0} onChange={(e) => setCurrentEntity((p) => ({ ...p, sort_order: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
                 </>
               )}
 
@@ -822,6 +853,66 @@ export default function Contabilidad() {
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">Importar CSV desde Excel</h3>
+              <button onClick={() => { setShowImportModal(false); setImportCsvText(''); setImportResult(null); }} className="p-1 hover:bg-gray-100 rounded">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <p className="text-sm text-gray-600 mb-2">
+                Pega el contenido del CSV exportado desde Excel o selecciona un archivo. Debe tener columnas FECHA, PROYECTO y columnas de cuentas (BANCOLOMBIA, PAYO JSD, etc.).
+              </p>
+              <div className="mb-2">
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      const r = new FileReader();
+                      r.onload = () => setImportCsvText(String(r.result ?? ''));
+                      r.readAsText(f, 'UTF-8');
+                    }
+                    e.target.value = '';
+                  }}
+                  className="text-sm"
+                />
+              </div>
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Moneda por defecto</label>
+                <select value={importCurrency} onChange={(e) => setImportCurrency(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+                  <option value="USD">USD</option>
+                  <option value="COP">COP</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </div>
+              <textarea
+                value={importCsvText}
+                onChange={(e) => setImportCsvText(e.target.value)}
+                placeholder="Pega aquí el CSV..."
+                className="w-full h-48 px-3 py-2 border rounded-lg font-mono text-sm"
+                disabled={importing}
+              />
+              {importResult && (
+                <div className="mt-3 p-3 bg-emerald-50 rounded-lg text-sm text-emerald-800">
+                  <strong>Importación completada:</strong> {importResult.created} transacciones, {importResult.entities} entidades, {importResult.accounts} cuentas, {importResult.categories} categorías. {importResult.skipped > 0 && `${importResult.skipped} filas omitidas.`}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button onClick={() => { setShowImportModal(false); setImportCsvText(''); setImportResult(null); }} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cerrar</button>
+              <button onClick={handleImportCsv} disabled={importing || !importCsvText.trim()} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                {importing ? 'Importando...' : 'Importar'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { parse } from 'csv-parse/sync';
 import {
   AcctEntity,
   AcctCategory,
@@ -9,6 +10,29 @@ import {
 } from '../models/index.js';
 
 const router = Router();
+
+const SPANISH_MONTHS: Record<string, number> = {
+  enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+  julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11,
+};
+
+function parseSpanishDate(str: string): Date | null {
+  const m = str.trim().match(/^(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})$/i);
+  if (!m) return null;
+  const month = SPANISH_MONTHS[m[2].toLowerCase()];
+  if (month == null) return null;
+  const d = new Date(parseInt(m[3], 10), month, parseInt(m[1], 10));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function parseAmount(str: string): number | null {
+  const s = String(str || '').trim().replace(/\s/g, '').replace(/\$/g, '').replace(/,/g, '');
+  if (!s) return null;
+  const neg = /^-/.test(s) || s.startsWith('-$');
+  const num = parseFloat(s.replace(/^-\$?/, '').replace(/^\$?/, ''));
+  if (isNaN(num)) return null;
+  return neg ? -num : num;
+}
 
 // --- Entities ---
 router.get('/entities', async (_req: Request, res: Response) => {
@@ -477,6 +501,185 @@ router.get('/balance', async (req: Request, res: Response) => {
     const grandTotal = rows.reduce((acc, r) => acc + r.total_amount, 0);
 
     res.json({ rows, grand_total: Math.round(grandTotal * 100) / 100 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Import CSV ---
+router.post('/import', async (req: Request, res: Response) => {
+  try {
+    const { csv_text, default_currency = 'USD' } = req.body as { csv_text?: string; default_currency?: string };
+    const created_by = req.body.created_by as string | undefined;
+    if (!csv_text || typeof csv_text !== 'string') {
+      res.status(400).json({ error: 'Falta csv_text' });
+      return;
+    }
+
+    const records = parse(csv_text, { relax_column_count: true, trim: true, skip_empty_lines: true }) as string[][];
+    if (records.length < 2) {
+      res.status(400).json({ error: 'CSV vacío o sin datos' });
+      return;
+    }
+
+    // Buscar fila de encabezado (contiene FECHA, PROYECTO)
+    let headerRow = 0;
+    for (let i = 0; i < Math.min(10, records.length); i++) {
+      const row = records[i];
+      const first = (row[0] || '').toUpperCase();
+      const hasProyecto = row.some((c) => (c || '').toUpperCase().includes('PROYECTO'));
+      if (first.includes('FECHA') || hasProyecto) {
+        headerRow = i;
+        break;
+      }
+    }
+
+    const headers = records[headerRow].map((h) => (h || '').trim());
+    const idxFecha = headers.findIndex((h) => /FECHA/i.test(h));
+    const idxProyecto = headers.findIndex((h) => /PROYECTO/i.test(h));
+    const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
+    const idxDescripcion = headers.findIndex((h) => /DESCRIPCION/i.test(h));
+    const idxCategoria = headers.findIndex((h) => /CATEGORIA|DETALLE/i.test(h));
+    const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
+
+    if (idxFecha < 0 || idxProyecto < 0) {
+      res.status(400).json({ error: 'CSV debe tener columnas FECHA y PROYECTO' });
+      return;
+    }
+
+    // Columnas de cuentas: desde después de IMPORTE CONTABLE (o col 7) hasta el final
+    const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
+    const accountHeaders = headers.slice(accountColStart).filter((h) => h && !/^\s*$/.test(h));
+
+    const entityByName = new Map<string, { id: string; type: string }>();
+    const categoryByName = new Map<string, string>();
+    const accountByName = new Map<string, string>();
+
+    async function getOrCreateEntity(name: string): Promise<string | null> {
+      const n = (name || '').trim();
+      if (!n || n === 'NA') return null;
+      if (entityByName.has(n)) return entityByName.get(n)!.id;
+      const type = /AGENCIA\s*X/i.test(n) ? 'agency' : /UTILIDADES|HOTMART|EQUIPO|NA/i.test(n) ? 'internal' : 'project';
+      const existing = await AcctEntity.findOne({ name: n }).select('id').lean().exec();
+      if (existing) {
+        entityByName.set(n, { id: (existing as { id: string }).id, type });
+        return (existing as { id: string }).id;
+      }
+      const doc = await AcctEntity.create({ name: n, type, sort_order: 0 });
+      if (created_by) {
+        await AuditLog.create({ user_id: created_by, entity_type: 'acct_entity', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
+      }
+      entityByName.set(n, { id: doc.id, type });
+      return doc.id;
+    }
+
+    async function getOrCreateCategory(name: string, isExpense: boolean): Promise<string | null> {
+      const n = (name || '').trim() || 'Importación';
+      if (categoryByName.has(n)) return categoryByName.get(n)!;
+      const existing = await AcctCategory.findOne({ name: n }).select('id').lean().exec();
+      if (existing) {
+        categoryByName.set(n, (existing as { id: string }).id);
+        return (existing as { id: string }).id;
+      }
+      const doc = await AcctCategory.create({ name: n, type: isExpense ? 'expense' : 'income', parent_id: null });
+      if (created_by) {
+        await AuditLog.create({ user_id: created_by, entity_type: 'acct_category', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
+      }
+      categoryByName.set(n, doc.id);
+      return doc.id;
+    }
+
+    async function getOrCreateAccount(name: string): Promise<string> {
+      const n = (name || '').trim() || 'Sin cuenta';
+      if (accountByName.has(n)) return accountByName.get(n)!;
+      const existing = await AcctPaymentAccount.findOne({ name: n }).select('id').lean().exec();
+      if (existing) {
+        accountByName.set(n, (existing as { id: string }).id);
+        return (existing as { id: string }).id;
+      }
+      const doc = await AcctPaymentAccount.create({ name: n, currency: default_currency });
+      if (created_by) {
+        await AuditLog.create({ user_id: created_by, entity_type: 'acct_payment_account', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
+      }
+      accountByName.set(n, doc.id);
+      return doc.id;
+    }
+
+    let created = 0;
+    let skipped = 0;
+
+    for (let i = headerRow + 1; i < records.length; i++) {
+      const row = records[i];
+      const fechaStr = (row[idxFecha] || '').trim();
+      const proyectoStr = (row[idxProyecto] || '').trim();
+      const descripcion = ((row[idxDescripcion] || '') || (row[idxCategoria] || '')).trim() || 'Sin descripción';
+      const subcategoria = (row[idxSubcategoria] || '').trim();
+
+      const date = parseSpanishDate(fechaStr);
+      if (!date) {
+        skipped++;
+        continue;
+      }
+
+      const entityId = await getOrCreateEntity(proyectoStr);
+      let rowCreated = 0;
+
+      // Revisar columnas de cuentas
+      for (let c = 0; c < accountHeaders.length; c++) {
+        const cell = (row[accountColStart + c] || '').trim();
+        const amount = parseAmount(cell);
+        if (amount == null || amount === 0) continue;
+
+        const accountName = accountHeaders[c];
+        if (!accountName) continue;
+
+        const accountId = await getOrCreateAccount(accountName);
+        const categoryName = subcategoria || 'Importación';
+        const categoryId = await getOrCreateCategory(categoryName, amount < 0);
+        const type = amount >= 0 ? 'income' : 'expense';
+
+        await AcctTransaction.create({
+          date,
+          amount: Math.round(amount * 100) / 100,
+          currency: default_currency,
+          type,
+          entity_id: entityId,
+          category_id: categoryId,
+          payment_account_id: accountId,
+          description: descripcion.slice(0, 500),
+          created_by: created_by ?? null,
+        });
+        created++;
+        rowCreated++;
+      }
+
+      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE, usar primera cuenta
+      if (rowCreated === 0) {
+        const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
+        const amount = parseAmount(importeCell);
+        if (amount != null && amount !== 0 && accountHeaders.length > 0) {
+          const accountId = await getOrCreateAccount(accountHeaders[0]);
+          const categoryName = subcategoria || 'Importación';
+          const categoryId = await getOrCreateCategory(categoryName, amount < 0);
+          const type = amount >= 0 ? 'income' : 'expense';
+          await AcctTransaction.create({
+            date,
+            amount: Math.round(amount * 100) / 100,
+            currency: default_currency,
+            type,
+            entity_id: entityId,
+            category_id: categoryId,
+            payment_account_id: accountId,
+            description: descripcion.slice(0, 500),
+            created_by: created_by ?? null,
+          });
+          created++;
+        }
+      }
+    }
+
+    res.json({ created, skipped, entities: entityByName.size, categories: categoryByName.size, accounts: accountByName.size });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });

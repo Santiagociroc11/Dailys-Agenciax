@@ -183,4 +183,23 @@ export const contabilidadApi = {
     if (params?.end) search.end = params.end;
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
   },
+
+  async importCsv(csvText: string, options?: { default_currency?: string }, createdBy?: string): Promise<ImportResult> {
+    return fetchJson<ImportResult>(url('/import'), {
+      method: 'POST',
+      body: JSON.stringify({
+        csv_text: csvText,
+        default_currency: options?.default_currency ?? 'USD',
+        created_by: createdBy,
+      }),
+    });
+  },
 };
+
+export interface ImportResult {
+  created: number;
+  skipped: number;
+  entities: number;
+  categories: number;
+  accounts: number;
+}
