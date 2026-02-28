@@ -383,6 +383,7 @@ export default function Contabilidad() {
   const [transactionsPage, setTransactionsPage] = useState(1);
   const [transactionsPageSize, setTransactionsPageSize] = useState(25);
   const [showSelectAllModal, setShowSelectAllModal] = useState(false);
+  const [categorySearchFilter, setCategorySearchFilter] = useState('');
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -402,6 +403,10 @@ export default function Contabilidad() {
   useEffect(() => {
     setTransactionsPage(1);
   }, [filterStart, filterEnd, filterEntity, filterCategory, filterAccount]);
+
+  useEffect(() => {
+    if (!showModal) setCategorySearchFilter('');
+  }, [showModal]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -1693,12 +1698,34 @@ export default function Contabilidad() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
-                    <select value={currentTransaction.category_id ?? ''} onChange={(e) => setCurrentTransaction((p) => ({ ...p, category_id: e.target.value || null }))} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">Sin categoría</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                    <input
+                      type="text"
+                      placeholder="Buscar categoría..."
+                      value={categorySearchFilter}
+                      onChange={(e) => setCategorySearchFilter(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg mb-2"
+                    />
+                    <div className="border rounded-lg max-h-40 overflow-y-auto">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentTransaction((p) => ({ ...p, category_id: null }))}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 block ${!currentTransaction.category_id ? 'bg-indigo-50 text-indigo-700' : ''}`}
+                      >
+                        Sin categoría
+                      </button>
+                      {categories
+                        .filter((c) => (c.name ?? '').toLowerCase().includes(categorySearchFilter.toLowerCase()))
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setCurrentTransaction((p) => ({ ...p, category_id: c.id }))}
+                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 block ${currentTransaction.category_id === c.id ? 'bg-indigo-50 text-indigo-700' : ''}`}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Cuenta de pago</label>
