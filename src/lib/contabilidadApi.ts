@@ -60,40 +60,41 @@ export interface BalanceRow {
   entity_id: string | null;
   entity_name: string;
   entity_type: string | null;
-  total_amount: number;
+  usd: number;
+  cop: number;
 }
 
 export interface BalanceResponse {
   rows: BalanceRow[];
-  grand_total: number;
+  total_usd: number;
+  total_cop: number;
 }
 
 export interface PygRow {
   entity_id: string | null;
   entity_name: string;
   entity_type: string | null;
-  ingresos: number;
-  gastos: number;
-  resultado: number;
+  usd: { ingresos: number; gastos: number; resultado: number };
+  cop: { ingresos: number; gastos: number; resultado: number };
 }
 
 export interface PygResponse {
   rows: PygRow[];
-  total_ingresos: number;
-  total_gastos: number;
-  total_resultado: number;
+  total_usd: { ingresos: number; gastos: number; resultado: number };
+  total_cop: { ingresos: number; gastos: number; resultado: number };
 }
 
 export interface AccountBalanceRow {
   payment_account_id: string;
   account_name: string;
-  currency: string;
-  total_amount: number;
+  usd: number;
+  cop: number;
 }
 
 export interface AccountBalancesResponse {
   rows: AccountBalanceRow[];
-  grand_total: number;
+  total_usd: number;
+  total_cop: number;
 }
 
 export const contabilidadApi = {

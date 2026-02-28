@@ -32,9 +32,9 @@ export default function Contabilidad() {
   const [categories, setCategories] = useState<AcctCategory[]>([]);
   const [accounts, setAccounts] = useState<AcctPaymentAccount[]>([]);
   const [transactions, setTransactions] = useState<AcctTransaction[]>([]);
-  const [balanceData, setBalanceData] = useState<{ rows: BalanceRow[]; grand_total: number } | null>(null);
-  const [pygData, setPygData] = useState<{ rows: PygRow[]; total_ingresos: number; total_gastos: number; total_resultado: number } | null>(null);
-  const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; grand_total: number } | null>(null);
+  const [balanceData, setBalanceData] = useState<{ rows: BalanceRow[]; total_usd: number; total_cop: number } | null>(null);
+  const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
+  const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; total_usd: number; total_cop: number } | null>(null);
   const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'accounts'>('balance');
 
   const [loading, setLoading] = useState(true);
@@ -715,15 +715,19 @@ export default function Contabilidad() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Balance (USD)</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>
                   </tr>
                 </thead>
                 <tbody>
                   {accountBalancesData.rows.map((r) => (
                     <tr key={r.payment_account_id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium">{r.account_name}</td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.total_amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.total_amount >= 0 ? '+' : ''}{r.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {r.currency}
+                      <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.usd >= 0 ? '+' : ''}{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                       </td>
                     </tr>
                   ))}
@@ -731,8 +735,11 @@ export default function Contabilidad() {
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
                     <td className="px-6 py-3">Total</td>
-                    <td className={`px-6 py-3 text-right ${accountBalancesData.grand_total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {accountBalancesData.grand_total >= 0 ? '+' : ''}{accountBalancesData.grand_total.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    <td className={`px-6 py-3 text-right ${accountBalancesData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {accountBalancesData.total_usd >= 0 ? '+' : ''}{accountBalancesData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    </td>
+                    <td className={`px-6 py-3 text-right ${accountBalancesData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {accountBalancesData.total_cop >= 0 ? '+' : ''}{accountBalancesData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                     </td>
                   </tr>
                 </tfoot>
@@ -742,24 +749,37 @@ export default function Contabilidad() {
               )}
             </div>
           ) : balanceView === 'pyg' && pygData ? (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto / Entidad</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Ingresos</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Gastos</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Resultado</th>
+                    <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">USD</th>
+                    <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">COP</th>
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <th></th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Ingresos</th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l">Ingresos</th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pygData.rows.map((r) => (
                     <tr key={r.entity_id ?? 'sin-asignar'} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium">{r.entity_name}</td>
-                      <td className="px-6 py-3 text-right text-emerald-600">{r.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="px-6 py-3 text-right text-red-600">{r.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.resultado >= 0 ? '+' : ''}{r.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      <td className="px-2 py-3 text-right text-emerald-600">{r.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-2 py-3 text-right text-red-600">{r.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.usd.resultado >= 0 ? '+' : ''}{r.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                      <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                      <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                       </td>
                     </tr>
                   ))}
@@ -767,10 +787,15 @@ export default function Contabilidad() {
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
                     <td className="px-6 py-3">Total</td>
-                    <td className="px-6 py-3 text-right text-emerald-700">{pygData.total_ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-6 py-3 text-right text-red-700">{pygData.total_gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className={`px-6 py-3 text-right ${pygData.total_resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {pygData.total_resultado >= 0 ? '+' : ''}{pygData.total_resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    <td className="px-2 py-3 text-right text-emerald-700">{pygData.total_usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-2 py-3 text-right text-red-700">{pygData.total_usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className={`px-2 py-3 text-right ${pygData.total_usd.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {pygData.total_usd.resultado >= 0 ? '+' : ''}{pygData.total_usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-2 py-3 text-right text-emerald-700 border-l">{pygData.total_cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                    <td className="px-2 py-3 text-right text-red-700">{pygData.total_cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                    <td className={`px-2 py-3 text-right ${pygData.total_cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {pygData.total_cop.resultado >= 0 ? '+' : ''}{pygData.total_cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                     </td>
                   </tr>
                 </tfoot>
@@ -785,15 +810,19 @@ export default function Contabilidad() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Entidad</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Suma de movimientos (USD)</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>
                   </tr>
                 </thead>
                 <tbody>
                   {balanceData.rows.map((r) => (
                     <tr key={r.entity_id ?? 'sin-asignar'} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium">{r.entity_name}</td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.total_amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.total_amount >= 0 ? '+' : ''}{r.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.usd >= 0 ? '+' : ''}{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                       </td>
                     </tr>
                   ))}
@@ -801,14 +830,20 @@ export default function Contabilidad() {
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
                     <td className="px-6 py-3">Total general</td>
-                    <td className={`px-6 py-3 text-right ${balanceData.grand_total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {balanceData.grand_total >= 0 ? '+' : ''}{balanceData.grand_total.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    <td className={`px-6 py-3 text-right ${balanceData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    </td>
+                    <td className={`px-6 py-3 text-right ${balanceData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                     </td>
                   </tr>
                   <tr>
                     <td className="px-6 py-3 text-indigo-700">Utilidad distribuible</td>
                     <td className="px-6 py-3 text-right text-indigo-700 font-bold">
-                      {balanceData.grand_total >= 0 ? '+' : ''}{balanceData.grand_total.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    </td>
+                    <td className="px-6 py-3 text-right text-indigo-700 font-bold">
+                      {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                     </td>
                   </tr>
                 </tfoot>
@@ -980,6 +1015,13 @@ export default function Contabilidad() {
                     <input type="number" step="0.01" value={currentTransaction.amount ?? 0} onChange={(e) => setCurrentTransaction((p) => ({ ...p, amount: Number(e.target.value) }))} className="w-full px-3 py-2 border rounded-lg" required />
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Moneda</label>
+                    <select value={currentTransaction.currency ?? 'USD'} onChange={(e) => setCurrentTransaction((p) => ({ ...p, currency: e.target.value }))} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="USD">USD</option>
+                      <option value="COP">COP</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
                     <select value={currentTransaction.type ?? 'expense'} onChange={(e) => setCurrentTransaction((p) => ({ ...p, type: e.target.value as 'income' | 'expense' | 'transfer' }))} className="w-full px-3 py-2 border rounded-lg">
                       <option value="income">Ingreso</option>
@@ -1074,7 +1116,6 @@ export default function Contabilidad() {
                     <select value={currentAccount.currency ?? 'USD'} onChange={(e) => setCurrentAccount((p) => ({ ...p, currency: e.target.value }))} className="w-full px-3 py-2 border rounded-lg">
                       <option value="USD">USD</option>
                       <option value="COP">COP</option>
-                      <option value="EUR">EUR</option>
                     </select>
                   </div>
                 </>
@@ -1189,7 +1230,6 @@ export default function Contabilidad() {
                 <select value={importCurrency} onChange={(e) => setImportCurrency(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
                   <option value="USD">USD</option>
                   <option value="COP">COP</option>
-                  <option value="EUR">EUR</option>
                 </select>
               </div>
               <textarea

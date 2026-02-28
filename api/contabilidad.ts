@@ -553,6 +553,10 @@ router.delete('/transactions/:id', async (req: Request, res: Response) => {
   }
 });
 
+function normCurrency(c: string): 'USD' | 'COP' {
+  return (c || 'USD').toUpperCase() === 'COP' ? 'COP' : 'USD';
+}
+
 // --- Balance ---
 router.get('/balance', async (req: Request, res: Response) => {
   try {
@@ -571,13 +575,12 @@ router.get('/balance', async (req: Request, res: Response) => {
       pipeline.push({ $match: matchStage });
     }
     pipeline.push(
-      { $group: { _id: '$entity_id', total_amount: { $sum: '$amount' } } },
-      { $sort: { total_amount: -1 } }
+      { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } }
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
-    const entityIds = (results as { _id: string | null }[]).map((r) => r._id).filter(Boolean);
+    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
       : [];
@@ -585,16 +588,30 @@ router.get('/balance', async (req: Request, res: Response) => {
       (entities as { id: string; name: string; type: string }[]).map((e) => [e.id, { name: e.name, type: e.type }])
     );
 
-    const rows = (results as { _id: string | null; total_amount: number }[]).map((r) => ({
-      entity_id: r._id,
-      entity_name: r._id ? (entityMap.get(r._id)?.name ?? 'Sin asignar') : 'Sin asignar',
-      entity_type: r._id ? (entityMap.get(r._id)?.type ?? null) : null,
-      total_amount: Math.round(r.total_amount * 100) / 100,
-    }));
+    const rowMap = new Map<string, { entity_id: string | null; entity_name: string; entity_type: string | null; usd: number; cop: number }>();
+    for (const r of results as { _id: { entity_id: string | null; currency: string }; total_amount: number }[]) {
+      const eid = r._id.entity_id;
+      const key = eid ?? 'null';
+      const cur = normCurrency(r._id.currency || 'USD');
+      const amt = Math.round(r.total_amount * 100) / 100;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
+          entity_id: eid,
+          entity_name: eid ? (entityMap.get(eid)?.name ?? 'Sin asignar') : 'Sin asignar',
+          entity_type: eid ? (entityMap.get(eid)?.type ?? null) : null,
+          usd: 0,
+          cop: 0,
+        });
+      }
+      const row = rowMap.get(key)!;
+      if (cur === 'COP') row.cop += amt;
+      else row.usd += amt;
+    }
+    const rows = Array.from(rowMap.values()).sort((a, b) => (b.usd + b.cop) - (a.usd + a.cop));
+    const totalUsd = rows.reduce((acc, r) => acc + r.usd, 0);
+    const totalCop = rows.reduce((acc, r) => acc + r.cop, 0);
 
-    const grandTotal = rows.reduce((acc, r) => acc + r.total_amount, 0);
-
-    res.json({ rows, grand_total: Math.round(grandTotal * 100) / 100 });
+    res.json({ rows, total_usd: Math.round(totalUsd * 100) / 100, total_cop: Math.round(totalCop * 100) / 100 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
@@ -620,19 +637,15 @@ router.get('/pyg', async (req: Request, res: Response) => {
     }
     pipeline.push({
       $group: {
-        _id: '$entity_id',
+        _id: { entity_id: '$entity_id', currency: '$currency' },
         ingresos: { $sum: { $cond: [{ $gte: ['$amount', 0] }, '$amount', 0] } },
         gastos: { $sum: { $cond: [{ $lt: ['$amount', 0] }, { $abs: '$amount' }, 0] } },
       },
-    }, {
-      $addFields: {
-        resultado: { $subtract: ['$ingresos', '$gastos'] },
-      },
-    }, { $sort: { resultado: -1 } });
+    }, { $addFields: { resultado: { $subtract: ['$ingresos', '$gastos'] } } });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
-    const entityIds = (results as { _id: string | null }[]).map((r) => r._id).filter(Boolean);
+    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
       : [];
@@ -640,24 +653,42 @@ router.get('/pyg', async (req: Request, res: Response) => {
       (entities as { id: string; name: string; type: string }[]).map((e) => [e.id, { name: e.name, type: e.type }])
     );
 
-    const rows = (results as { _id: string | null; ingresos: number; gastos: number; resultado: number }[]).map((r) => ({
-      entity_id: r._id,
-      entity_name: r._id ? (entityMap.get(r._id)?.name ?? 'Sin asignar') : 'Sin asignar',
-      entity_type: r._id ? (entityMap.get(r._id)?.type ?? null) : null,
-      ingresos: Math.round(r.ingresos * 100) / 100,
-      gastos: Math.round(r.gastos * 100) / 100,
-      resultado: Math.round(r.resultado * 100) / 100,
-    }));
+    const rowMap = new Map<string, { entity_id: string | null; entity_name: string; entity_type: string | null; usd: { ingresos: number; gastos: number; resultado: number }; cop: { ingresos: number; gastos: number; resultado: number } }>();
+    for (const r of results as { _id: { entity_id: string | null; currency: string }; ingresos: number; gastos: number; resultado: number }[]) {
+      const eid = r._id.entity_id;
+      const key = eid ?? 'null';
+      const cur = normCurrency(r._id.currency || 'USD');
+      const ing = Math.round(r.ingresos * 100) / 100;
+      const gas = Math.round(r.gastos * 100) / 100;
+      const res = Math.round(r.resultado * 100) / 100;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
+          entity_id: eid,
+          entity_name: eid ? (entityMap.get(eid)?.name ?? 'Sin asignar') : 'Sin asignar',
+          entity_type: eid ? (entityMap.get(eid)?.type ?? null) : null,
+          usd: { ingresos: 0, gastos: 0, resultado: 0 },
+          cop: { ingresos: 0, gastos: 0, resultado: 0 },
+        });
+      }
+      const row = rowMap.get(key)!;
+      const c = cur === 'COP' ? row.cop : row.usd;
+      c.ingresos += ing;
+      c.gastos += gas;
+      c.resultado += res;
+    }
+    const rows = Array.from(rowMap.values()).map((r) => ({
+      ...r,
+      usd: { ingresos: Math.round(r.usd.ingresos * 100) / 100, gastos: Math.round(r.usd.gastos * 100) / 100, resultado: Math.round(r.usd.resultado * 100) / 100 },
+      cop: { ingresos: Math.round(r.cop.ingresos * 100) / 100, gastos: Math.round(r.cop.gastos * 100) / 100, resultado: Math.round(r.cop.resultado * 100) / 100 },
+    })).sort((a, b) => (b.usd.resultado + b.cop.resultado) - (a.usd.resultado + a.cop.resultado));
 
-    const totalIngresos = rows.reduce((acc, r) => acc + r.ingresos, 0);
-    const totalGastos = rows.reduce((acc, r) => acc + r.gastos, 0);
-    const totalResultado = totalIngresos - totalGastos;
+    const totalUsd = { ingresos: rows.reduce((a, r) => a + r.usd.ingresos, 0), gastos: rows.reduce((a, r) => a + r.usd.gastos, 0), resultado: rows.reduce((a, r) => a + r.usd.resultado, 0) };
+    const totalCop = { ingresos: rows.reduce((a, r) => a + r.cop.ingresos, 0), gastos: rows.reduce((a, r) => a + r.cop.gastos, 0), resultado: rows.reduce((a, r) => a + r.cop.resultado, 0) };
 
     res.json({
       rows,
-      total_ingresos: Math.round(totalIngresos * 100) / 100,
-      total_gastos: Math.round(totalGastos * 100) / 100,
-      total_resultado: Math.round(totalResultado * 100) / 100,
+      total_usd: { ingresos: Math.round(totalUsd.ingresos * 100) / 100, gastos: Math.round(totalUsd.gastos * 100) / 100, resultado: Math.round(totalUsd.resultado * 100) / 100 },
+      total_cop: { ingresos: Math.round(totalCop.ingresos * 100) / 100, gastos: Math.round(totalCop.gastos * 100) / 100, resultado: Math.round(totalCop.resultado * 100) / 100 },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
@@ -683,30 +714,41 @@ router.get('/account-balances', async (req: Request, res: Response) => {
       pipeline.push({ $match: matchStage });
     }
     pipeline.push(
-      { $group: { _id: '$payment_account_id', total_amount: { $sum: '$amount' } } },
-      { $sort: { total_amount: -1 } }
+      { $group: { _id: { payment_account_id: '$payment_account_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } }
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
-    const accountIds = (results as { _id: string }[]).map((r) => r._id).filter(Boolean);
+    const accountIds = [...new Set((results as { _id: { payment_account_id: string } }[]).map((r) => r._id.payment_account_id).filter(Boolean))];
     const accounts = accountIds.length > 0
       ? await AcctPaymentAccount.find({ id: { $in: accountIds } }).select('id name currency').lean().exec()
       : [];
     const accountMap = new Map(
-      (accounts as { id: string; name: string; currency?: string }[]).map((a) => [a.id, { name: a.name, currency: a.currency ?? 'USD' }])
+      (accounts as { id: string; name: string; currency?: string }[]).map((a) => [a.id, { name: a.name }])
     );
 
-    const rows = (results as { _id: string; total_amount: number }[]).map((r) => ({
-      payment_account_id: r._id,
-      account_name: accountMap.get(r._id)?.name ?? 'Cuenta desconocida',
-      currency: accountMap.get(r._id)?.currency ?? 'USD',
-      total_amount: Math.round(r.total_amount * 100) / 100,
-    }));
+    const rowMap = new Map<string, { payment_account_id: string; account_name: string; usd: number; cop: number }>();
+    for (const r of results as { _id: { payment_account_id: string; currency: string }; total_amount: number }[]) {
+      const aid = r._id.payment_account_id;
+      const cur = normCurrency(r._id.currency || 'USD');
+      const amt = Math.round(r.total_amount * 100) / 100;
+      if (!rowMap.has(aid)) {
+        rowMap.set(aid, {
+          payment_account_id: aid,
+          account_name: accountMap.get(aid)?.name ?? 'Cuenta desconocida',
+          usd: 0,
+          cop: 0,
+        });
+      }
+      const row = rowMap.get(aid)!;
+      if (cur === 'COP') row.cop += amt;
+      else row.usd += amt;
+    }
+    const rows = Array.from(rowMap.values()).sort((a, b) => (b.usd + b.cop) - (a.usd + a.cop));
+    const totalUsd = rows.reduce((acc, r) => acc + r.usd, 0);
+    const totalCop = rows.reduce((acc, r) => acc + r.cop, 0);
 
-    const grandTotal = rows.reduce((acc, r) => acc + r.total_amount, 0);
-
-    res.json({ rows, grand_total: Math.round(grandTotal * 100) / 100 });
+    res.json({ rows, total_usd: Math.round(totalUsd * 100) / 100, total_cop: Math.round(totalCop * 100) / 100 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
