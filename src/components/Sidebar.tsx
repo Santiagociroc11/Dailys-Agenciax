@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -119,6 +119,7 @@ export default function Sidebar() {
   const finanzasItems: NavItem[] = [
     { to: '/payroll', label: 'Nómina', icon: DollarSign },
     { to: '/timeline', label: 'Timeline', icon: Calendar },
+    { to: '/contabilidad', label: 'Contabilidad', icon: Calculator },
   ];
 
   return (
@@ -172,7 +173,7 @@ export default function Sidebar() {
               items={finanzasItems}
               expanded={expanded.finanzas}
               onToggle={() => toggle('finanzas')}
-              isActive={isActiveIn(['/payroll', '/timeline'])}
+              isActive={isActiveIn(['/payroll', '/timeline', '/contabilidad'])}
             />
             <NavLink
               to="/settings"

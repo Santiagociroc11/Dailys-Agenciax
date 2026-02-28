@@ -20,6 +20,7 @@ const Audits = lazy(() => import('./pages/Audits'));
 const ActivityReport = lazy(() => import('./pages/ActivityReport'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const Timeline = lazy(() => import('./pages/Timeline'));
+const Contabilidad = lazy(() => import('./pages/Contabilidad'));
 const UserProjectView = lazy(() => import('./pages/UserProjectView'));
 const MiDiaView = lazy(() => import('./pages/MiDiaView'));
 const Login = lazy(() => import('./pages/Login'));
@@ -98,6 +99,7 @@ function App() {
               <Route path="activity" element={<ActivityReport />} />
               <Route path="payroll" element={<Payroll />} />
               <Route path="timeline" element={<Timeline />} />
+              <Route path="contabilidad" element={<Contabilidad />} />
               <Route path="settings" element={<Settings />} />
             </Route>
 

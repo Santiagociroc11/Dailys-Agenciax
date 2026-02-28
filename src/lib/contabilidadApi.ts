@@ -1,0 +1,186 @@
+const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
+
+function url(path: string, params?: Record<string, string>) {
+  const base = `${API_BASE}/api/contabilidad`;
+  const full = `${base}${path}`;
+  if (!params) return full;
+  const search = new URLSearchParams(params).toString();
+  return search ? `${full}?${search}` : full;
+}
+
+async function fetchJson<T>(urlStr: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(urlStr, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error((json as { error?: string })?.error ?? 'Error de red');
+  }
+  return json as T;
+}
+
+export interface AcctEntity {
+  id: string;
+  name: string;
+  type: 'project' | 'agency' | 'internal';
+  sort_order?: number;
+}
+
+export interface AcctCategory {
+  id: string;
+  name: string;
+  type: 'income' | 'expense';
+  parent_id?: string | null;
+}
+
+export interface AcctPaymentAccount {
+  id: string;
+  name: string;
+  currency?: string;
+}
+
+export interface AcctTransaction {
+  id: string;
+  date: string;
+  amount: number;
+  currency?: string;
+  type: 'income' | 'expense' | 'transfer';
+  entity_id?: string | null;
+  category_id?: string | null;
+  payment_account_id: string;
+  description?: string;
+  created_by?: string | null;
+  entity_name?: string | null;
+  category_name?: string | null;
+  payment_account_name?: string | null;
+}
+
+export interface BalanceRow {
+  entity_id: string | null;
+  entity_name: string;
+  entity_type: string | null;
+  total_amount: number;
+}
+
+export interface BalanceResponse {
+  rows: BalanceRow[];
+  grand_total: number;
+}
+
+export const contabilidadApi = {
+  async getEntities(): Promise<AcctEntity[]> {
+    return fetchJson<AcctEntity[]>(url('/entities'));
+  },
+  async createEntity(data: { name: string; type: string; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
+    return fetchJson<AcctEntity>(url('/entities'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateEntity(id: string, data: { name?: string; type?: string; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
+    return fetchJson<AcctEntity>(url(`/entities/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteEntity(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/entities/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getCategories(): Promise<AcctCategory[]> {
+    return fetchJson<AcctCategory[]>(url('/categories'));
+  },
+  async createCategory(data: { name: string; type: string; parent_id?: string | null }, createdBy?: string): Promise<AcctCategory> {
+    return fetchJson<AcctCategory>(url('/categories'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateCategory(id: string, data: { name?: string; type?: string; parent_id?: string | null }, createdBy?: string): Promise<AcctCategory> {
+    return fetchJson<AcctCategory>(url(`/categories/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteCategory(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/categories/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getPaymentAccounts(): Promise<AcctPaymentAccount[]> {
+    return fetchJson<AcctPaymentAccount[]>(url('/payment-accounts'));
+  },
+  async createPaymentAccount(data: { name: string; currency?: string }, createdBy?: string): Promise<AcctPaymentAccount> {
+    return fetchJson<AcctPaymentAccount>(url('/payment-accounts'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updatePaymentAccount(id: string, data: { name?: string; currency?: string }, createdBy?: string): Promise<AcctPaymentAccount> {
+    return fetchJson<AcctPaymentAccount>(url(`/payment-accounts/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deletePaymentAccount(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/payment-accounts/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getTransactions(params?: { start?: string; end?: string; entity_id?: string; category_id?: string; payment_account_id?: string }): Promise<AcctTransaction[]> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    if (params?.entity_id) search.entity_id = params.entity_id;
+    if (params?.category_id) search.category_id = params.category_id;
+    if (params?.payment_account_id) search.payment_account_id = params.payment_account_id;
+    return fetchJson<AcctTransaction[]>(url('/transactions', Object.keys(search).length > 0 ? search : undefined));
+  },
+  async createTransaction(data: {
+    date: string;
+    amount: number;
+    currency?: string;
+    type: string;
+    entity_id?: string | null;
+    category_id?: string | null;
+    payment_account_id: string;
+    description?: string;
+  }, createdBy?: string): Promise<AcctTransaction> {
+    return fetchJson<AcctTransaction>(url('/transactions'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateTransaction(id: string, data: Partial<{
+    date: string;
+    amount: number;
+    currency: string;
+    type: string;
+    entity_id: string | null;
+    category_id: string | null;
+    payment_account_id: string;
+    description: string;
+  }>, createdBy?: string): Promise<AcctTransaction> {
+    return fetchJson<AcctTransaction>(url(`/transactions/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteTransaction(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/transactions/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getBalance(params?: { start?: string; end?: string }): Promise<BalanceResponse> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
+  },
+};

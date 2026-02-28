@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { connectDB } from './lib/mongoose.js';
 import { handleDbQuery, handleDbRpc } from './api/db.js';
+import { contabilidadRouter } from './api/contabilidad.js';
 import { 
   handleTestNotification, 
   sendAdminNotification, 
@@ -42,6 +43,9 @@ const __dirname = path.dirname(__filename);
 // API de base de datos (MongoDB)
 app.post('/api/db/query', handleDbQuery);
 app.post('/api/db/rpc', handleDbRpc);
+
+// API de contabilidad (standalone)
+app.use('/api/contabilidad', contabilidadRouter);
 
 // Invalidar caché de app_settings tras actualizar configuración
 app.post('/api/settings/invalidate-cache', async (_req, res) => {
