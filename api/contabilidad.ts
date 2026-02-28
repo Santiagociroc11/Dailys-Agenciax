@@ -267,9 +267,39 @@ router.put('/categories/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, type, parent_id } = req.body;
     const created_by = req.body.created_by as string | undefined;
+    const existing = await AcctCategory.findOne({ id }).select('id name type parent_id').lean().exec();
+    if (!existing) {
+      res.status(404).json({ error: 'Categoría no encontrada' });
+      return;
+    }
+    const nameNorm = (typeof name === 'string' ? name : '').trim();
+    const existingName = (existing as { name: string }).name;
+    const nameChanged = nameNorm && nameNorm.toLowerCase() !== existingName.toLowerCase();
+    const otraConMismoNombre = nameNorm && nameChanged
+      ? await AcctCategory.findOne({
+          id: { $ne: id },
+          name: { $regex: new RegExp(`^${nameNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        }).select('id name').lean().exec()
+      : null;
+    if (otraConMismoNombre) {
+      const targetId = (otraConMismoNombre as { id: string }).id;
+      const result = await AcctTransaction.updateMany({ category_id: id }, { $set: { category_id: targetId } }).exec();
+      await AcctCategory.deleteOne({ id }).exec();
+      if (created_by) {
+        await AuditLog.create({
+          user_id: created_by,
+          entity_type: 'acct_category',
+          entity_id: targetId,
+          action: 'merge',
+          summary: `Categoría "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} transacciones)`,
+        });
+      }
+      const merged = await AcctCategory.findOne({ id: targetId }).lean().exec();
+      return res.json({ ...merged, _merged: true, merged_count: result.modifiedCount });
+    }
     const doc = await AcctCategory.findOneAndUpdate(
       { id },
-      { $set: { name, type, parent_id: parent_id ?? null } },
+      { $set: { name: name ?? existingName, type: type ?? (existing as { type?: string }).type, parent_id: parent_id !== undefined ? (parent_id ?? null) : (existing as { parent_id?: string | null }).parent_id } },
       { new: true }
     )
       .lean()

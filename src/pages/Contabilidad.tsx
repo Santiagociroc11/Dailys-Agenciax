@@ -375,6 +375,8 @@ export default function Contabilidad() {
   const [pygDetailSort, setPygDetailSort] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
   const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
   const [configCategoryExpanded, setConfigCategoryExpanded] = useState<string | null>(null);
+  const [categorySortBy, setCategorySortBy] = useState<'name' | 'transactions'>('transactions');
+  const [categorySortOrder, setCategorySortOrder] = useState<'asc' | 'desc'>('desc');
   const [configDetailTransactions, setConfigDetailTransactions] = useState<AcctTransaction[]>([]);
   const [configDetailLoading, setConfigDetailLoading] = useState(false);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -610,12 +612,13 @@ export default function Contabilidad() {
         );
         toast.success('Categoría creada');
       } else {
-        await contabilidadApi.updateCategory(
+        const res = await contabilidadApi.updateCategory(
           currentCategory.id!,
-          { name: currentCategory.name, type: currentCategory.type, parent_id: currentCategory.parent_id ?? null },
+          { name: (currentCategory.name ?? '').trim(), type: currentCategory.type, parent_id: currentCategory.parent_id ?? null },
           currentUser?.id
         );
-        toast.success('Categoría actualizada');
+        const merged = (res as { _merged?: boolean; merged_count?: number })._merged;
+        toast.success(merged ? `Categoría fusionada (${(res as { merged_count?: number }).merged_count ?? 0} transacciones reasignadas)` : 'Categoría actualizada');
       }
       setShowModal(false);
       setCurrentCategory({ name: '', type: 'expense', parent_id: null });
@@ -1471,14 +1474,48 @@ export default function Contabilidad() {
                 <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCategorySortBy('name');
+                            setCategorySortOrder((o) => (categorySortBy === 'name' ? (o === 'asc' ? 'desc' : 'asc') : 'asc'));
+                          }}
+                          className="flex items-center gap-1 hover:text-indigo-600"
+                        >
+                          Nombre
+                          {categorySortBy === 'name' && (categorySortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                        </button>
+                      </th>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
-                      <th className="px-6 py-3 text-right font-medium text-gray-700">Transacciones</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCategorySortBy('transactions');
+                            setCategorySortOrder((o) => (categorySortBy === 'transactions' ? (o === 'asc' ? 'desc' : 'asc') : 'desc'));
+                          }}
+                          className="flex items-center gap-1 ml-auto hover:text-indigo-600"
+                        >
+                          Transacciones
+                          {categorySortBy === 'transactions' && (categorySortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                        </button>
+                      </th>
                       <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {categories.map((c) => (
+                    {[...categories]
+                      .sort((a, b) => {
+                        if (categorySortBy === 'name') {
+                          const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
+                          return categorySortOrder === 'asc' ? cmp : -cmp;
+                        }
+                        const ta = a.transaction_count ?? 0;
+                        const tb = b.transaction_count ?? 0;
+                        return categorySortOrder === 'asc' ? ta - tb : tb - ta;
+                      })
+                      .map((c) => (
                       <React.Fragment key={c.id}>
                         <tr
                           onClick={() => toggleConfigCategoryExpand(c)}
