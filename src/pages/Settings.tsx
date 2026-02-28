@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { apiUrl } from '../lib/apiBase';
 
@@ -8,6 +9,8 @@ const ADMIN_TELEGRAM_ID_KEY = 'admin_telegram_chat_id';
 const Settings = () => {
   const [telegramId, setTelegramId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [testLoading, setTestLoading] = useState<string | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     const fetchAdminId = async () => {
@@ -97,6 +100,160 @@ const Settings = () => {
     }
   };
 
+  const runTest = async (
+    key: string,
+    fn: () => Promise<{ success: boolean; error?: string; message?: string; sentCount?: number; totalUsers?: number }>
+  ) => {
+    setTestLoading(key);
+    try {
+      const result = await fn();
+      if (result.success) {
+        const sent = result.sentCount ?? result.totalUsers;
+        if (typeof sent === 'number' && result.totalUsers != null && sent < result.totalUsers) {
+          toast.success(
+            sent === 0
+              ? `API OK. Enviadas: 0/${result.totalUsers}. Configura telegram_chat_id en Tu Configuración para recibir.`
+              : `Enviadas: ${sent}/${result.totalUsers}.`
+          );
+        } else {
+          toast.success(result.message || 'Notificación enviada correctamente.');
+        }
+      } else {
+        toast.error(result.error || 'Error al enviar.');
+      }
+    } catch (e) {
+      toast.error('Error de red.');
+      console.error(e);
+    } finally {
+      setTestLoading(null);
+    }
+  };
+
+  const testPayloads = {
+    'admin-completed': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - Login',
+          userName: 'Usuario Demo',
+          projectName: 'Proyecto Demo',
+          areaName: 'Desarrollo',
+          status: 'completed',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'admin-blocked': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - API',
+          userName: 'Usuario Demo',
+          projectName: 'Proyecto Demo',
+          areaName: 'Backend',
+          status: 'blocked',
+          blockReason: 'Esperando respuesta del cliente',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'admin-in-review': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - Diseño',
+          userName: 'Usuario Demo',
+          projectName: 'Proyecto Demo',
+          areaName: 'Diseño',
+          status: 'in_review',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'admin-approved': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - Documentación',
+          userName: 'Usuario Demo',
+          projectName: 'Proyecto Demo',
+          areaName: 'QA',
+          status: 'approved',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'admin-returned': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - Revisión',
+          userName: 'Usuario Demo',
+          projectName: 'Proyecto Demo',
+          areaName: 'Desarrollo',
+          status: 'returned',
+          returnFeedback: 'Por favor corregir el formato de fechas.',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'admin-reassigned': () =>
+      fetch(apiUrl('/api/telegram/admin-notification'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskTitle: 'Tarea de prueba - Migración',
+          previousUserName: 'Usuario Anterior',
+          newUserName: 'Usuario Nuevo',
+          projectName: 'Proyecto Demo',
+          areaName: 'DevOps',
+          status: 'reassigned',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'user-task-in-review': () =>
+      fetch(apiUrl('/api/telegram/user-task-in-review'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userIds: user?.id ? [user.id] : [],
+          taskTitle: 'Tarea de prueba - Tu tarea en revisión',
+          projectName: 'Proyecto Demo',
+          adminName: user?.name || 'Admin',
+        }),
+      }).then((r) => r.json()),
+    'task-available': (reason: string) => () =>
+      fetch(apiUrl('/api/telegram/task-available'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userIds: user?.id ? [user.id] : [],
+          taskTitle: 'Tarea de prueba disponible',
+          projectName: 'Proyecto Demo',
+          reason,
+        }),
+      }).then((r) => r.json()),
+    'deadline-reminders': () =>
+      fetch(apiUrl('/api/telegram/deadline-reminders'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 1 }),
+      }).then((r) => r.json()),
+    'daily-summary': () =>
+      fetch(apiUrl('/api/telegram/daily-summary'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then((r) => r.json()),
+    'budget-check': () =>
+      fetch(apiUrl('/api/telegram/budget-check'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: 80 }),
+      }).then((r) => r.json()),
+  };
+
+  const isTestDisabled = !telegramId || isLoading;
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -271,8 +428,141 @@ const Settings = () => {
             </button>
         </div>
       </div>
+
+      {/* Panel de pruebas de todas las notificaciones */}
+      {telegramId && (
+        <div className="mt-10 pt-8 border-t border-gray-200">
+          <h2 className="text-xl font-bold mb-2">🧪 Panel de pruebas de notificaciones</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Prueba cada tipo de notificación del sistema. Las de <strong>admin</strong> van al chat configurado arriba. Las de <strong>usuario</strong> van a tu Telegram si tienes <code className="bg-gray-100 px-1 rounded">telegram_chat_id</code> en tu perfil.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <TestButton
+              label="Mensaje de prueba"
+              onClick={() => runTest('test', () => fetch(apiUrl('/api/telegram/test'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatId: telegramId, message: '¡Prueba desde Dailys! 🎉' }),
+              }).then((r) => r.json()))}
+              disabled={isTestDisabled}
+              loading={testLoading === 'test'}
+            />
+            <TestButton
+              label="Admin: Tarea aprobada (test-admin)"
+              onClick={() => runTest('test-admin', () => fetch(apiUrl('/api/telegram/test-admin'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+              }).then((r) => r.json()))}
+              disabled={isTestDisabled}
+              loading={testLoading === 'test-admin'}
+            />
+            <TestButton
+              label="Admin: Tarea completada"
+              onClick={() => runTest('admin-completed', () => testPayloads['admin-completed']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-completed'}
+            />
+            <TestButton
+              label="Admin: Tarea bloqueada"
+              onClick={() => runTest('admin-blocked', () => testPayloads['admin-blocked']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-blocked'}
+            />
+            <TestButton
+              label="Admin: En revisión"
+              onClick={() => runTest('admin-in-review', () => testPayloads['admin-in-review']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-in-review'}
+            />
+            <TestButton
+              label="Admin: Tarea aprobada"
+              onClick={() => runTest('admin-approved', () => testPayloads['admin-approved']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-approved'}
+            />
+            <TestButton
+              label="Admin: Tarea devuelta"
+              onClick={() => runTest('admin-returned', () => testPayloads['admin-returned']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-returned'}
+            />
+            <TestButton
+              label="Admin: Reasignación"
+              onClick={() => runTest('admin-reassigned', () => testPayloads['admin-reassigned']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'admin-reassigned'}
+            />
+            <TestButton
+              label="Usuario: Tu tarea en revisión"
+              onClick={() => runTest('user-task-in-review', () => testPayloads['user-task-in-review']())}
+              disabled={isTestDisabled || !user?.id}
+              loading={testLoading === 'user-task-in-review'}
+            />
+            <TestButton
+              label="Usuario: Tarea disponible (reasignada)"
+              onClick={() => runTest('task-reassigned', () => testPayloads['task-available']('reassigned')())}
+              disabled={isTestDisabled || !user?.id}
+              loading={testLoading === 'task-reassigned'}
+            />
+            <TestButton
+              label="Usuario: Tarea disponible (desbloqueada)"
+              onClick={() => runTest('task-unblocked', () => testPayloads['task-available']('unblocked')())}
+              disabled={isTestDisabled || !user?.id}
+              loading={testLoading === 'task-unblocked'}
+            />
+            <TestButton
+              label="Usuario: Tarea disponible (devuelta)"
+              onClick={() => runTest('task-returned', () => testPayloads['task-available']('returned')())}
+              disabled={isTestDisabled || !user?.id}
+              loading={testLoading === 'task-returned'}
+            />
+            <TestButton
+              label="Recordatorios de vencimiento"
+              onClick={() => runTest('deadline', () => testPayloads['deadline-reminders']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'deadline'}
+            />
+            <TestButton
+              label="Resumen diario"
+              onClick={() => runTest('daily', () => testPayloads['daily-summary']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'daily'}
+            />
+            <TestButton
+              label="Alerta de presupuesto"
+              onClick={() => runTest('budget', () => testPayloads['budget-check']())}
+              disabled={isTestDisabled}
+              loading={testLoading === 'budget'}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+function TestButton({
+  label,
+  onClick,
+  disabled,
+  loading,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled: boolean;
+  loading: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed rounded-md border border-gray-200 text-left transition-colors"
+    >
+      {loading ? 'Enviando...' : label}
+    </button>
+  );
+}
 
 export default Settings; 
