@@ -80,7 +80,15 @@ router.put('/entities/:id', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Entidad no encontrada' });
       return;
     }
-    const otraConMismoNombre = await AcctEntity.findOne({ name: (name || '').trim(), id: { $ne: id } }).select('id name').lean().exec();
+    const nameNorm = (typeof name === 'string' ? name : '').trim();
+    const existingName = (existing as { name: string }).name;
+    const nameChanged = nameNorm && nameNorm.toLowerCase() !== existingName.toLowerCase();
+    const otraConMismoNombre = nameNorm && nameChanged
+      ? await AcctEntity.findOne({
+          id: { $ne: id },
+          name: { $regex: new RegExp(`^${nameNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        }).select('id name').lean().exec()
+      : null;
     if (otraConMismoNombre) {
       const targetId = (otraConMismoNombre as { id: string }).id;
       const result = await AcctTransaction.updateMany({ entity_id: id }, { $set: { entity_id: targetId } }).exec();
@@ -199,8 +207,30 @@ router.post('/entities/:id/merge', async (req: Request, res: Response) => {
 // --- Categories ---
 router.get('/categories', async (_req: Request, res: Response) => {
   try {
-    const list = await AcctCategory.find({}).sort({ type: 1, name: 1 }).lean().exec();
-    res.json(list);
+    const list = await AcctCategory.find({}).lean().exec();
+    const ids = (list as { id: string }[]).map((c) => c.id);
+    if (ids.length === 0) return res.json([]);
+    const agg = await AcctTransaction.aggregate([
+      { $match: { category_id: { $in: ids } } },
+      { $group: { _id: '$category_id', count: { $sum: 1 }, lastDate: { $max: '$date' } } },
+    ]).exec();
+    const countMap = new Map<string, number>();
+    const lastDateMap = new Map<string, Date>();
+    for (const r of agg as { _id: string; count: number; lastDate: Date }[]) {
+      countMap.set(r._id, r.count);
+      lastDateMap.set(r._id, r.lastDate);
+    }
+    const enriched = (list as { id: string; name: string; type: string; parent_id?: string | null }[]).map((c) => ({
+      ...c,
+      transaction_count: countMap.get(c.id) ?? 0,
+      last_transaction_date: lastDateMap.get(c.id) ?? null,
+    }));
+    enriched.sort((a, b) => {
+      const da = (a as { last_transaction_date?: Date | null }).last_transaction_date?.getTime() ?? 0;
+      const db = (b as { last_transaction_date?: Date | null }).last_transaction_date?.getTime() ?? 0;
+      return db - da;
+    });
+    res.json(enriched.map(({ last_transaction_date, ...rest }) => rest));
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });

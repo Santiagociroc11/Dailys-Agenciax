@@ -585,7 +585,7 @@ export default function Contabilidad() {
       } else {
         const res = await contabilidadApi.updateEntity(
           currentEntity.id!,
-          { name: currentEntity.name, type: currentEntity.type, sort_order: currentEntity.sort_order },
+          { name: (currentEntity.name ?? '').trim(), type: currentEntity.type, sort_order: currentEntity.sort_order },
           currentUser?.id
         );
         const merged = (res as { _merged?: boolean; merged_count?: number })._merged;
@@ -1473,6 +1473,7 @@ export default function Contabilidad() {
                     <tr>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">Transacciones</th>
                       <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
                     </tr>
                   </thead>
@@ -1494,6 +1495,7 @@ export default function Contabilidad() {
                             </span>
                           </td>
                           <td className="px-6 py-3 capitalize">{c.type}</td>
+                          <td className="px-6 py-3 text-right text-gray-600">{(c.transaction_count ?? 0).toLocaleString()}</td>
                           <td className="px-6 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                             <button onClick={() => { setMergeSourceCategory(c); setMergeCategoryTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra categoría"><Merge className="w-4 h-4 inline" /></button>
                             <button onClick={() => { setCurrentCategory(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
@@ -1502,7 +1504,7 @@ export default function Contabilidad() {
                         </tr>
                         {configCategoryExpanded === c.id && (
                           <tr className="border-t border-gray-100 bg-gray-50/80">
-                            <td colSpan={3} className="px-6 py-4">
+                            <td colSpan={4} className="px-6 py-4">
                               {configDetailLoading ? (
                                 <div className="text-sm text-gray-500 py-4">Cargando…</div>
                               ) : configDetailTransactions.length === 0 ? (

@@ -32,6 +32,7 @@ export interface AcctCategory {
   name: string;
   type: 'income' | 'expense';
   parent_id?: string | null;
+  transaction_count?: number;
 }
 
 export interface AcctPaymentAccount {
