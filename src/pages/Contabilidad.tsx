@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { contabilidadApi, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type AccountBalanceRow } from '../lib/contabilidadApi';
 import {
@@ -19,6 +19,7 @@ import {
   ArrowDown,
   ChevronDown,
   ChevronRight,
+  Calendar,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -28,6 +29,107 @@ type MainTab = 'libro' | 'balance' | 'config';
 type ConfigTab = 'entities' | 'categories' | 'accounts';
 
 type PygDetailSort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
+
+const PERIOD_PRESETS = [
+  { id: 'all', label: 'Todo el tiempo' },
+  { id: 'this-year', label: 'Este año' },
+  { id: 'last-year', label: 'Año pasado' },
+  { id: 'this-month', label: 'Este mes' },
+  { id: 'last-month', label: 'Mes pasado' },
+] as const;
+
+function DateRangePicker({
+  start,
+  end,
+  onStartChange,
+  onEndChange,
+  onPreset,
+}: {
+  start: string;
+  end: string;
+  onStartChange: (v: string) => void;
+  onEndChange: (v: string) => void;
+  onPreset: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, []);
+
+  const fmt = (s: string) => {
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? s : format(d, 'd MMM yyyy', { locale: es });
+  };
+  const badgeText = !start && !end
+    ? 'Todo el tiempo'
+    : start && end
+      ? `${fmt(start)} – ${fmt(end)}`
+      : start
+        ? `Desde ${fmt(start)}`
+        : end
+          ? `Hasta ${fmt(end)}`
+          : 'Seleccionar período';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700 shadow-sm"
+      >
+        <Calendar className="w-4 h-4 text-gray-500" />
+        <span>{badgeText}</span>
+        <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-72 p-4 bg-white rounded-xl shadow-lg border border-gray-200">
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
+              {PERIOD_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { onPreset(p.id); setOpen(false); }}
+                  className="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="pt-2 border-t border-gray-100">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Desde</label>
+                  <input
+                    type="date"
+                    value={start}
+                    onChange={(e) => onStartChange(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Hasta</label>
+                  <input
+                    type="date"
+                    value={end}
+                    onChange={(e) => onEndChange(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border rounded-lg"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ConfigDetailTable({
   transactions,
@@ -820,14 +922,6 @@ export default function Contabilidad() {
     }
   };
 
-  const periodPresets = [
-    { id: 'all', label: 'Todo el tiempo' },
-    { id: 'this-year', label: 'Este año' },
-    { id: 'last-year', label: 'Año pasado' },
-    { id: 'this-month', label: 'Este mes' },
-    { id: 'last-month', label: 'Mes pasado' },
-  ];
-
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -858,35 +952,13 @@ export default function Contabilidad() {
       {activeTab === 'libro' && (
         <div>
           <div className="flex flex-wrap gap-4 mb-4 items-end">
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Desde</label>
-              <input
-                type="date"
-                value={filterStart}
-                onChange={(e) => setFilterStart(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Hasta</label>
-              <input
-                type="date"
-                value={filterEnd}
-                onChange={(e) => setFilterEnd(e.target.value)}
-                className="px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div className="flex gap-1 flex-wrap">
-              {periodPresets.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => applyPeriodPreset(p.id, 'libro')}
-                  className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            <DateRangePicker
+              start={filterStart}
+              end={filterEnd}
+              onStartChange={setFilterStart}
+              onEndChange={setFilterEnd}
+              onPreset={(id) => applyPeriodPreset(id, 'libro')}
+            />
             <div>
               <label className="block text-sm text-gray-600 mb-1">Entidad</label>
               <select
@@ -1103,27 +1175,13 @@ export default function Contabilidad() {
               </button>
             </div>
             {balanceView !== 'accounts' && (
-              <>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Desde</label>
-                  <input type="date" value={balanceStart} onChange={(e) => setBalanceStart(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Hasta</label>
-                  <input type="date" value={balanceEnd} onChange={(e) => setBalanceEnd(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-                </div>
-                <div className="flex gap-1 flex-wrap">
-                  {periodPresets.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => applyPeriodPreset(p.id, 'balance')}
-                      className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </>
+              <DateRangePicker
+                start={balanceStart}
+                end={balanceEnd}
+                onStartChange={setBalanceStart}
+                onEndChange={setBalanceEnd}
+                onPreset={(id) => applyPeriodPreset(id, 'balance')}
+              />
             )}
             {balanceView === 'accounts' && (
               <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
