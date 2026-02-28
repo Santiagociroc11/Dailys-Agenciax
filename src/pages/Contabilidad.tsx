@@ -15,6 +15,8 @@ import {
   CreditCard,
   Upload,
   Merge,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -79,6 +81,7 @@ export default function Contabilidad() {
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeSourceCategory, setMergeSourceCategory] = useState<AcctCategory | null>(null);
   const [mergeCategoryTargetId, setMergeCategoryTargetId] = useState('');
+  const [sortDateOrder, setSortDateOrder] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -625,7 +628,15 @@ export default function Contabilidad() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Fecha</th>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">
+                      <button
+                        onClick={() => setSortDateOrder((o) => (o === 'desc' ? 'asc' : 'desc'))}
+                        className="flex items-center gap-1 hover:text-indigo-600"
+                      >
+                        Fecha
+                        {sortDateOrder === 'desc' ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
+                      </button>
+                    </th>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Entidad</th>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Categoría</th>
@@ -636,7 +647,13 @@ export default function Contabilidad() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((t) => (
+                  {[...transactions]
+                    .sort((a, b) => {
+                      const da = new Date(a.date).getTime();
+                      const db = new Date(b.date).getTime();
+                      return sortDateOrder === 'desc' ? db - da : da - db;
+                    })
+                    .map((t) => (
                     <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3">{format(new Date(t.date), 'dd/MM/yyyy', { locale: es })}</td>
                       <td className="px-6 py-3 capitalize">{t.type}</td>
@@ -1008,7 +1025,13 @@ export default function Contabilidad() {
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
-                    <input type="date" value={currentTransaction.date ?? ''} onChange={(e) => setCurrentTransaction((p) => ({ ...p, date: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" required />
+                    <input
+                      type="date"
+                      value={currentTransaction.date ? new Date(currentTransaction.date).toISOString().split('T')[0] : ''}
+                      onChange={(e) => setCurrentTransaction((p) => ({ ...p, date: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-lg"
+                      required
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Monto</label>
