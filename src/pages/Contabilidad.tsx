@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Calendar,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -562,6 +563,7 @@ export default function Contabilidad() {
   const [filterEntity, setFilterEntity] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterAccount, setFilterAccount] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
 
   const [balanceStart, setBalanceStart] = useState(() => {
     const d = new Date();
@@ -629,7 +631,7 @@ export default function Contabilidad() {
 
   useEffect(() => {
     setTransactionsPage(1);
-  }, [filterStart, filterEnd, filterEntity, filterCategory, filterAccount]);
+  }, [filterStart, filterEnd, filterEntity, filterCategory, filterAccount, filterSearch]);
 
   useEffect(() => {
     if (!showModal) {
@@ -1041,15 +1043,25 @@ export default function Contabilidad() {
     });
   }
 
-  const sortedTransactions = React.useMemo(
-    () =>
-      [...transactions].sort((a, b) => {
-        const da = new Date(a.date).getTime();
-        const db = new Date(b.date).getTime();
-        return sortDateOrder === 'desc' ? db - da : da - db;
-      }),
-    [transactions, sortDateOrder]
-  );
+  const sortedTransactions = React.useMemo(() => {
+    let list = [...transactions];
+    if (filterSearch.trim()) {
+      const q = filterSearch.trim().toLowerCase();
+      list = list.filter(
+        (t) =>
+          (t.description || '').toLowerCase().includes(q) ||
+          (t.entity_name || '').toLowerCase().includes(q) ||
+          (t.category_name || '').toLowerCase().includes(q) ||
+          (t.payment_account_name || '').toLowerCase().includes(q) ||
+          (t.amount?.toString() ?? '').includes(q)
+      );
+    }
+    return list.sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      return sortDateOrder === 'desc' ? db - da : da - db;
+    });
+  }, [transactions, sortDateOrder, filterSearch]);
 
   const totalPages = Math.max(1, Math.ceil(sortedTransactions.length / transactionsPageSize));
   const paginatedTransactions = sortedTransactions.slice(
@@ -1197,6 +1209,19 @@ export default function Contabilidad() {
               onEndChange={setFilterEnd}
               onPreset={(id) => applyPeriodPreset(id, 'libro')}
             />
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">Buscar</label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  placeholder="Descripción, entidad, categoría..."
+                  className="pl-9 pr-3 py-2 border rounded-lg text-sm min-w-[160px]"
+                />
+              </div>
+            </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Entidad</label>
               <select

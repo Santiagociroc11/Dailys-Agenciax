@@ -7,11 +7,13 @@
  * - Un nombre contiene al otro (ej: "Marketing" y "Marketing Digital")
  * - Nombres muy similares (distancia de Levenshtein baja)
  *
- * Uso: npx tsx scripts/sugerir-fusion-categorias.ts
+ * Uso: npx tsx scripts/sugerir-fusion-categorias.ts [--doc]
+ *   --doc  Escribe el documento docs/FUSIONES_CATEGORIAS.md
  *
  * Requiere MONGODB_URI en .env
  */
 import 'dotenv/config';
+import { writeFileSync } from 'fs';
 import { connectDB } from '../lib/mongoose.js';
 import { AcctCategory, AcctTransaction } from '../models/index.js';
 
@@ -55,6 +57,8 @@ function oneContainsOther(a: string, b: string): boolean {
   const nb = normalize(b);
   return na.length > 2 && nb.length > 2 && (na.includes(nb) || nb.includes(na));
 }
+
+const writeDoc = process.argv.includes('--doc');
 
 async function main() {
   await connectDB();
@@ -209,6 +213,88 @@ async function main() {
   console.log('\nPara fusionar, usa la UI de Configuración > Categorías o la API:');
   console.log('  POST /api/contabilidad/categories/:id/merge');
   console.log('  Body: { "target_category_id": "<id_destino>", "created_by": "<user_id>" }\n');
+
+  // --- Escribir documento si --doc ---
+  if (writeDoc) {
+    const lines: string[] = [
+      '# Posibles fusiones de categorías',
+      '',
+      'Documento generado por `npm run sugerir:fusion-categorias -- --doc`',
+      '',
+      '## Categorías con "comisiones" → PAGO COMISIONES',
+      '',
+    ];
+
+    const pagoComisiones = cats.find((c) => c.type === 'expense' && normalize(c.name) === 'pago comisiones');
+    const comisionesCats = cats.filter(
+      (c) =>
+        c.type === 'expense' &&
+        normalize(c.name) !== 'pago comisiones' &&
+        normalize(c.name).includes('comision')
+    );
+
+    if (pagoComisiones && comisionesCats.length > 0) {
+      lines.push(`**Destino:** "${pagoComisiones.name}" (ID: \`${pagoComisiones.id}\`, ${pagoComisiones.transaction_count} trans.)`);
+      lines.push('');
+      lines.push('| Fusionar (origen) | Trans. | ID origen |');
+      lines.push('|--------------------|--------|-----------|');
+      for (const c of comisionesCats.sort((a, b) => b.transaction_count - a.transaction_count)) {
+        lines.push(`| ${c.name} | ${c.transaction_count} | \`${c.id}\` |`);
+      }
+      lines.push('');
+    } else {
+      lines.push('No hay categorías adicionales con "comisiones" para fusionar.');
+      lines.push('');
+    }
+
+    lines.push('---', '', '## Simplificación por prefijo', '');
+
+    if (simplificaciones.length > 0) {
+      for (const s of simplificaciones.sort((a, b) => b.target.transaction_count - a.target.transaction_count)) {
+        const typeLabel = s.type === 'income' ? 'ingreso' : 'gasto';
+        lines.push(`### Prefijo "${s.prefix}" (${typeLabel})`);
+        lines.push(`**Mantener:** "${s.target.name}" (${s.target.transaction_count} trans.) — ID: \`${s.target.id}\``);
+        lines.push('');
+        for (const c of s.toMerge) {
+          lines.push(`- [ ] Fusionar "${c.name}" (${c.transaction_count} trans.) → \`${c.id}\``);
+        }
+        lines.push('');
+      }
+    } else {
+      lines.push('Ninguna.');
+      lines.push('');
+    }
+
+    lines.push('---', '', '## Otras sugerencias (pequeñas → grandes)', '');
+
+    if (unique.length > 0) {
+      const sorted = unique.sort((a, b) => {
+        const byTarget = b.target.transaction_count - a.target.transaction_count;
+        if (byTarget !== 0) return byTarget;
+        return b.score - a.score;
+      });
+      for (const s of sorted) {
+        lines.push(`### ${s.reason}`);
+        lines.push(`- **Fusionar:** "${s.source.name}" (${s.source.transaction_count} trans.) — \`${s.source.id}\``);
+        lines.push(`- **En:** "${s.target.name}" (${s.target.transaction_count} trans.) — \`${s.target.id}\``);
+        lines.push('');
+      }
+    } else {
+      lines.push('Ninguna.');
+      lines.push('');
+    }
+
+    lines.push('---', '', '## Cómo fusionar', '', '1. **UI:** Configuración > Categorías > botón fusionar', '');
+    lines.push('2. **API:**');
+    lines.push('```');
+    lines.push('POST /api/contabilidad/categories/:id/merge');
+    lines.push('Body: { "target_category_id": "<id_destino>", "created_by": "<user_id>" }');
+    lines.push('```');
+
+    const outPath = 'docs/FUSIONES_CATEGORIAS.md';
+    writeFileSync(outPath, lines.join('\n'), 'utf-8');
+    console.log(`\n📄 Documento escrito en ${outPath}\n`);
+  }
 
   process.exit(0);
 }
