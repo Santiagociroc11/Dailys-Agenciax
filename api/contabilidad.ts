@@ -789,7 +789,9 @@ router.post('/import', async (req: Request, res: Response) => {
     const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
     let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
     if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
-    const idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A|DETALLE/i.test(h));
+    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
+    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
     const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
 
     if (idxFecha < 0 || idxProyecto < 0) {
@@ -862,7 +864,7 @@ router.post('/import', async (req: Request, res: Response) => {
       const row = records[i];
       const fechaStr = (row[idxFecha] || '').trim();
       const proyectoStr = (row[idxProyecto] || '').trim();
-      const descripcion = ((row[idxDescripcion] || '') || (row[idxCategoria] || '')).trim() || 'Sin descripción';
+      const descripcion = ((row[idxCategoria] || '') || (row[idxDescripcion] || '')).trim() || 'Sin descripción';
       const subcategoria = (row[idxSubcategoria] || '').trim();
 
       const date = parseSpanishDate(fechaStr);

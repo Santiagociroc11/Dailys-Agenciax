@@ -49,6 +49,12 @@ for (let i = 0; i < Math.min(10, records.length); i++) {
 const headers = records[headerRow].map((h) => (h || '').trim());
 const idxFecha = headers.findIndex((h) => /FECHA/i.test(h));
 const idxProyecto = headers.findIndex((h) => /PROYECTO/i.test(h));
+const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
+let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
+if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
+let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
+if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
 const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
 const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
 const accountHeaders = headers.slice(accountColStart).filter((h) => h && !/^\s*$/.test(h));
@@ -71,6 +77,12 @@ for (const name of accountHeaders) {
   totals[name] = 0;
 }
 
+// Track entidades y descripciones
+const entities = new Set<string>();
+const descripcionesProblema: { linea: number; proyecto: string; desc: string; motivo: string }[] = [];
+const entityType = (n: string) =>
+  /AGENCIA\s*X/i.test(n) ? 'agency' : /UTILIDADES|HOTMART|EQUIPO|NA/i.test(n) ? 'internal' : 'project';
+
 let created = 0;
 let skipped = 0;
 
@@ -83,6 +95,17 @@ for (let i = headerRow + 1; i < records.length; i++) {
   if (!date) {
     skipped++;
     continue;
+  }
+
+  const descRaw = ((row[idxCategoria] ?? '') || (row[idxDescripcion] ?? '')).trim() || 'Sin descripción';
+  if (descRaw === 'Sin descripción') {
+    const subcat = (row[idxSubcategoria] ?? '').trim();
+    const motivo = subcat ? `DESCRIPCION y CATEGORIA vacíos (SUBCATEGORIA="${subcat}" no se usa)` : 'DESCRIPCION y CATEGORIA vacíos';
+    descripcionesProblema.push({ linea: i + 1, proyecto: proyectoStr, desc: subcat, motivo });
+  }
+
+  if (proyectoStr && proyectoStr !== 'NA') {
+    entities.add(proyectoStr);
   }
 
   // NA = entity null, pero igual creamos transacciones (el import real puede fallar si entity es required)
@@ -115,6 +138,24 @@ for (let i = headerRow + 1; i < records.length; i++) {
 console.log('=== SIMULACIÓN DE IMPORTACIÓN CSV ===\n');
 console.log('Transacciones creadas:', created);
 console.log('Filas omitidas (fecha inválida):', skipped);
+
+console.log('\n--- ENTIDADES QUE SE CREARÍAN ---');
+const entityList = [...entities].sort();
+entityList.forEach((e) => {
+  const t = entityType(e);
+  const flag = e === 'NA' || e === 'TRASLADO' || /RETIRO HOTMART/i.test(e) ? ' ⚠' : '';
+  console.log(`  ${e} (${t})${flag}`);
+});
+console.log(`  Total: ${entityList.length} entidades únicas`);
+
+if (descripcionesProblema.length > 0) {
+  console.log('\n--- DESCRIPCIONES PROBLEMÁTICAS (quedarían "Sin descripción") ---');
+  descripcionesProblema.slice(0, 15).forEach((d) => {
+    console.log(`  L${d.linea} | ${d.proyecto || '(vacío)'} | ${d.motivo}`);
+  });
+  if (descripcionesProblema.length > 15) console.log(`  ... y ${descripcionesProblema.length - 15} más`);
+}
+
 console.log('\n--- TOTALES POR CUENTA (simulado) ---\n');
 
 const diff: { account: string; simulado: number; esperado: number; diff: number }[] = [];
