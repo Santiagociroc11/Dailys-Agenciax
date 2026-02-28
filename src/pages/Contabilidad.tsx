@@ -28,8 +28,6 @@ import { es } from 'date-fns/locale';
 type MainTab = 'libro' | 'balance' | 'config';
 type ConfigTab = 'entities' | 'categories' | 'accounts';
 
-type PygDetailSort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
-
 const PERIOD_PRESETS = [
   { id: 'all', label: 'Todo el tiempo' },
   { id: 'this-year', label: 'Este año' },
@@ -217,141 +215,280 @@ function ConfigDetailTable({
 
 function PygDetailPanel({
   transactions,
-  groupBy,
-  sortBy,
-  onGroupChange,
-  onSortChange,
+  onEditTransaction,
 }: {
   transactions: AcctTransaction[];
-  groupBy: 'month' | 'category';
-  sortBy: PygDetailSort;
-  onGroupChange: (v: 'month' | 'category') => void;
-  onSortChange: (v: PygDetailSort) => void;
+  onEditTransaction?: (t: AcctTransaction) => void;
 }) {
-  const sortTx = (list: AcctTransaction[], isPositive: boolean) => {
-    const [by, dir] = sortBy.includes('date') ? ['date', sortBy === 'date-desc' ? 'desc' : 'asc'] : ['amount', sortBy === 'amount-desc' ? 'desc' : 'asc'];
-    return [...list].sort((a, b) => {
-      if (by === 'date') {
-        const da = new Date(a.date).getTime();
-        const db = new Date(b.date).getTime();
-        return dir === 'desc' ? db - da : da - db;
-      }
-      const aa = Math.abs(a.amount ?? 0);
-      const ab = Math.abs(b.amount ?? 0);
-      return dir === 'desc' ? ab - aa : aa - ab;
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  const toggleCategory = (cat: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
     });
   };
 
-  const groupByKey = (t: AcctTransaction, isPositive: boolean) =>
-    groupBy === 'month'
-      ? format(new Date(t.date), 'yyyy-MM', { locale: es })
-      : (t.category_name || 'Sin categoría');
-
-  const renderList = (list: AcctTransaction[], isPositive: boolean, colorClass: string) => {
-    const sorted = sortTx(list, isPositive);
-    const groups = new Map<string, AcctTransaction[]>();
-    for (const t of sorted) {
-      const k = groupByKey(t, isPositive);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(t);
+  // Meses únicos ascendentes (izq a der)
+  const months = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const t of transactions) {
+      set.add(format(new Date(t.date), 'yyyy-MM', { locale: es }));
     }
-    const groupLabels = new Map<string, string>();
-    for (const k of groups.keys()) {
-      if (groupBy === 'month') {
-        const [y, m] = k.split('-');
-        groupLabels.set(k, format(new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1), 'MMM yyyy', { locale: es }));
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  // Agrupar por categoría
+  const byCategory = React.useMemo(() => {
+    const map = new Map<string, AcctTransaction[]>();
+    for (const t of transactions) {
+      const k = t.category_name || 'Sin categoría';
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(t);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }
+    return map;
+  }, [transactions]);
+
+  const categories = Array.from(byCategory.keys()).sort((a, b) => {
+    const sumA = byCategory.get(a)!.reduce((s, t) => s + Math.abs(t.amount ?? 0), 0);
+    const sumB = byCategory.get(b)!.reduce((s, t) => s + Math.abs(t.amount ?? 0), 0);
+    return sumB - sumA;
+  });
+
+  const getMonthSums = (list: AcctTransaction[]) => {
+    const ing: Record<string, { usd: number; cop: number }> = {};
+    const sal: Record<string, { usd: number; cop: number }> = {};
+    for (const m of months) {
+      ing[m] = { usd: 0, cop: 0 };
+      sal[m] = { usd: 0, cop: 0 };
+    }
+    for (const t of list) {
+      const m = format(new Date(t.date), 'yyyy-MM', { locale: es });
+      const c = t.currency || 'USD';
+      const amt = t.amount ?? 0;
+      if (amt > 0) {
+        if (c === 'USD') ing[m].usd += amt;
+        else ing[m].cop += amt;
       } else {
-        groupLabels.set(k, k);
+        if (c === 'USD') sal[m].usd += Math.abs(amt);
+        else sal[m].cop += Math.abs(amt);
       }
     }
-    const order = Array.from(groups.keys()).sort((a, b) => {
-      if (groupBy === 'month') return b.localeCompare(a);
-      const sumA = groups.get(a)!.reduce((s, t) => s + (t.amount ?? 0), 0);
-      const sumB = groups.get(b)!.reduce((s, t) => s + (t.amount ?? 0), 0);
-      return Math.abs(sumB) - Math.abs(sumA);
-    });
-
-    return (
-      <ul className="space-y-3 text-sm">
-        {order.map((k) => {
-          const items = groups.get(k)!;
-          const byCurr = items.reduce((acc, t) => {
-            const c = t.currency || 'USD';
-            acc[c] = (acc[c] ?? 0) + (t.amount ?? 0);
-            return acc;
-          }, {} as Record<string, number>);
-          const subtotalStr = Object.entries(byCurr)
-            .map(([c, v]) => `${isPositive && v > 0 ? '+' : ''}${v.toLocaleString(c === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: c === 'COP' ? 0 : 2 })} ${c}`)
-            .join(' · ');
-          return (
-            <li key={k}>
-              <div className="font-medium text-gray-600 mb-1 flex justify-between items-baseline gap-2">
-                <span>{groupLabels.get(k)}</span>
-                <span className={`${colorClass} text-right shrink-0`}>{subtotalStr}</span>
-              </div>
-              <ul className="space-y-0.5 pl-2 border-l border-gray-200">
-                {items.map((t) => (
-                  <li key={t.id} className="flex justify-between items-center py-0.5 text-gray-700">
-                    <span className="truncate max-w-[280px]">
-                      {format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
-                    </span>
-                    <span className={`font-medium shrink-0 ml-2 ${colorClass}`}>
-                      {isPositive ? '+' : ''}{(t.amount ?? 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </li>
-          );
-        })}
-      </ul>
-    );
+    return { ing, sal };
   };
 
-  const entradas = transactions.filter((t) => (t.amount ?? 0) > 0);
-  const salidas = transactions.filter((t) => (t.amount ?? 0) < 0);
+  const fmt = (n: number, curr: 'usd' | 'cop') =>
+    curr === 'usd' ? n.toLocaleString('en-US', { minimumFractionDigits: 2 }) : n.toLocaleString('es-CO', { minimumFractionDigits: 0 });
+
+  const totals = React.useMemo(() => {
+    const { ing, sal } = getMonthSums(transactions);
+    let totIngUsd = 0, totIngCop = 0, totSalUsd = 0, totSalCop = 0;
+    for (const m of months) {
+      totIngUsd += ing[m].usd;
+      totIngCop += ing[m].cop;
+      totSalUsd += sal[m].usd;
+      totSalCop += sal[m].cop;
+    }
+    return { totIngUsd, totIngCop, totSalUsd, totSalCop, balanceUsd: totIngUsd - totSalUsd, balanceCop: totIngCop - totSalCop };
+  }, [transactions, months]);
+
+  if (transactions.length === 0) {
+    return <div className="text-sm text-gray-500 py-2">No hay transacciones en este período.</div>;
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-3 items-center text-xs">
-        <span className="text-gray-500">Agrupar:</span>
-        <button
-          type="button"
-          onClick={() => onGroupChange('month')}
-          className={`px-2 py-1 rounded ${groupBy === 'month' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-        >
-          Por mes
-        </button>
-        <button
-          type="button"
-          onClick={() => onGroupChange('category')}
-          className={`px-2 py-1 rounded ${groupBy === 'category' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-        >
-          Por categoría
-        </button>
-        <span className="text-gray-400">|</span>
-        <span className="text-gray-500">Ordenar:</span>
-        <select
-          value={sortBy}
-          onChange={(e) => onSortChange(e.target.value as PygDetailSort)}
-          className="px-2 py-1 border rounded text-gray-700 bg-white"
-        >
-          <option value="date-desc">Fecha (reciente)</option>
-          <option value="date-asc">Fecha (antiguo)</option>
-          <option value="amount-desc">Monto (mayor)</option>
-          <option value="amount-asc">Monto (menor)</option>
-        </select>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <h4 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">Entradas</h4>
-          {entradas.length === 0 ? <p className="text-gray-500 py-1">Ninguna</p> : renderList(entradas, true, 'text-emerald-600')}
-        </div>
-        <div>
-          <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">Salidas</h4>
-          {salidas.length === 0 ? <p className="text-gray-500 py-1">Ninguna</p> : renderList(salidas, false, 'text-red-600')}
-        </div>
-      </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[600px]">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10">Categoría</th>
+            {months.map((m) => {
+              const [y, mo] = m.split('-');
+              const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
+              return (
+                <th key={m} colSpan={4} className="px-1 py-2 text-center font-medium text-gray-700 border-l">
+                  {label}
+                </th>
+              );
+            })}
+            <th colSpan={4} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
+          </tr>
+          <tr className="bg-gray-50">
+            <th className="px-3 py-1 text-xs text-gray-500 sticky left-0 bg-gray-50 z-10"></th>
+            {months.map((m) => (
+              <React.Fragment key={m}>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+              </React.Fragment>
+            ))}
+            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
+            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+          </tr>
+          <tr className="bg-gray-50 text-xs text-gray-500">
+            <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10"></th>
+            {months.flatMap((m) => [
+              <th key={`${m}-u1`} className="px-1 py-0.5 text-right">USD</th>,
+              <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
+              <th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>,
+              <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>,
+            ])}
+            <th className="px-1 py-0.5 text-right border-l">USD</th>
+            <th className="px-1 py-0.5 text-right">USD</th>
+            <th className="px-1 py-0.5 text-right border-l">COP</th>
+            <th className="px-1 py-0.5 text-right">COP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {categories.map((cat) => {
+            const items = byCategory.get(cat)!;
+            const { ing, sal } = getMonthSums(items);
+            const isExpanded = expandedCategories.has(cat);
+            return (
+              <React.Fragment key={cat}>
+                <tr
+                  onClick={() => toggleCategory(cat)}
+                  className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none group"
+                >
+                  <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50">
+                    <span className="inline-flex items-center gap-1">
+                      {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
+                      {cat}
+                    </span>
+                  </td>
+                  {months.map((m) => (
+                    <React.Fragment key={m}>
+                      <td className="px-1 py-2 text-right text-emerald-600">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                    </React.Fragment>
+                  ))}
+                  <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
+                    {fmt(months.reduce((s, m) => s + (ing[m]?.usd ?? 0), 0), 'usd')}
+                  </td>
+                  <td className="px-1 py-2 text-right text-red-600 font-medium">
+                    {fmt(months.reduce((s, m) => s + (sal[m]?.usd ?? 0), 0), 'usd')}
+                  </td>
+                  <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
+                    {fmt(months.reduce((s, m) => s + (ing[m]?.cop ?? 0), 0), 'cop')}
+                  </td>
+                  <td className="px-1 py-2 text-right text-red-600 font-medium">
+                    {fmt(months.reduce((s, m) => s + (sal[m]?.cop ?? 0), 0), 'cop')}
+                  </td>
+                </tr>
+                {isExpanded &&
+                  items.map((t) => {
+                    const m = format(new Date(t.date), 'yyyy-MM', { locale: es });
+                    const amt = t.amount ?? 0;
+                    const isPos = amt > 0;
+                    const curr = t.currency || 'USD';
+                    return (
+                      <tr key={t.id} className="border-t border-gray-50 bg-gray-50/50">
+                        <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50" onClick={(e) => e.stopPropagation()}>
+                          <span className="flex items-center gap-2">
+                            {format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || 'Sin descripción'}
+                            {onEditTransaction && (
+                              <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-0.5" title="Editar"><Edit className="w-3.5 h-3.5 inline" /></button>
+                            )}
+                          </span>
+                        </td>
+                        {months.map((mo) => (
+                          <React.Fragment key={mo}>
+                            {mo === m ? (
+                              <>
+                                <td className={`px-1 py-1.5 text-right text-sm ${isPos ? 'text-emerald-600' : 'text-gray-400'}`}>{isPos && curr === 'USD' ? fmt(amt, 'usd') : '—'}</td>
+                                <td className={`px-1 py-1.5 text-right text-sm ${!isPos ? 'text-red-600' : 'text-gray-400'}`}>{!isPos && curr === 'USD' ? fmt(Math.abs(amt), 'usd') : '—'}</td>
+                                <td className={`px-1 py-1.5 text-right text-sm border-l ${isPos ? 'text-emerald-600' : 'text-gray-400'}`}>{isPos && curr === 'COP' ? fmt(amt, 'cop') : '—'}</td>
+                                <td className={`px-1 py-1.5 text-right text-sm ${!isPos ? 'text-red-600' : 'text-gray-400'}`}>{!isPos && curr === 'COP' ? fmt(Math.abs(amt), 'cop') : '—'}</td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="px-1 py-1.5 text-right text-gray-300">—</td>
+                                <td className="px-1 py-1.5 text-right text-gray-300">—</td>
+                                <td className="px-1 py-1.5 text-right text-gray-300 border-l">—</td>
+                                <td className="px-1 py-1.5 text-right text-gray-300">—</td>
+                              </>
+                            )}
+                          </React.Fragment>
+                        ))}
+                        <td colSpan={4} className="px-1 py-1.5 border-l" />
+                      </tr>
+                    );
+                  })}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+        <tfoot className="bg-gray-100 font-semibold">
+          <tr>
+            <td className="px-3 py-2 sticky left-0 bg-gray-100">Total mes</td>
+            {months.map((m) => {
+              const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
+              return (
+                <React.Fragment key={m}>
+                  <td className="px-1 py-2 text-right text-emerald-700">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
+                  <td className="px-1 py-2 text-right text-red-700">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
+                  <td className="px-1 py-2 text-right text-emerald-700 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                  <td className="px-1 py-2 text-right text-red-700">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                </React.Fragment>
+              );
+            })}
+            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
+            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
+            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
+            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
+          </tr>
+          <tr className="bg-indigo-50">
+            <td className="px-3 py-2 sticky left-0 bg-indigo-50 font-medium">Balance global</td>
+            {months.map((m) => {
+              const { ing, sal } = getMonthSums(transactions.filter((t) => format(new Date(t.date), 'yyyy-MM', { locale: es }) === m));
+              const balUsd = ing[m].usd - sal[m].usd;
+              const balCop = ing[m].cop - sal[m].cop;
+              return (
+                <React.Fragment key={m}>
+                  <td colSpan={2} className={`px-1 py-2 text-right font-medium ${balUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {balUsd >= 0 ? '+' : ''}{fmt(balUsd, 'usd')} USD
+                  </td>
+                  <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${balCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {balCop >= 0 ? '+' : ''}{fmt(balCop, 'cop')} COP
+                  </td>
+                </React.Fragment>
+              );
+            })}
+            <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+              {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
+            </td>
+            <td colSpan={2} className={`px-1 py-2 text-right font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+              {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
+            </td>
+          </tr>
+          <tr className="bg-amber-50">
+            <td className="px-3 py-2 sticky left-0 bg-amber-50 font-medium">Pendiente por liquidar</td>
+            {months.map((m) => (
+              <td key={m} colSpan={4} className="px-1 py-2 text-center text-gray-500 border-l text-xs">—</td>
+            ))}
+            <td colSpan={4} className="px-1 py-2 border-l">
+              <span className={`font-medium ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
+              </span>
+              {totals.balanceCop !== 0 && (
+                <span className={`ml-2 font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
+                </span>
+              )}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -415,8 +552,6 @@ export default function Contabilidad() {
   const [pygExpandedEntity, setPygExpandedEntity] = useState<string | null>(null);
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
-  const [pygDetailGroup, setPygDetailGroup] = useState<'month' | 'category'>('month');
-  const [pygDetailSort, setPygDetailSort] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
   const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
   const [configCategoryExpanded, setConfigCategoryExpanded] = useState<string | null>(null);
   const [categorySortBy, setCategorySortBy] = useState<'name' | 'transactions'>('transactions');
@@ -1349,10 +1484,7 @@ export default function Contabilidad() {
                               ) : (
                                 <PygDetailPanel
                                   transactions={pygDetailTransactions}
-                                  groupBy={pygDetailGroup}
-                                  sortBy={pygDetailSort}
-                                  onGroupChange={setPygDetailGroup}
-                                  onSortChange={setPygDetailSort}
+                                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
                                 />
                               )}
                             </td>
