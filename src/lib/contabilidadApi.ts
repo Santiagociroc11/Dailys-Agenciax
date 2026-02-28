@@ -68,6 +68,34 @@ export interface BalanceResponse {
   grand_total: number;
 }
 
+export interface PygRow {
+  entity_id: string | null;
+  entity_name: string;
+  entity_type: string | null;
+  ingresos: number;
+  gastos: number;
+  resultado: number;
+}
+
+export interface PygResponse {
+  rows: PygRow[];
+  total_ingresos: number;
+  total_gastos: number;
+  total_resultado: number;
+}
+
+export interface AccountBalanceRow {
+  payment_account_id: string;
+  account_name: string;
+  currency: string;
+  total_amount: number;
+}
+
+export interface AccountBalancesResponse {
+  rows: AccountBalanceRow[];
+  grand_total: number;
+}
+
 export const contabilidadApi = {
   async getEntities(): Promise<AcctEntity[]> {
     return fetchJson<AcctEntity[]>(url('/entities'));
@@ -194,6 +222,20 @@ export const contabilidadApi = {
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
+  },
+
+  async getPyg(params?: { start?: string; end?: string }): Promise<PygResponse> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<PygResponse>(url('/pyg', Object.keys(search).length > 0 ? search : undefined));
+  },
+
+  async getAccountBalances(params?: { start?: string; end?: string }): Promise<AccountBalancesResponse> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<AccountBalancesResponse>(url('/account-balances', Object.keys(search).length > 0 ? search : undefined));
   },
 
   async importCsv(csvText: string, options?: { default_currency?: string }, createdBy?: string): Promise<ImportResult> {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type AccountBalanceRow } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -33,6 +33,9 @@ export default function Contabilidad() {
   const [accounts, setAccounts] = useState<AcctPaymentAccount[]>([]);
   const [transactions, setTransactions] = useState<AcctTransaction[]>([]);
   const [balanceData, setBalanceData] = useState<{ rows: BalanceRow[]; grand_total: number } | null>(null);
+  const [pygData, setPygData] = useState<{ rows: PygRow[]; total_ingresos: number; total_gastos: number; total_resultado: number } | null>(null);
+  const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; grand_total: number } | null>(null);
+  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'accounts'>('balance');
 
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -87,8 +90,12 @@ export default function Contabilidad() {
   useEffect(() => {
     if (!isAdmin) return;
     if (activeTab === 'libro') fetchTransactions();
-    if (activeTab === 'balance') fetchBalance();
-  }, [isAdmin, activeTab, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd]);
+    if (activeTab === 'balance') {
+      if (balanceView === 'balance') fetchBalance();
+      else if (balanceView === 'pyg') fetchPyg();
+      else fetchAccountBalances();
+    }
+  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd]);
 
   async function fetchEntities() {
     try {
@@ -148,6 +155,40 @@ export default function Contabilidad() {
       console.error(e);
       toast.error('Error al cargar balance');
       setBalanceData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchPyg() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      const data = await contabilidadApi.getPyg(params);
+      setPygData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar P&G');
+      setPygData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchAccountBalances() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      const data = await contabilidadApi.getAccountBalances(params);
+      setAccountBalancesData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar balance de cuentas');
+      setAccountBalancesData(null);
     } finally {
       setLoading(false);
     }
@@ -574,6 +615,26 @@ export default function Contabilidad() {
       {activeTab === 'balance' && (
         <div>
           <div className="flex flex-wrap gap-4 mb-4 items-end">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setBalanceView('balance')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'balance' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Balance
+              </button>
+              <button
+                onClick={() => setBalanceView('pyg')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                P&G por proyecto
+              </button>
+              <button
+                onClick={() => setBalanceView('accounts')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'accounts' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Balance de cuentas
+              </button>
+            </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Desde</label>
               <input type="date" value={balanceStart} onChange={(e) => setBalanceStart(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
@@ -589,6 +650,76 @@ export default function Contabilidad() {
 
           {loading ? (
             <div className="animate-pulse h-48 bg-gray-200 rounded-lg" />
+          ) : balanceView === 'accounts' && accountBalancesData ? (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Balance (USD)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountBalancesData.rows.map((r) => (
+                    <tr key={r.payment_account_id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-6 py-3 font-medium">{r.account_name}</td>
+                      <td className={`px-6 py-3 text-right font-medium ${r.total_amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.total_amount >= 0 ? '+' : ''}{r.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {r.currency}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-100 font-semibold">
+                  <tr>
+                    <td className="px-6 py-3">Total</td>
+                    <td className={`px-6 py-3 text-right ${accountBalancesData.grand_total >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {accountBalancesData.grand_total >= 0 ? '+' : ''}{accountBalancesData.grand_total.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              {accountBalancesData.rows.length === 0 && (
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
+              )}
+            </div>
+          ) : balanceView === 'pyg' && pygData ? (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto / Entidad</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Ingresos</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Gastos</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Resultado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pygData.rows.map((r) => (
+                    <tr key={r.entity_id ?? 'sin-asignar'} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-6 py-3 font-medium">{r.entity_name}</td>
+                      <td className="px-6 py-3 text-right text-emerald-600">{r.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-6 py-3 text-right text-red-600">{r.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className={`px-6 py-3 text-right font-medium ${r.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.resultado >= 0 ? '+' : ''}{r.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-100 font-semibold">
+                  <tr>
+                    <td className="px-6 py-3">Total</td>
+                    <td className="px-6 py-3 text-right text-emerald-700">{pygData.total_ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-6 py-3 text-right text-red-700">{pygData.total_gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className={`px-6 py-3 text-right ${pygData.total_resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {pygData.total_resultado >= 0 ? '+' : ''}{pygData.total_resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              {pygData.rows.length === 0 && (
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
+              )}
+            </div>
           ) : balanceData ? (
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <table className="w-full text-sm">
@@ -628,7 +759,7 @@ export default function Contabilidad() {
               )}
             </div>
           ) : (
-            <div className="p-12 text-center text-gray-500">Error al cargar el balance.</div>
+            <div className="p-12 text-center text-gray-500">Error al cargar los datos.</div>
           )}
         </div>
       )}

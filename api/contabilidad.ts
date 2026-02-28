@@ -601,6 +601,118 @@ router.get('/balance', async (req: Request, res: Response) => {
   }
 });
 
+// --- P&G (Pérdidas y Ganancias) por proyecto ---
+router.get('/pyg', async (req: Request, res: Response) => {
+  try {
+    const { start, end } = req.query;
+    const matchStage: Record<string, unknown> = {};
+    if (start && end) {
+      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      matchStage.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      matchStage.date = { $lte: new Date(end as string) };
+    }
+
+    const pipeline: Record<string, unknown>[] = [];
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
+    pipeline.push({
+      $group: {
+        _id: '$entity_id',
+        ingresos: { $sum: { $cond: [{ $gte: ['$amount', 0] }, '$amount', 0] } },
+        gastos: { $sum: { $cond: [{ $lt: ['$amount', 0] }, { $abs: '$amount' }, 0] } },
+      },
+    }, {
+      $addFields: {
+        resultado: { $subtract: ['$ingresos', '$gastos'] },
+      },
+    }, { $sort: { resultado: -1 } });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const entityIds = (results as { _id: string | null }[]).map((r) => r._id).filter(Boolean);
+    const entities = entityIds.length > 0
+      ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
+      : [];
+    const entityMap = new Map(
+      (entities as { id: string; name: string; type: string }[]).map((e) => [e.id, { name: e.name, type: e.type }])
+    );
+
+    const rows = (results as { _id: string | null; ingresos: number; gastos: number; resultado: number }[]).map((r) => ({
+      entity_id: r._id,
+      entity_name: r._id ? (entityMap.get(r._id)?.name ?? 'Sin asignar') : 'Sin asignar',
+      entity_type: r._id ? (entityMap.get(r._id)?.type ?? null) : null,
+      ingresos: Math.round(r.ingresos * 100) / 100,
+      gastos: Math.round(r.gastos * 100) / 100,
+      resultado: Math.round(r.resultado * 100) / 100,
+    }));
+
+    const totalIngresos = rows.reduce((acc, r) => acc + r.ingresos, 0);
+    const totalGastos = rows.reduce((acc, r) => acc + r.gastos, 0);
+    const totalResultado = totalIngresos - totalGastos;
+
+    res.json({
+      rows,
+      total_ingresos: Math.round(totalIngresos * 100) / 100,
+      total_gastos: Math.round(totalGastos * 100) / 100,
+      total_resultado: Math.round(totalResultado * 100) / 100,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Balance de cuentas (ubicación del dinero) ---
+router.get('/account-balances', async (req: Request, res: Response) => {
+  try {
+    const { start, end } = req.query;
+    const matchStage: Record<string, unknown> = {};
+    if (start && end) {
+      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      matchStage.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      matchStage.date = { $lte: new Date(end as string) };
+    }
+
+    const pipeline: Record<string, unknown>[] = [];
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
+    pipeline.push(
+      { $group: { _id: '$payment_account_id', total_amount: { $sum: '$amount' } } },
+      { $sort: { total_amount: -1 } }
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const accountIds = (results as { _id: string }[]).map((r) => r._id).filter(Boolean);
+    const accounts = accountIds.length > 0
+      ? await AcctPaymentAccount.find({ id: { $in: accountIds } }).select('id name currency').lean().exec()
+      : [];
+    const accountMap = new Map(
+      (accounts as { id: string; name: string; currency?: string }[]).map((a) => [a.id, { name: a.name, currency: a.currency ?? 'USD' }])
+    );
+
+    const rows = (results as { _id: string; total_amount: number }[]).map((r) => ({
+      payment_account_id: r._id,
+      account_name: accountMap.get(r._id)?.name ?? 'Cuenta desconocida',
+      currency: accountMap.get(r._id)?.currency ?? 'USD',
+      total_amount: Math.round(r.total_amount * 100) / 100,
+    }));
+
+    const grandTotal = rows.reduce((acc, r) => acc + r.total_amount, 0);
+
+    res.json({ rows, grand_total: Math.round(grandTotal * 100) / 100 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // --- Import CSV ---
 router.post('/import', async (req: Request, res: Response) => {
   try {
