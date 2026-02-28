@@ -4,6 +4,7 @@
   "version": "1.1.2",
   "type": "module",
   "scripts": {
+    "sugerir:fusion-categorias": "npx tsx scripts/sugerir-fusion-categorias.ts",
     "migrate:supabase-to-mongodb": "npx tsx scripts/migrate-supabase-to-mongodb.ts",
     "fix:migrated-tasks": "npx tsx scripts/fix-migrated-tasks.ts",
     "migrate:add-restricted-access": "npx tsx scripts/add-restricted-access-to-projects.ts",

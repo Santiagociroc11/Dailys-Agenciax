@@ -310,7 +310,7 @@ function PygDetailPanel({
       <table className="w-full text-sm min-w-[600px]">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 w-[1%] max-w-[200px]">Categoría</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[260px]">Categoría</th>
             {months.map((m) => {
               const [y, mo] = m.split('-');
               const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
@@ -346,7 +346,7 @@ function PygDetailPanel({
             )}
           </tr>
           <tr className="bg-gray-50 text-xs text-gray-500">
-            <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10"></th>
+            <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10 min-w-[260px]"></th>
             {months.flatMap((m) => [
               <th key={`${m}-u1`} className="px-1 py-0.5 text-right border-l">USD</th>,
               <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
@@ -373,8 +373,8 @@ function PygDetailPanel({
                   onClick={() => toggleCategory(cat)}
                   className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none group"
                 >
-                  <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50 align-top">
-                    <span className="inline-flex items-start gap-1 max-w-[180px]">
+                  <td className="px-3 py-2 font-medium sticky left-0 bg-white group-hover:bg-gray-50 align-top min-w-[260px]">
+                    <span className="inline-flex items-start gap-1 min-w-[220px] max-w-[320px]">
                       {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" /> : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />}
                       <span className="break-words leading-tight line-clamp-2">{cat}</span>
                     </span>
@@ -416,8 +416,8 @@ function PygDetailPanel({
                     const curr = t.currency || 'USD';
                     return (
                       <tr key={t.id} className="border-t border-gray-50 bg-gray-50/50">
-                        <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50 align-top" onClick={(e) => e.stopPropagation()}>
-                          <span className="flex items-start gap-2 max-w-[180px]">
+                        <td className="px-3 py-1.5 pl-8 text-gray-600 sticky left-0 bg-gray-50/50 align-top min-w-[260px]" onClick={(e) => e.stopPropagation()}>
+                          <span className="flex items-start gap-2 min-w-[220px] max-w-[320px]">
                             <span className="break-words leading-tight line-clamp-2">{format(new Date(t.date), 'dd MMM', { locale: es })} — {t.description || 'Sin descripción'}</span>
                             {onEditTransaction && (
                               <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-0.5 shrink-0" title="Editar"><Edit className="w-3.5 h-3.5 inline" /></button>
