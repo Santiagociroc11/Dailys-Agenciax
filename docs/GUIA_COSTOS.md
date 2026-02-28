@@ -41,6 +41,8 @@ Para que los costos funcionen en todo el sistema necesitas:
 | **Clientes** | Proyectos vinculados y coste total por cliente |
 | **Reportes → Resumen** | Coste por cliente en el período |
 | **Reportes → Facturación** | Coste por usuario, coste por cliente, coste por área |
+| **Reportes → Áreas** | Coste total por área en el período |
+| **Áreas** | Coste por área (este mes) en cada tarjeta y total |
 | **Alertas de presupuesto** | Horas consumidas vs budget_hours, coste consumido y presupuesto monto |
 
 ---
@@ -77,7 +79,21 @@ El coste se calcula como: para cada asignación de trabajo en proyectos del clie
 
 ---
 
-## 6. Próximos pasos posibles
+## 6. Utilización de la nómina (pagas igual trabajen o no)
+
+En **Nómina** hay una sección **"Utilización de la nómina"** que te ayuda a revisar este problema:
+
+- **Nómina fija**: Lo que pagas a empleados con salario mensual (no cambia con las horas).
+- **Horas trabajadas vs esperadas**: Cuántas horas registraron vs 160h/mes por persona.
+- **% Utilización**: Si es bajo, pagas mucho por pocas horas.
+- **Coste efectivo por hora**: Nómina ÷ horas reales — cuanto más alto, más "caro" cada hora productiva.
+- **Empleados con subutilización**: Lista de quienes trabajaron menos del 80% de la jornada.
+
+Así puedes ver quién está subutilizado y tomar decisiones (redistribuir trabajo, revisar asignaciones, etc.).
+
+---
+
+## 7. Próximos pasos posibles
 
 1. **Alertas de presupuesto por coste**: Si el proyecto tiene `budget_amount`, comparar con el coste consumido y alertar cuando se supere.
 2. **Coste en tareas**: Mostrar coste estimado (estimated_duration × tarifa) y coste real en cada tarea.
@@ -86,7 +102,7 @@ El coste se calcula como: para cada asignación de trabajo en proyectos del clie
 
 ---
 
-## 7. Resumen rápido
+## 8. Resumen rápido
 
 1. Ve a **Usuarios** y configura `monthly_salary` o `hourly_rate` para cada miembro del equipo.
 2. Asegúrate de que el equipo registre horas en las tareas (actual_duration).

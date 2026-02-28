@@ -2,12 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { Plus, Edit, Trash2, X, Users, Check } from 'lucide-react';
+import { getCostByArea } from '../lib/metrics';
+import { Plus, Edit, Trash2, X, Users, DollarSign } from 'lucide-react';
 import { Area, AreaWithUsers } from '../types/Area';
+
+function getMonthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date();
+  return {
+    start: start.toISOString().split('T')[0],
+    end: end.toISOString().split('T')[0],
+  };
+}
 
 export default function Areas() {
   const { isAdmin, user: currentUser } = useAuth();
   const [areas, setAreas] = useState<AreaWithUsers[]>([]);
+  const [costByArea, setCostByArea] = useState<Record<string, { cost: number; currency: string; hours: number }>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -23,6 +35,24 @@ export default function Areas() {
     fetchAreas();
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    if (areas.length > 0) fetchAreaCosts();
+  }, [areas.length]);
+
+  async function fetchAreaCosts() {
+    try {
+      const { start, end } = getMonthRange();
+      const costs = await getCostByArea(start, end);
+      const map: Record<string, { cost: number; currency: string; hours: number }> = {};
+      costs.forEach((c) => {
+        map[c.area_id] = { cost: c.total_cost, currency: c.currency, hours: c.total_hours };
+      });
+      setCostByArea(map);
+    } catch (err) {
+      console.error('Error fetching area costs:', err);
+    }
+  }
 
   async function fetchAreas() {
     try {
@@ -267,6 +297,14 @@ export default function Areas() {
     );
   }
 
+  const totalByCurrency = Object.values(costByArea).reduce(
+    (acc, c) => {
+      acc[c.currency] = (acc[c.currency] || 0) + c.cost;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -286,6 +324,23 @@ export default function Areas() {
           Nueva Área
         </button>
       </div>
+
+      {Object.keys(totalByCurrency).length > 0 && (
+        <div className="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200 flex items-center gap-3">
+          <DollarSign className="w-8 h-8 text-indigo-600" />
+          <div>
+            <p className="text-sm font-medium text-indigo-700">Coste total por áreas (este mes)</p>
+            <p className="text-2xl font-bold text-indigo-900">
+              {Object.entries(totalByCurrency).map(([cur, tot], i) => (
+                <span key={cur}>
+                  {i > 0 && ' · '}
+                  {tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}
+                </span>
+              ))}
+            </p>
+          </div>
+        </div>
+      )}
 
       {areas.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-6 text-center">
@@ -320,6 +375,17 @@ export default function Areas() {
                 )}
               </div>
               <div className="p-5">
+                {costByArea[area.id] && costByArea[area.id].cost > 0 && (
+                  <div className="mb-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                    <div className="flex items-center gap-2 text-sm font-medium text-indigo-700">
+                      <DollarSign className="w-4 h-4" />
+                      Coste este mes: {costByArea[area.id].cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {costByArea[area.id].currency}
+                    </div>
+                    <p className="text-xs text-indigo-600 mt-0.5">
+                      {costByArea[area.id].hours.toFixed(1)}h trabajadas
+                    </p>
+                  </div>
+                )}
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-medium text-gray-700">Miembros ({area.users.length})</h3>
                   <button

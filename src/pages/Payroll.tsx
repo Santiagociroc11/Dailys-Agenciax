@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { getPayrollBeneficiaries, type PayrollBeneficiaryRow } from '../lib/metrics';
-import { DollarSign, Plus, Edit, Trash2, X, Calendar, CreditCard, Copy, Download, Calculator, Users, Filter } from 'lucide-react';
+import { getPayrollBeneficiaries, getCostByUser, type PayrollBeneficiaryRow, type CostByUserRow } from '../lib/metrics';
+import { DollarSign, Plus, Edit, Trash2, X, Calendar, CreditCard, Copy, Download, Calculator, Users, Filter, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -58,12 +58,27 @@ export default function Payroll() {
   const [detailRecord, setDetailRecord] = useState<PayrollRecord | null>(null);
   const [beneficiaries, setBeneficiaries] = useState<PayrollBeneficiaryRow[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [utilizationData, setUtilizationData] = useState<CostByUserRow[] | null>(null);
 
   useEffect(() => {
     if (!isAdmin) return;
     fetchRecords();
     fetchActivePayroll();
+    fetchUtilizationData();
   }, [isAdmin]);
+
+  async function fetchUtilizationData() {
+    try {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const end = now.toISOString().split('T')[0];
+      const data = await getCostByUser(start, end);
+      setUtilizationData(data);
+    } catch (e) {
+      console.error('Error fetching utilization:', e);
+      setUtilizationData([]);
+    }
+  }
 
   async function fetchActivePayroll() {
     try {
@@ -380,6 +395,80 @@ export default function Payroll() {
           </div>
         )}
       </div>
+
+      {/* Utilización de nómina: pagas igual trabajen o no */}
+      {utilizationData && utilizationData.length > 0 && (() => {
+        const salaryUsers = utilizationData.filter((m) => m.rate_source === 'salary' && m.monthly_salary != null && m.monthly_salary > 0);
+        if (salaryUsers.length === 0) return null;
+        const underutilized = salaryUsers.filter((m) => {
+          const hours = m.total_hours || 0;
+          const utilization = (hours / 160) * 100;
+          return utilization < 80 && hours < 160; // menos del 80% de jornada
+        });
+        const totalSalaryByCur = salaryUsers.reduce((acc, m) => {
+          const c = m.currency || 'COP';
+          acc[c] = (acc[c] || 0) + (m.total_cost ?? 0);
+          return acc;
+        }, {} as Record<string, number>);
+        const totalHoursWorked = salaryUsers.reduce((acc, m) => acc + m.total_hours, 0);
+        const expectedHours = salaryUsers.length * 160;
+        const utilizationPct = expectedHours > 0 ? Math.round((totalHoursWorked / expectedHours) * 100) : 0;
+        const totalSalaryPaid = Object.values(totalSalaryByCur).reduce((a, b) => a + b, 0);
+        const effectiveCostPerHour = totalHoursWorked > 0 ? totalSalaryPaid / totalHoursWorked : 0;
+        return (
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-5">
+            <h3 className="text-lg font-semibold text-amber-900 flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-5 h-5" />
+              Utilización de la nómina (este mes)
+            </h3>
+            <p className="text-sm text-amber-800 mb-4">
+              Con salario fijo pagas lo mismo trabajen o no. Aquí ves cuánto pagas vs cuántas horas obtienes.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-gray-600">Nómina fija (empleados)</p>
+                <p className="font-bold text-amber-900">
+                  {Object.entries(totalSalaryByCur).map(([cur, tot], i) => (
+                    <span key={cur}>{i > 0 && ' · '}{tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}</span>
+                  ))}
+                </p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-gray-600">Horas trabajadas</p>
+                <p className="font-bold text-amber-900">{totalHoursWorked.toFixed(1)}h / {expectedHours}h esperadas</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-gray-600">Utilización</p>
+                <p className={`font-bold ${utilizationPct < 80 ? 'text-red-600' : 'text-amber-900'}`}>{utilizationPct}%</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-gray-600">Coste efectivo por hora</p>
+                <p className="font-bold text-amber-900">
+                  {effectiveCostPerHour > 0 ? effectiveCostPerHour.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'} /h
+                </p>
+              </div>
+            </div>
+            {underutilized.length > 0 && (
+              <div>
+                <p className="text-sm font-medium text-amber-900 mb-2">Empleados con posible subutilización (&lt;80% jornada):</p>
+                <ul className="space-y-1 text-sm">
+                  {underutilized.map((m) => {
+                    const util = Math.round((m.total_hours / 160) * 100);
+                    return (
+                      <li key={m.user_id} className="flex justify-between items-center py-1 bg-white/60 rounded px-2">
+                        <span>{m.user_name}</span>
+                        <span className="text-amber-800 font-medium">
+                          {m.total_hours.toFixed(1)}h ({util}%) · {m.total_cost != null ? m.total_cost.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'} {m.currency}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {records.length > 0 && (
         <div className="flex items-center gap-4 mb-4">
