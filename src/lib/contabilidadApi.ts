@@ -118,6 +118,73 @@ export interface AccountBalancesResponse {
   total_cop: number;
 }
 
+export interface AcctChartAccount {
+  id: string;
+  code: string;
+  name: string;
+  type: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
+  parent_id?: string | null;
+  is_header?: boolean;
+  sort_order?: number;
+}
+
+export interface AcctJournalEntry {
+  id: string;
+  date: string;
+  description?: string;
+  reference?: string;
+  created_by?: string | null;
+  lines?: AcctJournalEntryLine[];
+}
+
+export interface AcctJournalEntryLine {
+  id: string;
+  journal_entry_id: string;
+  account_id: string;
+  entity_id?: string | null;
+  debit: number;
+  credit: number;
+  description?: string;
+  currency?: string;
+  account_code?: string;
+  account_name?: string;
+  account_type?: string;
+  entity_name?: string | null;
+}
+
+export interface LedgerLine {
+  id: string;
+  journal_entry_id: string;
+  date?: string;
+  description?: string;
+  reference?: string;
+  account_id: string;
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  entity_id?: string | null;
+  entity_name?: string | null;
+  debit: number;
+  credit: number;
+  currency: string;
+}
+
+export interface TrialBalanceRow {
+  account_id: string;
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface TrialBalanceResponse {
+  rows: TrialBalanceRow[];
+  total_debit: number;
+  total_credit: number;
+}
+
 export const contabilidadApi = {
   async getClients(): Promise<AcctClient[]> {
     return fetchJson<AcctClient[]>(url('/clients'));
@@ -226,6 +293,18 @@ export const contabilidadApi = {
     if (params?.client_id) search.client_id = params.client_id;
     return fetchJson<AcctTransaction[]>(url('/transactions', Object.keys(search).length > 0 ? search : undefined));
   },
+  async getLedgerLines(params?: { start?: string; end?: string; entity_id?: string | null; account_id?: string; client_id?: string; category_id?: string }): Promise<LedgerLine[]> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    if (params?.entity_id !== undefined) {
+      search.entity_id = params.entity_id == null || params.entity_id === '' ? '__null__' : params.entity_id;
+    }
+    if (params?.account_id) search.account_id = params.account_id;
+    if (params?.client_id) search.client_id = params.client_id;
+    if (params?.category_id) search.category_id = params.category_id;
+    return fetchJson<LedgerLine[]>(url('/ledger-lines', Object.keys(search).length > 0 ? search : undefined));
+  },
   async createTransaction(data: {
     date: string;
     amount: number;
@@ -292,6 +371,64 @@ export const contabilidadApi = {
     return fetchJson<AccountBalancesResponse>(url('/account-balances', Object.keys(search).length > 0 ? search : undefined));
   },
 
+  async getChartAccounts(): Promise<AcctChartAccount[]> {
+    return fetchJson<AcctChartAccount[]>(url('/chart-accounts'));
+  },
+  async seedChartAccounts(): Promise<{ created: number; accounts: AcctChartAccount[] }> {
+    return fetchJson<{ created: number; accounts: AcctChartAccount[] }>(url('/chart-accounts/seed'), { method: 'POST' });
+  },
+  async createChartAccount(data: { code: string; name: string; type: string; parent_id?: string | null; is_header?: boolean; sort_order?: number }, createdBy?: string): Promise<AcctChartAccount> {
+    return fetchJson<AcctChartAccount>(url('/chart-accounts'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateChartAccount(id: string, data: { code?: string; name?: string; type?: string; parent_id?: string | null; is_header?: boolean; sort_order?: number }, createdBy?: string): Promise<AcctChartAccount> {
+    return fetchJson<AcctChartAccount>(url(`/chart-accounts/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteChartAccount(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/chart-accounts/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getJournalEntries(params?: { start?: string; end?: string }): Promise<AcctJournalEntry[]> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<AcctJournalEntry[]>(url('/journal-entries', Object.keys(search).length > 0 ? search : undefined));
+  },
+  async getJournalEntry(id: string): Promise<AcctJournalEntry> {
+    return fetchJson<AcctJournalEntry>(url(`/journal-entries/${id}`));
+  },
+  async createJournalEntry(data: { date: string; description?: string; reference?: string; lines: Array<{ account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }> }, createdBy?: string): Promise<AcctJournalEntry> {
+    return fetchJson<AcctJournalEntry>(url('/journal-entries'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateJournalEntry(id: string, data: { date?: string; description?: string; reference?: string; lines?: Array<{ account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }> }, createdBy?: string): Promise<AcctJournalEntry> {
+    return fetchJson<AcctJournalEntry>(url(`/journal-entries/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteJournalEntry(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/journal-entries/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
+
+  async getTrialBalance(params?: { start?: string; end?: string }): Promise<TrialBalanceResponse> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<TrialBalanceResponse>(url('/trial-balance', Object.keys(search).length > 0 ? search : undefined));
+  },
+
   async importCsv(csvText: string, options?: { default_currency?: string }, createdBy?: string): Promise<ImportResult> {
     return fetchJson<ImportResult>(url('/import'), {
       method: 'POST',
@@ -310,4 +447,5 @@ export interface ImportResult {
   entities: number;
   categories: number;
   accounts: number;
+  chart_accounts?: number;
 }

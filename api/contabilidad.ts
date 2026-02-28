@@ -7,6 +7,9 @@ import {
   AcctCategory,
   AcctPaymentAccount,
   AcctTransaction,
+  AcctChartAccount,
+  AcctJournalEntry,
+  AcctJournalEntryLine,
   AuditLog,
 } from '../models/index.js';
 
@@ -193,7 +196,7 @@ router.put('/entities/:id', async (req: Request, res: Response) => {
       : null;
     if (otraConMismoNombre) {
       const targetId = (otraConMismoNombre as { id: string }).id;
-      const result = await AcctTransaction.updateMany({ entity_id: id }, { $set: { entity_id: targetId } }).exec();
+      const result = await AcctJournalEntryLine.updateMany({ entity_id: id }, { $set: { entity_id: targetId } }).exec();
       await AcctEntity.deleteOne({ id }).exec();
       if (created_by) {
         await AuditLog.create({
@@ -201,7 +204,7 @@ router.put('/entities/:id', async (req: Request, res: Response) => {
           entity_type: 'acct_entity',
           entity_id: targetId,
           action: 'merge',
-          summary: `Entidad "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} transacciones)`,
+          summary: `Entidad "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} líneas)`,
         });
       }
       const merged = await AcctEntity.findOne({ id: targetId }).lean().exec();
@@ -239,9 +242,9 @@ router.delete('/entities/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const created_by = req.query.created_by as string | undefined;
-    const count = await AcctTransaction.countDocuments({ entity_id: id }).exec();
+    const count = await AcctJournalEntryLine.countDocuments({ entity_id: id }).exec();
     if (count > 0) {
-      res.status(400).json({ error: `Hay ${count} transacciones con esta entidad. Usa "Fusionar" para reasignarlas a otra entidad antes de eliminar.` });
+      res.status(400).json({ error: `Hay ${count} línea(s) de asientos con esta entidad. Usa "Fusionar" para reasignarlas a otra entidad antes de eliminar.` });
       return;
     }
     const doc = await AcctEntity.findOneAndDelete({ id }).lean().exec();
@@ -286,7 +289,7 @@ router.post('/entities/:id/merge', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Entidad destino no encontrada' });
       return;
     }
-    const result = await AcctTransaction.updateMany(
+    const result = await AcctJournalEntryLine.updateMany(
       { entity_id: id },
       { $set: { entity_id: target_entity_id } }
     ).exec();
@@ -386,7 +389,10 @@ router.put('/categories/:id', async (req: Request, res: Response) => {
       : null;
     if (otraConMismoNombre) {
       const targetId = (otraConMismoNombre as { id: string }).id;
-      const result = await AcctTransaction.updateMany({ category_id: id }, { $set: { category_id: targetId } }).exec();
+      const targetCat = await AcctCategory.findOne({ id: targetId }).select('name').lean().exec();
+      const result = targetCat
+        ? await AcctChartAccount.updateMany({ name: (existing as { name: string }).name }, { $set: { name: (targetCat as { name: string }).name } }).exec()
+        : { modifiedCount: 0 };
       await AcctCategory.deleteOne({ id }).exec();
       if (created_by) {
         await AuditLog.create({
@@ -394,7 +400,7 @@ router.put('/categories/:id', async (req: Request, res: Response) => {
           entity_type: 'acct_category',
           entity_id: targetId,
           action: 'merge',
-          summary: `Categoría "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} transacciones)`,
+          summary: `Categoría "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} cuentas)`,
         });
       }
       const merged = await AcctCategory.findOne({ id: targetId }).lean().exec();
@@ -431,9 +437,10 @@ router.delete('/categories/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const created_by = req.query.created_by as string | undefined;
-    const count = await AcctTransaction.countDocuments({ category_id: id }).exec();
+    const cat = await AcctCategory.findOne({ id }).select('name').lean().exec();
+    const count = cat ? await AcctChartAccount.countDocuments({ name: (cat as { name: string }).name }).exec() : 0;
     if (count > 0) {
-      res.status(400).json({ error: `Hay ${count} transacciones con esta categoría. Usa "Fusionar" para reasignarlas antes de eliminar.` });
+      res.status(400).json({ error: `Hay ${count} cuenta(s) contable(s) con este nombre. Usa "Fusionar" para reasignarlas antes de eliminar.` });
       return;
     }
     const doc = await AcctCategory.findOneAndDelete({ id }).lean().exec();
@@ -478,9 +485,9 @@ router.post('/categories/:id/merge', async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Categoría destino no encontrada' });
       return;
     }
-    const result = await AcctTransaction.updateMany(
-      { category_id: id },
-      { $set: { category_id: target_category_id } }
+    const result = await AcctChartAccount.updateMany(
+      { name: (source as { name: string }).name },
+      { $set: { name: (target as { name: string }).name } }
     ).exec();
     await AcctCategory.findOneAndDelete({ id }).exec();
     if (created_by) {
@@ -489,7 +496,7 @@ router.post('/categories/:id/merge', async (req: Request, res: Response) => {
         entity_type: 'acct_category',
         entity_id: id,
         action: 'merge',
-        summary: `Categoría "${(source as { name: string }).name}" fusionada en "${(target as { name: string }).name}" (${result.modifiedCount} transacciones)`,
+        summary: `Categoría "${(source as { name: string }).name}" fusionada en "${(target as { name: string }).name}" (${result.modifiedCount} cuentas)`,
       });
     }
     res.json({ merged: result.modifiedCount, deleted_category_id: id });
@@ -592,62 +599,94 @@ router.delete('/payment-accounts/:id', async (req: Request, res: Response) => {
   }
 });
 
-// --- Transactions ---
-router.get('/transactions', async (req: Request, res: Response) => {
+// --- Ledger lines (Libro mayor desde asientos) ---
+router.get('/ledger-lines', async (req: Request, res: Response) => {
   try {
-    const { start, end, entity_id, category_id, payment_account_id, client_id } = req.query;
-    const filter: Record<string, unknown> = {};
+    const { start, end, entity_id, account_id, client_id, category_id } = req.query;
+    const entryFilter: Record<string, unknown> = {};
     if (start && end) {
-      filter.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+      entryFilter.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
     } else if (start) {
-      filter.date = { $gte: new Date(start as string) };
+      entryFilter.date = { $gte: new Date(start as string) };
     } else if (end) {
-      filter.date = { $lte: new Date(end as string) };
+      entryFilter.date = { $lte: new Date(end as string) };
     }
+    const entryMatch = Object.keys(entryFilter).length > 0
+      ? await AcctJournalEntry.find(entryFilter).select('id date description reference').lean().exec()
+      : await AcctJournalEntry.find({}).select('id date description reference').lean().exec();
+    const entryIds = (entryMatch as { id: string }[]).map((e) => e.id);
+    const entryMap = new Map((entryMatch as { id: string; date: Date; description?: string; reference?: string }[]).map((e) => [e.id, e]));
+
+    if (entryIds.length === 0) {
+      return res.json([]);
+    }
+
+    const lineFilter: Record<string, unknown> = { journal_entry_id: { $in: entryIds } };
     if (entity_id !== undefined && entity_id !== null && entity_id !== '') {
       if (entity_id === '__null__' || entity_id === 'null') {
-        filter.entity_id = null;
+        lineFilter.entity_id = null;
       } else {
-        filter.entity_id = entity_id;
+        lineFilter.entity_id = entity_id;
       }
     }
-    if (category_id) filter.category_id = category_id;
-    if (payment_account_id) filter.payment_account_id = payment_account_id;
+    if (account_id) lineFilter.account_id = account_id;
+    if (category_id && typeof category_id === 'string') {
+      const cat = await AcctCategory.findOne({ id: category_id }).select('name').lean().exec();
+      if (cat) {
+        const accIds = (await AcctChartAccount.find({ name: (cat as { name: string }).name }).select('id').lean().exec()).map((a) => (a as { id: string }).id);
+        if (accIds.length > 0) lineFilter.account_id = { $in: accIds };
+      }
+    }
     if (client_id && typeof client_id === 'string' && (entity_id === undefined || entity_id === null || entity_id === '')) {
       const entityIds = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
-      if (entityIds.length === 0) {
-        return res.json([]);
-      }
-      filter.entity_id = { $in: entityIds };
+      if (entityIds.length === 0) return res.json([]);
+      lineFilter.entity_id = { $in: entityIds };
     }
 
-    const list = await AcctTransaction.find(filter)
-      .sort({ date: -1 })
-      .lean()
-      .exec();
-
-    const entityIds = [...new Set((list as { entity_id?: string | null }[]).map((t) => t.entity_id).filter(Boolean))];
-    const categoryIds = [...new Set((list as { category_id?: string | null }[]).map((t) => t.category_id).filter(Boolean))];
-    const accountIds = [...new Set((list as { payment_account_id: string }[]).map((t) => t.payment_account_id))];
-
-    const [entities, categories, accounts] = await Promise.all([
-      entityIds.length > 0 ? AcctEntity.find({ id: { $in: entityIds } }).select('id name').lean().exec() : [],
-      categoryIds.length > 0 ? AcctCategory.find({ id: { $in: categoryIds } }).select('id name').lean().exec() : [],
-      accountIds.length > 0 ? AcctPaymentAccount.find({ id: { $in: accountIds } }).select('id name').lean().exec() : [],
-    ]);
-
+    const lines = await AcctJournalEntryLine.find(lineFilter).sort({ journal_entry_id: -1 }).lean().exec();
+    const accountIds = [...new Set((lines as { account_id: string }[]).map((l) => l.account_id))];
+    const entityIds = [...new Set((lines as { entity_id?: string | null }[]).map((l) => l.entity_id).filter(Boolean))];
+    const accounts = accountIds.length > 0 ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id code name type').lean().exec() : [];
+    const entities = entityIds.length > 0 ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name').lean().exec() : [];
+    const accountMap = new Map((accounts as { id: string; code: string; name: string; type: string }[]).map((a) => [a.id, a]));
     const entityMap = new Map((entities as { id: string; name: string }[]).map((e) => [e.id, e.name]));
-    const categoryMap = new Map((categories as { id: string; name: string }[]).map((c) => [c.id, c.name]));
-    const accountMap = new Map((accounts as { id: string; name: string }[]).map((a) => [a.id, a.name]));
 
-    const enriched = (list as { entity_id?: string | null; category_id?: string | null; payment_account_id: string }[]).map((t) => ({
-      ...t,
-      entity_name: t.entity_id ? entityMap.get(t.entity_id) ?? null : null,
-      category_name: t.category_id ? categoryMap.get(t.category_id) ?? null : null,
-      payment_account_name: accountMap.get(t.payment_account_id) ?? null,
-    }));
-
+    const enriched = (lines as { id: string; journal_entry_id: string; account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }[]).map((l) => {
+      const entry = entryMap.get(l.journal_entry_id);
+      const acc = accountMap.get(l.account_id);
+      return {
+        id: l.id,
+        journal_entry_id: l.journal_entry_id,
+        date: entry?.date,
+        description: l.description || entry?.description || '',
+        reference: entry?.reference,
+        account_id: l.account_id,
+        account_code: acc?.code ?? '',
+        account_name: acc?.name ?? '',
+        account_type: acc?.type ?? '',
+        entity_id: l.entity_id,
+        entity_name: l.entity_id ? entityMap.get(l.entity_id) ?? null : null,
+        debit: l.debit,
+        credit: l.credit,
+        currency: l.currency ?? 'USD',
+      };
+    });
+    enriched.sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
     res.json(enriched);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Transactions (deprecado: usar ledger-lines) - mantiene compatibilidad para merge/delete de entidades/categorías ---
+router.get('/transactions', async (_req: Request, res: Response) => {
+  try {
+    res.json([]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
@@ -755,29 +794,44 @@ function normCurrency(c: string): 'USD' | 'COP' {
   return (c || 'USD').toUpperCase() === 'COP' ? 'COP' : 'USD';
 }
 
-// --- Balance ---
+// --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
 router.get('/balance', async (req: Request, res: Response) => {
   try {
     const { start, end } = req.query;
-    const matchStage: Record<string, unknown> = {};
+    const entryMatch: Record<string, unknown> = {};
     if (start && end) {
-      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
     } else if (start) {
-      matchStage.date = { $gte: new Date(start as string) };
+      entryMatch.date = { $gte: new Date(start as string) };
     } else if (end) {
-      matchStage.date = { $lte: new Date(end as string) };
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+    if (entryIds.length === 0) {
+      return res.json({ rows: [], total_usd: 0, total_cop: 0 });
     }
 
-    const pipeline: Record<string, unknown>[] = [];
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
-    }
-    pipeline.push(
-      { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } }
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const pipeline = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+      {
+        $addFields: {
+          amount: {
+            $cond: [
+              { $eq: ['$acc.type', 'income'] },
+              { $subtract: ['$credit', '$debit'] },
+              { $subtract: [0, { $subtract: ['$debit', '$credit'] }] },
+            ],
+          },
+        },
+      },
+      { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } },
+    ];
+    const results = await AcctJournalEntryLine.aggregate(pipeline).exec();
     const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
@@ -823,62 +877,64 @@ const TRASLADO_UTILIDADES_REGEX = /traslado.*utilidad|utilidad.*traslado|traslad
 router.get('/pyg', async (req: Request, res: Response) => {
   try {
     const { start, end, client_id } = req.query;
-    const matchStage: Record<string, unknown> = {};
+    const entryMatch: Record<string, unknown> = {};
     if (start && end) {
-      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
     } else if (start) {
-      matchStage.date = { $gte: new Date(start as string) };
+      entryMatch.date = { $gte: new Date(start as string) };
     } else if (end) {
-      matchStage.date = { $lte: new Date(end as string) };
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({
+        rows: [],
+        total_usd: { ingresos: 0, gastos: 0, resultado: 0 },
+        total_cop: { ingresos: 0, gastos: 0, resultado: 0 },
+      });
     }
 
-    const excludedCategoryIds = (await AcctCategory.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
-      .map((c) => (c as { id: string }).id);
-
-    const excludeTrasladoUtilidades: Record<string, unknown> = {
-      $and: [
-        { category_id: { $nin: excludedCategoryIds } },
-        {
-          $or: [
-            { description: { $in: [null, ''] } },
-            { description: { $not: { $regex: 'traslado.*utilidad|utilidad.*traslado|traslado\\s+utilidades', $options: 'i' } } },
-          ],
-        },
-      ],
-    };
-
-    let entityFilter: { id: { $in: string[] } } | null = null;
+    let entityFilter: string[] | null = null;
     if (client_id && typeof client_id === 'string') {
-      const entityIds = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
-      if (entityIds.length === 0) {
+      entityFilter = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+      if (entityFilter.length === 0) {
         return res.json({
           rows: [],
           total_usd: { ingresos: 0, gastos: 0, resultado: 0 },
           total_cop: { ingresos: 0, gastos: 0, resultado: 0 },
         });
       }
-      entityFilter = { id: { $in: entityIds } };
     }
 
-    const pipeline: Record<string, unknown>[] = [];
-    let fullMatch: Record<string, unknown> = excludeTrasladoUtilidades;
-    if (Object.keys(matchStage).length > 0) {
-      fullMatch = { $and: [matchStage, excludeTrasladoUtilidades] };
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((a) => (a as { id: string }).id);
+
+    const pipeline: Record<string, unknown>[] = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+    ];
+    if (excludedAccountIds.length > 0) {
+      pipeline.push({ $match: { account_id: { $nin: excludedAccountIds } } });
     }
     if (entityFilter) {
-      fullMatch = { $and: [fullMatch, { entity_id: { $in: entityFilter.id.$in } }] };
+      pipeline.push({ $match: { entity_id: { $in: entityFilter } } });
     }
-    pipeline.push({ $match: fullMatch });
     pipeline.push({
       $group: {
         _id: { entity_id: '$entity_id', currency: '$currency' },
-        ingresos: { $sum: { $cond: [{ $gte: ['$amount', 0] }, '$amount', 0] } },
-        gastos: { $sum: { $cond: [{ $lt: ['$amount', 0] }, { $abs: '$amount' }, 0] } },
+        ingresos: { $sum: { $cond: [{ $eq: ['$acc.type', 'income'] }, { $subtract: ['$credit', '$debit'] }, 0] } },
+        gastos: { $sum: { $cond: [{ $eq: ['$acc.type', 'expense'] }, { $subtract: ['$debit', '$credit'] }, 0] } },
       },
-    }, { $addFields: { resultado: { $subtract: ['$ingresos', '$gastos'] } } });
+    });
+    pipeline.push({ $addFields: { resultado: { $subtract: ['$ingresos', '$gastos'] } } });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const results = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
     const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
@@ -941,43 +997,40 @@ router.get('/pyg', async (req: Request, res: Response) => {
 router.get('/pyg-by-client', async (req: Request, res: Response) => {
   try {
     const { start, end } = req.query;
-    const matchStage: Record<string, unknown> = {};
+    const entryMatch: Record<string, unknown> = {};
     if (start && end) {
-      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
     } else if (start) {
-      matchStage.date = { $gte: new Date(start as string) };
+      entryMatch.date = { $gte: new Date(start as string) };
     } else if (end) {
-      matchStage.date = { $lte: new Date(end as string) };
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({
+        rows: [],
+        total_usd: { ingresos: 0, gastos: 0, resultado: 0 },
+        total_cop: { ingresos: 0, gastos: 0, resultado: 0 },
+      });
     }
 
-    const excludedCategoryIds = (await AcctCategory.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
-      .map((c) => (c as { id: string }).id);
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((a) => (a as { id: string }).id);
 
-    const excludeTrasladoUtilidades: Record<string, unknown> = {
-      $and: [
-        { category_id: { $nin: excludedCategoryIds } },
-        {
-          $or: [
-            { description: { $in: [null, ''] } },
-            { description: { $not: { $regex: 'traslado.*utilidad|utilidad.*traslado|traslado\\s+utilidades', $options: 'i' } } },
-          ],
-        },
-      ],
-    };
-
-    const pipeline: Record<string, unknown>[] = [];
-    let fullMatch: Record<string, unknown> = excludeTrasladoUtilidades;
-    if (Object.keys(matchStage).length > 0) {
-      fullMatch = { $and: [matchStage, excludeTrasladoUtilidades] };
+    const pipeline: Record<string, unknown>[] = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+    ];
+    if (excludedAccountIds.length > 0) {
+      pipeline.push({ $match: { account_id: { $nin: excludedAccountIds } } });
     }
-    pipeline.push({ $match: fullMatch });
     pipeline.push({
-      $lookup: {
-        from: 'acct_entities',
-        localField: 'entity_id',
-        foreignField: 'id',
-        as: 'entity',
-      },
+      $lookup: { from: 'acct_entities', localField: 'entity_id', foreignField: 'id', as: 'entity' },
     });
     pipeline.push({
       $addFields: {
@@ -987,14 +1040,14 @@ router.get('/pyg-by-client', async (req: Request, res: Response) => {
     pipeline.push({
       $group: {
         _id: { client_id: '$client_id', currency: '$currency' },
-        ingresos: { $sum: { $cond: [{ $gte: ['$amount', 0] }, '$amount', 0] } },
-        gastos: { $sum: { $cond: [{ $lt: ['$amount', 0] }, { $abs: '$amount' }, 0] } },
+        ingresos: { $sum: { $cond: [{ $eq: ['$acc.type', 'income'] }, { $subtract: ['$credit', '$debit'] }, 0] } },
+        gastos: { $sum: { $cond: [{ $eq: ['$acc.type', 'expense'] }, { $subtract: ['$debit', '$credit'] }, 0] } },
       },
     });
     pipeline.push({ $addFields: { resultado: { $subtract: ['$ingresos', '$gastos'] } } });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const results = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
     const clientIds = [...new Set((results as { _id: { client_id: string } }[]).map((r) => r._id.client_id).filter((id) => id && id !== '__no_client__'))];
     const clients = clientIds.length > 0
       ? await AcctClient.find({ id: { $in: clientIds } }).select('id name').lean().exec()
@@ -1047,40 +1100,50 @@ router.get('/pyg-by-client', async (req: Request, res: Response) => {
   }
 });
 
-// --- Balance de cuentas (ubicación del dinero) ---
+// --- Balance de cuentas (ubicación del dinero, desde asientos: cuentas tipo asset) ---
 router.get('/account-balances', async (req: Request, res: Response) => {
   try {
     const { start, end } = req.query;
-    const matchStage: Record<string, unknown> = {};
+    const entryMatch: Record<string, unknown> = {};
     if (start && end) {
-      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
     } else if (start) {
-      matchStage.date = { $gte: new Date(start as string) };
+      entryMatch.date = { $gte: new Date(start as string) };
     } else if (end) {
-      matchStage.date = { $lte: new Date(end as string) };
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({ rows: [], total_usd: 0, total_cop: 0 });
     }
 
-    const pipeline: Record<string, unknown>[] = [];
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
-    }
-    pipeline.push(
-      { $group: { _id: { payment_account_id: '$payment_account_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } }
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
-    const accountIds = [...new Set((results as { _id: { payment_account_id: string } }[]).map((r) => r._id.payment_account_id).filter(Boolean))];
+    const pipeline = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': 'asset' } },
+      {
+        $group: {
+          _id: { account_id: '$account_id', currency: '$currency' },
+          total_amount: { $sum: { $subtract: ['$debit', '$credit'] } },
+        },
+      },
+    ];
+    const results = await AcctJournalEntryLine.aggregate(pipeline).exec();
+    const accountIds = [...new Set((results as { _id: { account_id: string } }[]).map((r) => r._id.account_id).filter(Boolean))];
     const accounts = accountIds.length > 0
-      ? await AcctPaymentAccount.find({ id: { $in: accountIds } }).select('id name currency').lean().exec()
+      ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id name').lean().exec()
       : [];
     const accountMap = new Map(
-      (accounts as { id: string; name: string; currency?: string }[]).map((a) => [a.id, { name: a.name }])
+      (accounts as { id: string; name: string }[]).map((a) => [a.id, { name: a.name }])
     );
 
     const rowMap = new Map<string, { payment_account_id: string; account_name: string; usd: number; cop: number }>();
-    for (const r of results as { _id: { payment_account_id: string; currency: string }; total_amount: number }[]) {
-      const aid = r._id.payment_account_id;
+    for (const r of results as { _id: { account_id: string; currency: string }; total_amount: number }[]) {
+      const aid = r._id.account_id;
       const cur = normCurrency(r._id.currency || 'USD');
       const amt = Math.round(r.total_amount * 100) / 100;
       if (!rowMap.has(aid)) {
@@ -1158,6 +1221,58 @@ router.post('/import', async (req: Request, res: Response) => {
     const entityByName = new Map<string, { id: string; type: string }>();
     const categoryByName = new Map<string, string>();
     const accountByName = new Map<string, string>();
+    const chartAccountByBankName = new Map<string, string>();
+    const chartAccountByCategoryName = new Map<string, string>();
+    const maxBank = await AcctChartAccount.findOne({ code: /^1110-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
+    const maxIncome = await AcctChartAccount.findOne({ code: /^4135-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
+    const maxExpense = await AcctChartAccount.findOne({ code: /^5195-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
+    let bankCounter = maxBank?.code ? parseInt(maxBank.code.split('-')[1] || '0', 10) : 0;
+    let incomeCounter = maxIncome?.code ? parseInt(maxIncome.code.split('-')[1] || '0', 10) : 0;
+    let expenseCounter = maxExpense?.code ? parseInt(maxExpense.code.split('-')[1] || '0', 10) : 0;
+
+    async function getOrCreateChartAccountForBank(name: string): Promise<string> {
+      const n = (name || '').trim() || 'Sin cuenta';
+      if (chartAccountByBankName.has(n)) return chartAccountByBankName.get(n)!;
+      bankCounter++;
+      const code = `1110-${String(bankCounter).padStart(2, '0')}`;
+      const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+      if (existing) {
+        chartAccountByBankName.set(n, (existing as { id: string }).id);
+        return (existing as { id: string }).id;
+      }
+      const doc = await AcctChartAccount.create({ code, name: n, type: 'asset', is_header: false, sort_order: bankCounter });
+      chartAccountByBankName.set(n, doc.id);
+      return doc.id;
+    }
+
+    async function getOrCreateChartAccountForCategory(name: string, isExpense: boolean): Promise<string> {
+      const n = (name || '').trim() || 'Importación';
+      const key = `${n}::${isExpense ? 'expense' : 'income'}`;
+      if (chartAccountByCategoryName.has(key)) return chartAccountByCategoryName.get(key)!;
+      if (isExpense) {
+        expenseCounter++;
+        const code = `5195-${String(expenseCounter).padStart(2, '0')}`;
+        const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+        if (existing) {
+          chartAccountByCategoryName.set(key, (existing as { id: string }).id);
+          return (existing as { id: string }).id;
+        }
+        const doc = await AcctChartAccount.create({ code, name: n, type: 'expense', is_header: false, sort_order: expenseCounter });
+        chartAccountByCategoryName.set(key, doc.id);
+        return doc.id;
+      } else {
+        incomeCounter++;
+        const code = `4135-${String(incomeCounter).padStart(2, '0')}`;
+        const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+        if (existing) {
+          chartAccountByCategoryName.set(key, (existing as { id: string }).id);
+          return (existing as { id: string }).id;
+        }
+        const doc = await AcctChartAccount.create({ code, name: n, type: 'income', is_header: false, sort_order: incomeCounter });
+        chartAccountByCategoryName.set(key, doc.id);
+        return doc.id;
+      }
+    }
 
     async function getOrCreateEntity(name: string): Promise<string | null> {
       const n = (name || '').trim();
@@ -1234,7 +1349,7 @@ router.post('/import', async (req: Request, res: Response) => {
       const entityId = await getOrCreateEntity(proyectoStr);
       let rowCreated = 0;
 
-      // Revisar columnas de cuentas
+      // Revisar columnas de cuentas — crear asientos (partida doble)
       for (let c = 0; c < accountHeaders.length; c++) {
         const cell = (row[accountColStart + c] || '').trim();
         const amount = parseAmount(cell);
@@ -1243,56 +1358,497 @@ router.post('/import', async (req: Request, res: Response) => {
         const accountName = accountHeaders[c];
         if (!accountName) continue;
 
-        const accountId = await getOrCreateAccount(accountName);
-        const categoryId = await getOrCreateCategory(categoryName, amount < 0);
-        const type = amount >= 0 ? 'income' : 'expense';
-        const amt = Math.round(amount * 100) / 100;
+        await getOrCreateAccount(accountName);
+        await getOrCreateCategory(categoryName, amount < 0);
+        const amt = Math.round(Math.abs(amount) * 100) / 100;
         const currency = Math.abs(amt) > 100000 ? 'COP' : default_currency;
 
-        await AcctTransaction.create({
+        const bankChartId = await getOrCreateChartAccountForBank(accountName);
+        const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+
+        const entry = await AcctJournalEntry.create({
           date,
-          amount: amt,
-          currency,
-          type,
-          entity_id: entityId,
-          category_id: categoryId,
-          payment_account_id: accountId,
           description: descripcion.slice(0, 500),
+          reference: `Import ${i + 1}`,
           created_by: created_by ?? null,
         });
+
+        if (amount > 0) {
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+        } else {
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+        }
         created++;
         rowCreated++;
       }
 
-      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE, usar cuenta apropiada
+      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE
       if (rowCreated === 0) {
         const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
         const amount = parseAmount(importeCell);
         const isMovContable = /SALIDA\s*CONTABLE|INGRESO\s*CONTABLE/i.test(tipoStr);
         if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
           const accountName = isMovContable ? 'Mov. Contable' : accountHeaders[0];
-          const accountId = await getOrCreateAccount(accountName);
-          const categoryId = await getOrCreateCategory(categoryName, amount < 0);
-          const type = amount >= 0 ? 'income' : 'expense';
-          const amt = Math.round(amount * 100) / 100;
-          const currency = Math.abs(amt) > 100000 ? 'COP' : default_currency;
-          await AcctTransaction.create({
+          await getOrCreateAccount(accountName);
+          await getOrCreateCategory(categoryName, amount < 0);
+          const amt = Math.round(Math.abs(amount) * 100) / 100;
+          const currency = Math.abs(amount) > 100000 ? 'COP' : default_currency;
+
+          const bankChartId = await getOrCreateChartAccountForBank(accountName);
+          const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+
+          const entry = await AcctJournalEntry.create({
             date,
-            amount: amt,
-            currency,
-            type,
-            entity_id: entityId,
-            category_id: categoryId,
-            payment_account_id: accountId,
             description: descripcion.slice(0, 500),
+            reference: `Import ${i + 1}`,
             created_by: created_by ?? null,
           });
+
+          if (amount > 0) {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          } else {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          }
           created++;
         }
       }
     }
 
-    res.json({ created, skipped, entities: entityByName.size, categories: categoryByName.size, accounts: accountByName.size });
+    res.json({ created, skipped, entities: entityByName.size, categories: categoryByName.size, accounts: accountByName.size, chart_accounts: chartAccountByBankName.size + chartAccountByCategoryName.size });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Plan de Cuentas (Chart of Accounts) ---
+router.get('/chart-accounts', async (_req: Request, res: Response) => {
+  try {
+    const list = await AcctChartAccount.find({}).sort({ code: 1 }).lean().exec();
+    res.json(list);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+const PUC_BASICO = [
+  { code: '1105', name: 'Caja', type: 'asset' },
+  { code: '1110', name: 'Bancos', type: 'asset' },
+  { code: '1305', name: 'Clientes', type: 'asset' },
+  { code: '2105', name: 'Obligaciones bancarias', type: 'liability' },
+  { code: '2205', name: 'Proveedores', type: 'liability' },
+  { code: '3105', name: 'Capital social', type: 'equity' },
+  { code: '3605', name: 'Utilidades acumuladas', type: 'equity' },
+  { code: '4135', name: 'Ingresos operacionales', type: 'income' },
+  { code: '5105', name: 'Gastos de personal', type: 'expense' },
+  { code: '5110', name: 'Honorarios', type: 'expense' },
+  { code: '5120', name: 'Arrendamientos', type: 'expense' },
+  { code: '5160', name: 'Gastos legales', type: 'expense' },
+  { code: '5195', name: 'Otros gastos', type: 'expense' },
+];
+
+router.post('/chart-accounts/seed', async (req: Request, res: Response) => {
+  try {
+    const count = await AcctChartAccount.countDocuments({}).exec();
+    if (count > 0) {
+      res.status(400).json({ error: 'Ya existen cuentas. Solo se puede cargar PUC básico cuando el plan está vacío.' });
+      return;
+    }
+    for (const c of PUC_BASICO) {
+      await AcctChartAccount.create(c);
+    }
+    const list = await AcctChartAccount.find({}).sort({ code: 1 }).lean().exec();
+    res.json({ created: PUC_BASICO.length, accounts: list });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/chart-accounts', async (req: Request, res: Response) => {
+  try {
+    const { code, name, type, parent_id, is_header, sort_order } = req.body;
+    const created_by = req.body.created_by as string | undefined;
+    if (!code || !name || !type) {
+      res.status(400).json({ error: 'Faltan code, name o type' });
+      return;
+    }
+    const existing = await AcctChartAccount.findOne({ code }).lean().exec();
+    if (existing) {
+      res.status(400).json({ error: `Ya existe una cuenta con código ${code}` });
+      return;
+    }
+    const doc = await AcctChartAccount.create({
+      code: String(code).trim(),
+      name: String(name).trim(),
+      type,
+      parent_id: parent_id ?? null,
+      is_header: is_header ?? false,
+      sort_order: sort_order ?? 0,
+    });
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_chart_account',
+        entity_id: doc.id,
+        action: 'create',
+        summary: `Cuenta creada: ${code} ${name}`,
+      });
+    }
+    res.status(201).json(doc.toObject ? doc.toObject() : doc);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.put('/chart-accounts/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { code, name, type, parent_id, is_header, sort_order } = req.body;
+    const created_by = req.body.created_by as string | undefined;
+    const update: Record<string, unknown> = {};
+    if (code != null) update.code = String(code).trim();
+    if (name != null) update.name = String(name).trim();
+    if (type != null) update.type = type;
+    if (parent_id !== undefined) update.parent_id = parent_id ?? null;
+    if (is_header !== undefined) update.is_header = is_header;
+    if (sort_order !== undefined) update.sort_order = sort_order;
+    const doc = await AcctChartAccount.findOneAndUpdate(
+      { id },
+      { $set: update },
+      { new: true }
+    )
+      .lean()
+      .exec();
+    if (!doc) {
+      res.status(404).json({ error: 'Cuenta no encontrada' });
+      return;
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_chart_account',
+        entity_id: id,
+        action: 'update',
+        summary: `Cuenta actualizada: ${code ?? name}`,
+      });
+    }
+    res.json(doc);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/chart-accounts/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const created_by = req.query.created_by as string | undefined;
+    const count = await AcctJournalEntryLine.countDocuments({ account_id: id }).exec();
+    if (count > 0) {
+      res.status(400).json({ error: `Hay ${count} líneas de asientos con esta cuenta. No se puede eliminar.` });
+      return;
+    }
+    const doc = await AcctChartAccount.findOneAndDelete({ id }).lean().exec();
+    if (!doc) {
+      res.status(404).json({ error: 'Cuenta no encontrada' });
+      return;
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_chart_account',
+        entity_id: id,
+        action: 'delete',
+        summary: `Cuenta eliminada: ${(doc as { code: string; name: string }).code} ${(doc as { name: string }).name}`,
+      });
+    }
+    res.json({ id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Asientos Contables (Journal Entries) ---
+router.get('/journal-entries', async (req: Request, res: Response) => {
+  try {
+    const { start, end } = req.query;
+    const filter: Record<string, unknown> = {};
+    if (start && end) {
+      filter.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      filter.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      filter.date = { $lte: new Date(end as string) };
+    }
+    const list = await AcctJournalEntry.find(filter).sort({ date: -1 }).lean().exec();
+    res.json(list);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.get('/journal-entries/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const entry = await AcctJournalEntry.findOne({ id }).lean().exec();
+    if (!entry) {
+      res.status(404).json({ error: 'Asiento no encontrado' });
+      return;
+    }
+    const lines = await AcctJournalEntryLine.find({ journal_entry_id: id }).lean().exec();
+    const accountIds = [...new Set(lines.map((l) => (l as { account_id: string }).account_id))];
+    const entityIds = [...new Set(lines.map((l) => (l as { entity_id?: string | null }).entity_id).filter(Boolean))];
+    const accounts = accountIds.length > 0
+      ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id code name type').lean().exec()
+      : [];
+    const entities = entityIds.length > 0
+      ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name').lean().exec()
+      : [];
+    const accountMap = new Map((accounts as { id: string; code: string; name: string; type: string }[]).map((a) => [a.id, a]));
+    const entityMap = new Map((entities as { id: string; name: string }[]).map((e) => [e.id, e.name]));
+    const enrichedLines = lines.map((l) => {
+      const line = l as { account_id: string; entity_id?: string | null; debit: number; credit: number };
+      const acc = accountMap.get(line.account_id);
+      return {
+        ...l,
+        account_code: acc?.code,
+        account_name: acc?.name,
+        account_type: acc?.type,
+        entity_name: line.entity_id ? entityMap.get(line.entity_id) ?? null : null,
+      };
+    });
+    res.json({ ...entry, lines: enrichedLines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/journal-entries', async (req: Request, res: Response) => {
+  try {
+    const { date, description, reference, lines } = req.body as {
+      date?: string;
+      description?: string;
+      reference?: string;
+      lines?: Array<{ account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }>;
+    };
+    const created_by = req.body.created_by as string | undefined;
+    if (!date || !lines || !Array.isArray(lines) || lines.length < 2) {
+      res.status(400).json({ error: 'Faltan date y lines (mínimo 2 líneas)' });
+      return;
+    }
+    let totalDebit = 0;
+    let totalCredit = 0;
+    for (const line of lines) {
+      const d = Number(line.debit) || 0;
+      const c = Number(line.credit) || 0;
+      if (d < 0 || c < 0) {
+        res.status(400).json({ error: 'Débitos y créditos deben ser >= 0' });
+        return;
+      }
+      totalDebit += d;
+      totalCredit += c;
+    }
+    const diff = Math.abs(totalDebit - totalCredit);
+    if (diff > 0.01) {
+      res.status(400).json({ error: `La partida no cuadra: débitos ${totalDebit.toFixed(2)} ≠ créditos ${totalCredit.toFixed(2)}` });
+      return;
+    }
+    const entry = await AcctJournalEntry.create({
+      date: new Date(date),
+      description: description ?? '',
+      reference: reference ?? '',
+      created_by: created_by ?? null,
+    });
+    for (const line of lines) {
+      await AcctJournalEntryLine.create({
+        journal_entry_id: entry.id,
+        account_id: line.account_id,
+        entity_id: line.entity_id ?? null,
+        debit: Math.round((Number(line.debit) || 0) * 100) / 100,
+        credit: Math.round((Number(line.credit) || 0) * 100) / 100,
+        description: line.description ?? '',
+        currency: line.currency ?? 'USD',
+      });
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: entry.id,
+        action: 'create',
+        summary: `Asiento creado: ${description ?? date}`,
+      });
+    }
+    const created = await AcctJournalEntry.findOne({ id: entry.id }).lean().exec();
+    const createdLines = await AcctJournalEntryLine.find({ journal_entry_id: entry.id }).lean().exec();
+    res.status(201).json({ ...created, lines: createdLines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.put('/journal-entries/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { date, description, reference, lines } = req.body as {
+      date?: string;
+      description?: string;
+      reference?: string;
+      lines?: Array<{ account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }>;
+    };
+    const created_by = req.body.created_by as string | undefined;
+    const existing = await AcctJournalEntry.findOne({ id }).lean().exec();
+    if (!existing) {
+      res.status(404).json({ error: 'Asiento no encontrado' });
+      return;
+    }
+    const update: Record<string, unknown> = {};
+    if (date != null) update.date = new Date(date);
+    if (description !== undefined) update.description = description;
+    if (reference !== undefined) update.reference = reference;
+    if (Object.keys(update).length > 0) {
+      await AcctJournalEntry.updateOne({ id }, { $set: update }).exec();
+    }
+    if (lines && Array.isArray(lines) && lines.length >= 2) {
+      let totalDebit = 0;
+      let totalCredit = 0;
+      for (const line of lines) {
+        const d = Number(line.debit) || 0;
+        const c = Number(line.credit) || 0;
+        if (d < 0 || c < 0) {
+          res.status(400).json({ error: 'Débitos y créditos deben ser >= 0' });
+          return;
+        }
+        totalDebit += d;
+        totalCredit += c;
+      }
+      const diff = Math.abs(totalDebit - totalCredit);
+      if (diff > 0.01) {
+        res.status(400).json({ error: `La partida no cuadra: débitos ${totalDebit.toFixed(2)} ≠ créditos ${totalCredit.toFixed(2)}` });
+        return;
+      }
+      await AcctJournalEntryLine.deleteMany({ journal_entry_id: id }).exec();
+      for (const line of lines) {
+        await AcctJournalEntryLine.create({
+          journal_entry_id: id,
+          account_id: line.account_id,
+          entity_id: line.entity_id ?? null,
+          debit: Math.round((Number(line.debit) || 0) * 100) / 100,
+          credit: Math.round((Number(line.credit) || 0) * 100) / 100,
+          description: line.description ?? '',
+          currency: line.currency ?? 'USD',
+        });
+      }
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: id,
+        action: 'update',
+        summary: `Asiento actualizado: ${description ?? id}`,
+      });
+    }
+    const updated = await AcctJournalEntry.findOne({ id }).lean().exec();
+    const updatedLines = await AcctJournalEntryLine.find({ journal_entry_id: id }).lean().exec();
+    res.json({ ...updated, lines: updatedLines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/journal-entries/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const created_by = req.query.created_by as string | undefined;
+    const doc = await AcctJournalEntry.findOneAndDelete({ id }).lean().exec();
+    if (!doc) {
+      res.status(404).json({ error: 'Asiento no encontrado' });
+      return;
+    }
+    await AcctJournalEntryLine.deleteMany({ journal_entry_id: id }).exec();
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: id,
+        action: 'delete',
+        summary: `Asiento eliminado`,
+      });
+    }
+    res.json({ id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Trial Balance (Balance de Comprobación) ---
+router.get('/trial-balance', async (req: Request, res: Response) => {
+  try {
+    const { start, end } = req.query;
+    const matchStage: Record<string, unknown> = {};
+    if (start && end) {
+      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      matchStage.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      matchStage.date = { $lte: new Date(end as string) };
+    }
+    const entryMatch = Object.keys(matchStage).length > 0
+      ? await AcctJournalEntry.find(matchStage).select('id').lean().exec()
+      : await AcctJournalEntry.find({}).select('id').lean().exec();
+    const entryIds = (entryMatch as { id: string }[]).map((e) => e.id);
+    if (entryIds.length === 0) {
+      return res.json({ rows: [], total_debit: 0, total_credit: 0 });
+    }
+    const pipeline = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $group: { _id: '$account_id', debit: { $sum: '$debit' }, credit: { $sum: '$credit' } } },
+    ];
+    const results = await AcctJournalEntryLine.aggregate(pipeline).exec();
+    const accountIds = (results as { _id: string }[]).map((r) => r._id);
+    const accounts = accountIds.length > 0
+      ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id code name type').lean().exec()
+      : [];
+    const accountMap = new Map((accounts as { id: string; code: string; name: string; type: string }[]).map((a) => [a.id, a]));
+    const rows = (results as { _id: string; debit: number; credit: number }[])
+      .map((r) => {
+        const acc = accountMap.get(r._id);
+        const debit = Math.round(r.debit * 100) / 100;
+        const credit = Math.round(r.credit * 100) / 100;
+        const balance = debit - credit;
+        return {
+          account_id: r._id,
+          account_code: acc?.code ?? '',
+          account_name: acc?.name ?? '',
+          account_type: acc?.type ?? '',
+          debit,
+          credit,
+          balance,
+        };
+      })
+      .filter((r) => r.debit !== 0 || r.credit !== 0)
+      .sort((a, b) => a.account_code.localeCompare(b.account_code));
+    const totalDebit = rows.reduce((s, r) => s + r.debit, 0);
+    const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
+    res.json({
+      rows,
+      total_debit: Math.round(totalDebit * 100) / 100,
+      total_credit: Math.round(totalCredit * 100) / 100,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });

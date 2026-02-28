@@ -21,3 +21,6 @@ export { AcctEntity } from './AcctEntity.js';
 export { AcctCategory } from './AcctCategory.js';
 export { AcctPaymentAccount } from './AcctPaymentAccount.js';
 export { AcctTransaction } from './AcctTransaction.js';
+export { AcctChartAccount } from './AcctChartAccount.js';
+export { AcctJournalEntry } from './AcctJournalEntry.js';
+export { AcctJournalEntryLine } from './AcctJournalEntryLine.js';

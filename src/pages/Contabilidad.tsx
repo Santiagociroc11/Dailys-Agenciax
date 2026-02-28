@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -22,12 +22,14 @@ import {
   Calendar,
   Search,
   Users,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-type MainTab = 'libro' | 'balance' | 'config';
+type MainTab = 'libro' | 'balance' | 'config' | 'asientos';
+type AsientosTab = 'chart' | 'entries' | 'trial';
 type ConfigTab = 'clients' | 'entities' | 'categories' | 'accounts';
 
 const PERIOD_PRESETS = [
@@ -213,6 +215,76 @@ function ConfigDetailTable({
       </tbody>
     </table>
   );
+}
+
+function LedgerLineTable({
+  lines,
+  onEditEntry,
+  onDeleteEntry,
+}: {
+  lines: LedgerLine[];
+  onEditEntry?: (journalEntryId: string) => void;
+  onDeleteEntry?: (journalEntryId: string) => void;
+}) {
+  const firstEntryIds = React.useMemo(() => {
+    const s = new Set<string>();
+    return new Set(lines.filter((l) => { if (s.has(l.journal_entry_id)) return false; s.add(l.journal_entry_id); return true; }).map((l) => l.journal_entry_id));
+  }, [lines]);
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-gray-600 border-b">
+          <th className="py-2 pr-4">Fecha</th>
+          <th className="py-2 pr-4">Cuenta</th>
+          <th className="py-2 pr-4">Entidad</th>
+          <th className="py-2 pr-4">Descripción</th>
+          <th className="py-2 text-right pr-4">Débito</th>
+          <th className="py-2 text-right pr-4">Crédito</th>
+          <th className="py-2 pr-2">Moneda</th>
+          {(onEditEntry || onDeleteEntry) && <th className="py-2 w-20"></th>}
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((l) => (
+          <tr key={l.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+            <td className="py-2 pr-4">{l.date ? format(new Date(l.date), 'dd/MM/yyyy', { locale: es }) : '—'}</td>
+            <td className="py-2 pr-4">{l.account_code} {l.account_name}</td>
+            <td className="py-2 pr-4">{l.entity_name ?? '—'}</td>
+            <td className="py-2 pr-4 max-w-[200px] truncate">{l.description || '—'}</td>
+            <td className="py-2 text-right pr-4 text-gray-700">{l.debit > 0 ? l.debit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td>
+            <td className="py-2 text-right pr-4 text-gray-700">{l.credit > 0 ? l.credit.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—'}</td>
+            <td className="py-2 pr-2">{l.currency ?? 'USD'}</td>
+            {(onEditEntry || onDeleteEntry) && firstEntryIds.has(l.journal_entry_id) && (
+              <td className="py-2">
+                {onEditEntry && <button type="button" onClick={() => onEditEntry(l.journal_entry_id)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Editar asiento"><Edit className="w-4 h-4 inline" /></button>}
+                {onDeleteEntry && <button type="button" onClick={() => onDeleteEntry(l.journal_entry_id)} className="text-red-600 hover:text-red-800 p-1 ml-1" title="Eliminar asiento"><Trash2 className="w-4 h-4 inline" /></button>}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ledgerLinesToTransactionLike(lines: LedgerLine[]): Array<AcctTransaction & { journal_entry_id?: string }> {
+  return lines.map((l) => {
+    const amt = l.account_type === 'income' ? (l.credit - l.debit) : l.account_type === 'expense' ? -(l.debit - l.credit) : (l.debit - l.credit);
+    return {
+      id: l.id,
+      date: l.date ?? '',
+      amount: amt,
+      currency: l.currency,
+      type: amt >= 0 ? 'income' : 'expense',
+      entity_id: l.entity_id,
+      entity_name: l.entity_name,
+      category_name: l.account_name,
+      payment_account_name: l.account_code,
+      description: l.description,
+      payment_account_id: '',
+      journal_entry_id: l.journal_entry_id,
+    } as AcctTransaction & { journal_entry_id?: string };
+  });
 }
 
 function PygDetailPanel({
@@ -548,6 +620,7 @@ export default function Contabilidad() {
   const [categories, setCategories] = useState<AcctCategory[]>([]);
   const [accounts, setAccounts] = useState<AcctPaymentAccount[]>([]);
   const [transactions, setTransactions] = useState<AcctTransaction[]>([]);
+  const [ledgerLines, setLedgerLines] = useState<LedgerLine[]>([]);
   const [balanceData, setBalanceData] = useState<{ rows: BalanceRow[]; total_usd: number; total_cop: number } | null>(null);
   const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [pygByClientData, setPygByClientData] = useState<{ rows: PygRowByClient[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
@@ -606,6 +679,7 @@ export default function Contabilidad() {
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
   const [pygFilterClient, setPygFilterClient] = useState('');
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
+  const [pygDetailLedgerLines, setPygDetailLedgerLines] = useState<LedgerLine[]>([]);
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
   const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
   const [configCategoryExpanded, setConfigCategoryExpanded] = useState<string | null>(null);
@@ -614,16 +688,34 @@ export default function Contabilidad() {
   const [entitySortBy, setEntitySortBy] = useState<'name' | 'type'>('name');
   const [entitySortOrder, setEntitySortOrder] = useState<'asc' | 'desc'>('asc');
   const [configDetailTransactions, setConfigDetailTransactions] = useState<AcctTransaction[]>([]);
+  const [configDetailLedgerLines, setConfigDetailLedgerLines] = useState<LedgerLine[]>([]);
   const [configDetailLoading, setConfigDetailLoading] = useState(false);
-  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
+  const [editingJournalEntryId, setEditingJournalEntryId] = useState<string | null>(null);
   const [transactionsPage, setTransactionsPage] = useState(1);
   const [transactionsPageSize, setTransactionsPageSize] = useState(25);
-  const [showSelectAllModal, setShowSelectAllModal] = useState(false);
   const [categorySearchFilter, setCategorySearchFilter] = useState('');
   const [modalForTransaction, setModalForTransaction] = useState(false);
   const [showCreateCategoryInTransaction, setShowCreateCategoryInTransaction] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [configSearch, setConfigSearch] = useState('');
+  const [asientosTab, setAsientosTab] = useState<AsientosTab>('chart');
+  const [chartAccounts, setChartAccounts] = useState<AcctChartAccount[]>([]);
+  const [journalEntries, setJournalEntries] = useState<AcctJournalEntry[]>([]);
+  const [trialBalanceData, setTrialBalanceData] = useState<{ rows: { account_code: string; account_name: string; account_type: string; debit: number; credit: number; balance: number }[]; total_debit: number; total_credit: number } | null>(null);
+  const [asientosStart, setAsientosStart] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [asientosEnd, setAsientosEnd] = useState(() => new Date().toISOString().split('T')[0]);
+  const [showChartAccountModal, setShowChartAccountModal] = useState(false);
+  const [showJournalEntryModal, setShowJournalEntryModal] = useState(false);
+  const [currentChartAccount, setCurrentChartAccount] = useState<Partial<AcctChartAccount>>({ code: '', name: '', type: 'expense' });
+  const [currentJournalEntry, setCurrentJournalEntry] = useState<{ date: string; description: string; reference: string; lines: Array<{ account_id: string; entity_id: string | null; debit: number; credit: number; description: string }> }>({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    reference: '',
+    lines: [{ account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }],
+  });
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -690,14 +782,22 @@ export default function Contabilidad() {
 
   useEffect(() => {
     if (!isAdmin) return;
-    if (activeTab === 'libro') fetchTransactions();
+    if (activeTab === 'libro') {
+      fetchLedgerLines();
+      fetchChartAccounts();
+    }
     if (activeTab === 'balance') {
       if (balanceView === 'balance') fetchBalance();
       else if (balanceView === 'pyg') fetchPyg();
       else if (balanceView === 'pyg_client') fetchPygByClient();
       else fetchAccountBalances();
     }
-  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient]);
+    if (activeTab === 'asientos') {
+      fetchChartAccounts();
+      if (asientosTab === 'entries') fetchJournalEntries();
+      if (asientosTab === 'trial') fetchTrialBalance();
+    }
+  }, [isAdmin, activeTab, balanceView, asientosTab, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient, asientosStart, asientosEnd]);
 
   async function fetchClients() {
     try {
@@ -750,6 +850,25 @@ export default function Contabilidad() {
       console.error(e);
       toast.error('Error al cargar transacciones');
       setTransactions([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function fetchLedgerLines() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string; entity_id?: string; account_id?: string; category_id?: string } = {};
+      if (filterStart) params.start = filterStart;
+      if (filterEnd) params.end = filterEnd;
+      if (filterEntity) params.entity_id = filterEntity;
+      if (filterAccount) params.account_id = filterAccount;
+      if (filterCategory) params.category_id = filterCategory;
+      const data = await contabilidadApi.getLedgerLines(params);
+      setLedgerLines(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar libro mayor');
+      setLedgerLines([]);
     } finally {
       setLoading(false);
     }
@@ -807,6 +926,39 @@ export default function Contabilidad() {
     }
   }
 
+  async function fetchChartAccounts() {
+    try {
+      const data = await contabilidadApi.getChartAccounts();
+      setChartAccounts(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar plan de cuentas');
+      setChartAccounts([]);
+    }
+  }
+
+  async function fetchJournalEntries() {
+    try {
+      const data = await contabilidadApi.getJournalEntries({ start: asientosStart, end: asientosEnd });
+      setJournalEntries(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar asientos');
+      setJournalEntries([]);
+    }
+  }
+
+  async function fetchTrialBalance() {
+    try {
+      const data = await contabilidadApi.getTrialBalance({ start: asientosStart, end: asientosEnd });
+      setTrialBalanceData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar balance de comprobación');
+      setTrialBalanceData(null);
+    }
+  }
+
   async function fetchPygDetail(entityId: string | null) {
     if (!entityId) return;
     setPygDetailLoading(true);
@@ -815,11 +967,13 @@ export default function Contabilidad() {
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
       params.entity_id = entityId;
-      const data = await contabilidadApi.getTransactions(params);
-      setPygDetailTransactions(data);
+      const data = await contabilidadApi.getLedgerLines(params);
+      setPygDetailLedgerLines(data);
+      setPygDetailTransactions(ledgerLinesToTransactionLike(data));
     } catch (e) {
       console.error(e);
       toast.error('Error al cargar detalle');
+      setPygDetailLedgerLines([]);
       setPygDetailTransactions([]);
     } finally {
       setPygDetailLoading(false);
@@ -834,11 +988,13 @@ export default function Contabilidad() {
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
       params.client_id = clientId;
-      const data = await contabilidadApi.getTransactions(params);
-      setPygDetailTransactions(data);
+      const data = await contabilidadApi.getLedgerLines(params);
+      setPygDetailLedgerLines(data);
+      setPygDetailTransactions(ledgerLinesToTransactionLike(data));
     } catch (e) {
       console.error(e);
       toast.error('Error al cargar detalle');
+      setPygDetailLedgerLines([]);
       setPygDetailTransactions([]);
     } finally {
       setPygDetailLoading(false);
@@ -864,11 +1020,13 @@ export default function Contabilidad() {
     setConfigDetailLoading(true);
     try {
       const params = type === 'entity' ? { entity_id: id } : { category_id: id };
-      const data = await contabilidadApi.getTransactions(params);
-      setConfigDetailTransactions(data);
+      const data = await contabilidadApi.getLedgerLines(params);
+      setConfigDetailLedgerLines(data);
+      setConfigDetailTransactions(ledgerLinesToTransactionLike(data));
     } catch (e) {
       console.error(e);
       toast.error('Error al cargar detalle');
+      setConfigDetailLedgerLines([]);
       setConfigDetailTransactions([]);
     } finally {
       setConfigDetailLoading(false);
@@ -1180,79 +1338,67 @@ export default function Contabilidad() {
     }
   }
 
-  async function handleDeleteSelected() {
-    const ids = Array.from(selectedTransactionIds).filter((id) => transactions.some((t) => t.id === id));
-    if (ids.length === 0) return;
-    if (!window.confirm(`¿Eliminar ${ids.length} transacción(es) seleccionada(s)?`)) return;
-    try {
-      await Promise.all(ids.map((id) => contabilidadApi.deleteTransaction(id, currentUser?.id)));
-      toast.success(`${ids.length} transacción(es) eliminada(s)`);
-      setSelectedTransactionIds(new Set());
-      fetchTransactions();
-    } catch (e) {
-      toast.error('Error al eliminar');
-    }
-  }
-
-  function toggleSelectTransaction(id: string) {
-    setSelectedTransactionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const sortedTransactions = React.useMemo(() => {
-    let list = [...transactions];
+  const sortedLedgerLines = React.useMemo(() => {
+    let list = [...ledgerLines];
     if (filterSearch.trim()) {
       const q = filterSearch.trim().toLowerCase();
       list = list.filter(
-        (t) =>
-          (t.description || '').toLowerCase().includes(q) ||
-          (t.entity_name || '').toLowerCase().includes(q) ||
-          (t.category_name || '').toLowerCase().includes(q) ||
-          (t.payment_account_name || '').toLowerCase().includes(q) ||
-          (t.amount?.toString() ?? '').includes(q)
+        (l) =>
+          (l.description || '').toLowerCase().includes(q) ||
+          (l.entity_name || '').toLowerCase().includes(q) ||
+          (l.account_name || '').toLowerCase().includes(q) ||
+          (l.account_code || '').toLowerCase().includes(q) ||
+          (l.debit?.toString() ?? '').includes(q) ||
+          (l.credit?.toString() ?? '').includes(q)
       );
     }
     return list.sort((a, b) => {
-      const da = new Date(a.date).getTime();
-      const db = new Date(b.date).getTime();
+      const da = (a.date ? new Date(a.date).getTime() : 0);
+      const db = (b.date ? new Date(b.date).getTime() : 0);
       return sortDateOrder === 'desc' ? db - da : da - db;
     });
-  }, [transactions, sortDateOrder, filterSearch]);
+  }, [ledgerLines, sortDateOrder, filterSearch]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedTransactions.length / transactionsPageSize));
-  const paginatedTransactions = sortedTransactions.slice(
+  const totalPages = Math.max(1, Math.ceil(sortedLedgerLines.length / transactionsPageSize));
+  const paginatedLedgerLines = sortedLedgerLines.slice(
     (transactionsPage - 1) * transactionsPageSize,
     transactionsPage * transactionsPageSize
   );
 
-  const allOnPageSelected = paginatedTransactions.length > 0 && paginatedTransactions.every((t) => selectedTransactionIds.has(t.id));
-  const allTotalSelected = sortedTransactions.length > 0 && sortedTransactions.every((t) => selectedTransactionIds.has(t.id));
-  const hasMultiplePages = sortedTransactions.length > transactionsPageSize;
-
-  function handleSelectAllClick() {
-    if (allTotalSelected) {
-      setSelectedTransactionIds(new Set());
-      return;
-    }
-    if (hasMultiplePages) {
-      setShowSelectAllModal(true);
-    } else {
-      setSelectedTransactionIds(new Set(paginatedTransactions.map((t) => t.id)));
+  async function handleEditJournalEntry(entryId: string) {
+    try {
+      const entry = await contabilidadApi.getJournalEntry(entryId);
+      const lines = (entry.lines ?? []).map((l) => ({
+        account_id: l.account_id,
+        entity_id: l.entity_id ?? null,
+        debit: l.debit ?? 0,
+        credit: l.credit ?? 0,
+        description: l.description ?? '',
+      }));
+      setCurrentJournalEntry({
+        date: entry.date ? new Date(entry.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        description: entry.description ?? '',
+        reference: entry.reference ?? '',
+        lines: lines.length >= 2 ? lines : [...lines, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }],
+      });
+      setEditingJournalEntryId(entryId);
+      setShowJournalEntryModal(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al cargar asiento');
     }
   }
 
-  function selectAllPage() {
-    setSelectedTransactionIds(new Set(paginatedTransactions.map((t) => t.id)));
-    setShowSelectAllModal(false);
-  }
-
-  function selectAllTotal() {
-    setSelectedTransactionIds(new Set(sortedTransactions.map((t) => t.id)));
-    setShowSelectAllModal(false);
+  async function handleDeleteJournalEntry(entryId: string) {
+    if (!confirm('¿Eliminar este asiento? Esta acción no se puede deshacer.')) return;
+    try {
+      await contabilidadApi.deleteJournalEntry(entryId, currentUser?.id);
+      toast.success('Asiento eliminado');
+      fetchLedgerLines();
+      if (asientosTab === 'entries') fetchJournalEntries();
+      fetchTrialBalance();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar');
+    }
   }
 
   async function handleImportCsv() {
@@ -1265,11 +1411,12 @@ export default function Contabilidad() {
     try {
       const result = await contabilidadApi.importCsv(importCsvText, { default_currency: 'USD' }, currentUser?.id);
       setImportResult(result);
-      toast.success(`Importadas ${result.created} transacciones`);
+      toast.success(`Importados ${result.created} asientos`);
       fetchEntities();
       fetchCategories();
       fetchAccounts();
-      fetchTransactions();
+      fetchChartAccounts();
+      fetchLedgerLines();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al importar');
     } finally {
@@ -1291,6 +1438,7 @@ export default function Contabilidad() {
   const mainTabs = [
     { id: 'libro' as MainTab, label: 'Libro mayor', icon: BookOpen },
     { id: 'balance' as MainTab, label: 'Balance', icon: BarChart3 },
+    { id: 'asientos' as MainTab, label: 'Asientos (partida doble)', icon: FileText },
     { id: 'config' as MainTab, label: 'Configuración', icon: Settings },
   ];
 
@@ -1370,6 +1518,13 @@ export default function Contabilidad() {
               onEndChange={setFilterEnd}
               onPreset={(id) => applyPeriodPreset(id, 'libro')}
             />
+            <button
+              type="button"
+              onClick={() => setSortDateOrder((o) => (o === 'desc' ? 'asc' : 'desc'))}
+              className="flex items-center gap-1 px-3 py-2 border rounded-lg text-sm hover:bg-gray-50"
+            >
+              Fecha {sortDateOrder === 'desc' ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
+            </button>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Buscar</label>
               <div className="relative">
@@ -1410,27 +1565,18 @@ export default function Contabilidad() {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-gray-600 mb-1">Cuenta</label>
+              <label className="block text-sm text-gray-600 mb-1">Cuenta contable</label>
               <select
                 value={filterAccount}
                 onChange={(e) => setFilterAccount(e.target.value)}
                 className="px-3 py-2 border rounded-lg text-sm min-w-[160px]"
               >
                 <option value="">Todas</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
+                {chartAccounts.filter((a) => !a.is_header).map((a) => (
+                  <option key={a.id} value={a.id}>{a.code} {a.name}</option>
                 ))}
               </select>
             </div>
-            {selectedTransactionIds.size > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                className="bg-red-100 text-red-700 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2"
-              >
-                <Trash2 className="w-5 h-5" />
-                Borrar {selectedTransactionIds.size} seleccionada(s)
-              </button>
-            )}
             <button
               onClick={() => setShowImportModal(true)}
               className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2"
@@ -1440,27 +1586,23 @@ export default function Contabilidad() {
             </button>
             <button
               onClick={() => {
-                if (accounts.length === 0) {
-                  toast.error('Crea al menos una cuenta de pago en Configuración');
-                  return;
-                }
-                setCurrentTransaction({
+                const nonHeader = chartAccounts.filter((a) => !a.is_header);
+                setCurrentJournalEntry({
                   date: new Date().toISOString().split('T')[0],
-                  amount: 0,
-                  currency: 'USD',
-                  type: 'expense',
-                  entity_id: null,
-                  category_id: null,
-                  payment_account_id: accounts[0]?.id ?? '',
                   description: '',
+                  reference: '',
+                  lines: [
+                    { account_id: nonHeader[0]?.id ?? '', entity_id: null, debit: 0, credit: 0, description: '' },
+                    { account_id: nonHeader[1]?.id ?? '', entity_id: null, debit: 0, credit: 0, description: '' },
+                  ],
                 });
-                setModalMode('create');
-                setShowModal(true);
+                setEditingJournalEntryId(null);
+                setShowJournalEntryModal(true);
               }}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
             >
               <Plus className="w-5 h-5" />
-              Nueva transacción
+              Nuevo asiento
             </button>
           </div>
 
@@ -1468,65 +1610,15 @@ export default function Contabilidad() {
             <div className="animate-pulse h-48 bg-gray-200 rounded-lg" />
           ) : (
             <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 w-10">
-                      <input
-                        type="checkbox"
-                        checked={allTotalSelected || allOnPageSelected}
-                        onChange={handleSelectAllClick}
-                        className="rounded border-gray-300"
-                      />
-                    </th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">
-                      <button
-                        onClick={() => setSortDateOrder((o) => (o === 'desc' ? 'asc' : 'desc'))}
-                        className="flex items-center gap-1 hover:text-indigo-600"
-                      >
-                        Fecha
-                        {sortDateOrder === 'desc' ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
-                      </button>
-                    </th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Entidad</th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Categoría</th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Descripción</th>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Monto</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedTransactions.map((t) => (
-                    <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 w-10">
-                        <input
-                          type="checkbox"
-                          checked={selectedTransactionIds.has(t.id)}
-                          onChange={() => toggleSelectTransaction(t.id)}
-                          className="rounded border-gray-300"
-                        />
-                      </td>
-                      <td className="px-6 py-3">{format(new Date(t.date), 'dd/MM/yyyy', { locale: es })}</td>
-                      <td className="px-6 py-3 capitalize">{t.type}</td>
-                      <td className="px-6 py-3">{t.entity_name ?? '—'}</td>
-                      <td className="px-6 py-3">{t.category_name ?? '—'}</td>
-                      <td className="px-6 py-3 max-w-[200px] truncate">{t.description || '—'}</td>
-                      <td className="px-6 py-3">{t.payment_account_name ?? '—'}</td>
-                      <td className={`px-6 py-3 text-right font-medium ${t.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} {t.currency ?? 'USD'}
-                      </td>
-                      <td className="px-6 py-3 text-right">
-                        <button onClick={() => { setCurrentTransaction(t); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
-                        <button onClick={() => handleDeleteTransaction(t.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {transactions.length === 0 ? (
-                <div className="p-12 text-center text-gray-500">No hay transacciones en el período seleccionado.</div>
+              <div className="overflow-x-auto">
+                <LedgerLineTable
+                  lines={paginatedLedgerLines}
+                  onEditEntry={handleEditJournalEntry}
+                  onDeleteEntry={handleDeleteJournalEntry}
+                />
+              </div>
+              {ledgerLines.length === 0 ? (
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado. Importa un CSV o crea un asiento.</div>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-t border-gray-100 bg-gray-50 text-sm">
                   <div className="flex items-center gap-2">
@@ -1544,7 +1636,7 @@ export default function Contabilidad() {
                       ))}
                     </select>
                     <span className="text-gray-500">
-                      {((transactionsPage - 1) * transactionsPageSize) + 1}–{Math.min(transactionsPage * transactionsPageSize, sortedTransactions.length)} de {sortedTransactions.length}
+                      {((transactionsPage - 1) * transactionsPageSize) + 1}–{Math.min(transactionsPage * transactionsPageSize, sortedLedgerLines.length)} de {sortedLedgerLines.length}
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -2182,7 +2274,11 @@ export default function Contabilidad() {
                               ) : configDetailTransactions.length === 0 ? (
                                 <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
                               ) : (
-                                <ConfigDetailTable transactions={configDetailTransactions} showEntity={false} showCategory onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }} />
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity={false} showCategory onEditTransaction={(t) => {
+                    const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
+                    if (jeId) handleEditJournalEntry(jeId);
+                    else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
+                  }} />
                               )}
                             </td>
                           </tr>
@@ -2286,7 +2382,11 @@ export default function Contabilidad() {
                               ) : configDetailTransactions.length === 0 ? (
                                 <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
                               ) : (
-                                <ConfigDetailTable transactions={configDetailTransactions} showEntity showCategory={false} onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }} />
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity showCategory={false} onEditTransaction={(t) => {
+                    const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
+                    if (jeId) handleEditJournalEntry(jeId);
+                    else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
+                  }} />
                               )}
                             </td>
                           </tr>
@@ -2346,6 +2446,219 @@ export default function Contabilidad() {
         </div>
       )}
 
+      {activeTab === 'asientos' && (
+        <div>
+          <div className="flex flex-wrap gap-4 mb-6 items-center">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAsientosTab('chart')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${asientosTab === 'chart' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Plan de cuentas
+              </button>
+              <button
+                onClick={() => setAsientosTab('entries')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${asientosTab === 'entries' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Asientos
+              </button>
+              <button
+                onClick={() => setAsientosTab('trial')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${asientosTab === 'trial' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Balance de comprobación
+              </button>
+            </div>
+            {(asientosTab === 'entries' || asientosTab === 'trial') && (
+              <DateRangePicker
+                start={asientosStart}
+                end={asientosEnd}
+                onStartChange={setAsientosStart}
+                onEndChange={setAsientosEnd}
+                onPreset={(id) => {
+                  const setStart = setAsientosStart;
+                  const setEnd = setAsientosEnd;
+                  const now = new Date();
+                  const year = now.getFullYear();
+                  switch (id) {
+                    case 'all': setStart(''); setEnd(''); break;
+                    case 'this-year': setStart(`${year}-01-01`); setEnd(now.toISOString().split('T')[0]); break;
+                    case 'last-year': setStart(`${year - 1}-01-01`); setEnd(`${year - 1}-12-31`); break;
+                    case 'this-month':
+                      setStart(new Date(year, now.getMonth(), 1).toISOString().split('T')[0]);
+                      setEnd(now.toISOString().split('T')[0]);
+                      break;
+                    case 'last-month': {
+                      const lm = now.getMonth() - 1;
+                      const lmy = lm < 0 ? year - 1 : year;
+                      const lmn = lm < 0 ? 11 : lm;
+                      setStart(new Date(lmy, lmn, 1).toISOString().split('T')[0]);
+                      setEnd(new Date(lmy, lmn + 1, 0).toISOString().split('T')[0]);
+                      break;
+                    }
+                    default: break;
+                  }
+                }}
+              />
+            )}
+          </div>
+
+          {asientosTab === 'chart' && (
+            <div>
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => { setCurrentChartAccount({ code: '', name: '', type: 'expense' }); setShowChartAccountModal(true); }}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                >
+                  <Plus className="w-5 h-5" />
+                  Nueva cuenta
+                </button>
+                {chartAccounts.length === 0 && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await contabilidadApi.seedChartAccounts();
+                        toast.success(`PUC básico cargado: ${res.created} cuentas`);
+                        fetchChartAccounts();
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Error');
+                      }
+                    }}
+                    className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
+                  >
+                    Cargar PUC básico
+                  </button>
+                )}
+              </div>
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Código</th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartAccounts.map((a) => (
+                      <tr key={a.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-6 py-3 font-mono">{a.code}</td>
+                        <td className="px-6 py-3">{a.name}</td>
+                        <td className="px-6 py-3 capitalize">{a.type}</td>
+                        <td className="px-6 py-3 text-right">
+                          <button onClick={() => { setCurrentChartAccount(a); setShowChartAccountModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
+                          <button onClick={async () => { if (window.confirm('¿Eliminar esta cuenta?')) { try { await contabilidadApi.deleteChartAccount(a.id, currentUser?.id); toast.success('Cuenta eliminada'); fetchChartAccounts(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } } }} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {chartAccounts.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">
+                    No hay cuentas en el plan. Crea cuentas para usar partida doble (activo, pasivo, patrimonio, ingresos, gastos).
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {asientosTab === 'entries' && (
+            <div>
+              <button
+                onClick={() => {
+                  setCurrentJournalEntry({
+                    date: new Date().toISOString().split('T')[0],
+                    description: '',
+                    reference: '',
+                    lines: [
+                      { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' },
+                      { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' },
+                    ],
+                  });
+                  setShowJournalEntryModal(true);
+                }}
+                className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Nuevo asiento
+              </button>
+              <div className="bg-white rounded-lg shadow overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Fecha</th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Descripción</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {journalEntries.map((e) => (
+                      <tr key={e.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-6 py-3">{format(new Date(e.date), 'd MMM yyyy', { locale: es })}</td>
+                        <td className="px-6 py-3">{e.description || '—'}</td>
+                        <td className="px-6 py-3 text-right">
+                          <button onClick={async () => { try { await contabilidadApi.deleteJournalEntry(e.id, currentUser?.id); toast.success('Asiento eliminado'); fetchJournalEntries(); fetchTrialBalance(); } catch (err) { toast.error(err instanceof Error ? err.message : 'Error'); } }} className="text-red-600 hover:text-red-800 p-1"><Trash2 className="w-4 h-4 inline" /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {journalEntries.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">No hay asientos en el período. Crea asientos con partida doble (débitos = créditos).</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {asientosTab === 'trial' && trialBalanceData && (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Código</th>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Débitos</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Créditos</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trialBalanceData.rows.map((r) => (
+                    <tr key={r.account_id} className="border-t border-gray-100">
+                      <td className="px-6 py-3 font-mono">{r.account_code}</td>
+                      <td className="px-6 py-3">{r.account_name}</td>
+                      <td className="px-6 py-3 text-right">{r.debit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-6 py-3 text-right">{r.credit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className={`px-6 py-3 text-right font-medium ${r.balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {r.balance >= 0 ? '+' : ''}{r.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-100 font-semibold">
+                  <tr>
+                    <td colSpan={2} className="px-6 py-3">Total</td>
+                    <td className="px-6 py-3 text-right">{trialBalanceData.total_debit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-6 py-3 text-right">{trialBalanceData.total_credit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className={`px-6 py-3 text-right ${Math.abs(trialBalanceData.total_debit - trialBalanceData.total_credit) < 0.01 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {Math.abs(trialBalanceData.total_debit - trialBalanceData.total_credit) < 0.01 ? 'Cuadra' : 'No cuadra'}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              {trialBalanceData.rows.length === 0 && (
+                <div className="p-8 text-center text-gray-500">No hay movimientos en el período.</div>
+              )}
+            </div>
+          )}
+
+          {asientosTab === 'trial' && !trialBalanceData && (
+            <div className="p-8 text-center text-gray-500">Cargando balance de comprobación…</div>
+          )}
+        </div>
+      )}
+
       {pygDetailModalEntity && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPygDetailModalEntity(null)}>
           <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -2361,7 +2674,11 @@ export default function Contabilidad() {
               ) : (
                 <PygDetailPanel
                   transactions={pygDetailTransactions}
-                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
+                  onEditTransaction={(t) => {
+                    const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
+                    if (jeId) handleEditJournalEntry(jeId);
+                    else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
+                  }}
                 />
               )}
             </div>
@@ -2384,7 +2701,11 @@ export default function Contabilidad() {
               ) : (
                 <PygDetailPanel
                   transactions={pygDetailTransactions}
-                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
+                  onEditTransaction={(t) => {
+                    const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
+                    if (jeId) handleEditJournalEntry(jeId);
+                    else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
+                  }}
                 />
               )}
             </div>
@@ -2392,36 +2713,190 @@ export default function Contabilidad() {
         </div>
       )}
 
-      {showSelectAllModal && (
+      {showChartAccountModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-4">
-            <h3 className="font-semibold text-lg mb-3">Seleccionar transacciones</h3>
-            <p className="text-gray-600 text-sm mb-4">
-              ¿Seleccionar solo las de esta página o todas las transacciones filtradas?
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={selectAllPage}
-                className="w-full px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-left"
-              >
-                Solo esta página ({paginatedTransactions.length})
-              </button>
-              <button
-                type="button"
-                onClick={selectAllTotal}
-                className="w-full px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-left"
-              >
-                Todas ({sortedTransactions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSelectAllModal(false)}
-                className="w-full px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 mt-2"
-              >
-                Cancelar
-              </button>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-4">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">{currentChartAccount.id ? 'Editar cuenta' : 'Nueva cuenta'}</h3>
+              <button onClick={() => setShowChartAccountModal(false)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
             </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const code = (currentChartAccount.code ?? '').trim();
+                const name = (currentChartAccount.name ?? '').trim();
+                const type = currentChartAccount.type ?? 'expense';
+                if (!code || !name) { toast.error('Código y nombre son requeridos'); return; }
+                try {
+                  if (currentChartAccount.id) {
+                    await contabilidadApi.updateChartAccount(currentChartAccount.id, { code, name, type }, currentUser?.id);
+                    toast.success('Cuenta actualizada');
+                  } else {
+                    await contabilidadApi.createChartAccount({ code, name, type }, currentUser?.id);
+                    toast.success('Cuenta creada');
+                  }
+                  setShowChartAccountModal(false);
+                  fetchChartAccounts();
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Error');
+                }
+              }}
+              className="p-4 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Código</label>
+                <input type="text" value={currentChartAccount.code ?? ''} onChange={(e) => setCurrentChartAccount((p) => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="1105" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                <input type="text" value={currentChartAccount.name ?? ''} onChange={(e) => setCurrentChartAccount((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="Caja" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                <select value={currentChartAccount.type ?? 'expense'} onChange={(e) => setCurrentChartAccount((p) => ({ ...p, type: e.target.value as AcctChartAccount['type'] }))} className="w-full px-3 py-2 border rounded-lg">
+                  <option value="asset">Activo</option>
+                  <option value="liability">Pasivo</option>
+                  <option value="equity">Patrimonio</option>
+                  <option value="income">Ingreso</option>
+                  <option value="expense">Gasto</option>
+                </select>
+              </div>
+              <div className="flex gap-2 pt-4">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Guardar</button>
+                <button type="button" onClick={() => setShowChartAccountModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showJournalEntryModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">{editingJournalEntryId ? 'Editar asiento' : 'Nuevo asiento'}</h3>
+              <button onClick={() => setShowJournalEntryModal(false)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const totalDebit = currentJournalEntry.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+                const totalCredit = currentJournalEntry.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+                if (Math.abs(totalDebit - totalCredit) > 0.01) {
+                  toast.error(`La partida no cuadra: débitos ${totalDebit.toFixed(2)} ≠ créditos ${totalCredit.toFixed(2)}`);
+                  return;
+                }
+                const validLines = currentJournalEntry.lines.filter((l) => l.account_id && ((Number(l.debit) || 0) > 0 || (Number(l.credit) || 0) > 0));
+                if (validLines.length < 2) {
+                  toast.error('Mínimo 2 líneas con cuenta y monto');
+                  return;
+                }
+                try {
+                  const payload = {
+                    date: currentJournalEntry.date,
+                    description: currentJournalEntry.description,
+                    reference: currentJournalEntry.reference,
+                    lines: validLines.map((l) => ({
+                      account_id: l.account_id,
+                      entity_id: l.entity_id || null,
+                      debit: Number(l.debit) || 0,
+                      credit: Number(l.credit) || 0,
+                      description: l.description || '',
+                    })),
+                  };
+                  if (editingJournalEntryId) {
+                    await contabilidadApi.updateJournalEntry(editingJournalEntryId, payload, currentUser?.id);
+                    toast.success('Asiento actualizado');
+                  } else {
+                    await contabilidadApi.createJournalEntry(payload, currentUser?.id);
+                    toast.success('Asiento creado');
+                  }
+                  setShowJournalEntryModal(false);
+                  setEditingJournalEntryId(null);
+                  fetchLedgerLines();
+                  fetchJournalEntries();
+                  fetchTrialBalance();
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Error');
+                }
+              }}
+              className="p-4 space-y-4"
+            >
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
+                  <input type="date" value={currentJournalEntry.date} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, date: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Referencia</label>
+                  <input type="text" value={currentJournalEntry.reference} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, reference: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="Opcional" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                <input type="text" value={currentJournalEntry.description} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, description: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" placeholder="Descripción del asiento" />
+              </div>
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Líneas (débitos = créditos)</label>
+                  <button type="button" onClick={() => setCurrentJournalEntry((p) => ({ ...p, lines: [...p.lines, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }] }))} className="text-indigo-600 text-sm hover:underline">+ Agregar línea</button>
+                </div>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Cuenta</th>
+                        <th className="px-2 py-1 text-left">Centro costo</th>
+                        <th className="px-2 py-1 text-right w-24">Débito</th>
+                        <th className="px-2 py-1 text-right w-24">Crédito</th>
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentJournalEntry.lines.map((line, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="px-2 py-1">
+                            <select value={line.account_id} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, account_id: e.target.value } : l) }))} className="w-full px-2 py-1 border rounded text-sm" required>
+                              <option value="">Seleccionar</option>
+                              {chartAccounts.map((a) => (
+                                <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1">
+                            <select value={line.entity_id ?? ''} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, entity_id: e.target.value || null } : l) }))} className="w-full px-2 py-1 border rounded text-sm">
+                              <option value="">—</option>
+                              {entities.map((e) => (
+                                <option key={e.id} value={e.id}>{e.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1">
+                            <input type="number" step="0.01" min="0" value={line.debit || ''} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, debit: parseFloat(e.target.value) || 0 } : l) }))} className="w-full px-2 py-1 border rounded text-sm text-right" placeholder="0" />
+                          </td>
+                          <td className="px-2 py-1">
+                            <input type="number" step="0.01" min="0" value={line.credit || ''} onChange={(e) => setCurrentJournalEntry((p) => ({ ...p, lines: p.lines.map((l, j) => j === i ? { ...l, credit: parseFloat(e.target.value) || 0 } : l) }))} className="w-full px-2 py-1 border rounded text-sm text-right" placeholder="0" />
+                          </td>
+                          <td className="px-1">
+                            {currentJournalEntry.lines.length > 2 && (
+                              <button type="button" onClick={() => setCurrentJournalEntry((p) => ({ ...p, lines: p.lines.filter((_, j) => j !== i) }))} className="text-red-500 hover:text-red-700"><X className="w-4 h-4" /></button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Total débitos: {currentJournalEntry.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0).toFixed(2)} — Total créditos: {currentJournalEntry.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0).toFixed(2)}
+                  {Math.abs(currentJournalEntry.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0) - currentJournalEntry.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0)) < 0.01 ? ' ✓' : ' (debe cuadrar)'}
+                </p>
+              </div>
+              <div className="flex gap-2 pt-4">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Crear asiento</button>
+                <button type="button" onClick={() => setShowJournalEntryModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
