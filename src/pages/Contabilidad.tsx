@@ -131,26 +131,65 @@ function DateRangePicker({
   );
 }
 
+type ConfigDetailSortBy = 'date' | 'entity' | 'category' | 'description' | 'account' | 'amount';
+
 function ConfigDetailTable({
   transactions,
   showEntity = true,
   showCategory = true,
+  onEditTransaction,
 }: {
   transactions: AcctTransaction[];
   showEntity?: boolean;
   showCategory?: boolean;
+  onEditTransaction?: (t: AcctTransaction) => void;
 }) {
-  const sorted = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const [sortBy, setSortBy] = useState<ConfigDetailSortBy>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (col: ConfigDetailSortBy) => {
+    const isSame = sortBy === col;
+    const newOrder = isSame ? (sortOrder === 'asc' ? 'desc' : 'asc') : (col === 'date' || col === 'amount' ? 'desc' : 'asc');
+    setSortBy(col);
+    setSortOrder(newOrder);
+  };
+
+  const sorted = [...transactions].sort((a, b) => {
+    let cmp = 0;
+    if (sortBy === 'date') {
+      cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+    } else if (sortBy === 'entity') {
+      cmp = (a.entity_name ?? '').localeCompare(b.entity_name ?? '', 'es');
+    } else if (sortBy === 'category') {
+      cmp = (a.category_name ?? '').localeCompare(b.category_name ?? '', 'es');
+    } else if (sortBy === 'description') {
+      cmp = (a.description ?? '').localeCompare(b.description ?? '', 'es');
+    } else if (sortBy === 'account') {
+      cmp = (a.payment_account_name ?? '').localeCompare(b.payment_account_name ?? '', 'es');
+    } else {
+      cmp = (a.amount ?? 0) - (b.amount ?? 0);
+    }
+    return sortOrder === 'asc' ? cmp : -cmp;
+  });
+
+  const SortBtn = ({ col, label }: { col: ConfigDetailSortBy; label: string }) => (
+    <button type="button" onClick={() => handleSort(col)} className="flex items-center gap-1 hover:text-indigo-600">
+      {label}
+      {sortBy === col && (sortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+    </button>
+  );
+
   return (
     <table className="w-full text-sm">
       <thead>
         <tr className="text-left text-gray-600 border-b">
-          <th className="py-2 pr-4">Fecha</th>
-          {showEntity && <th className="py-2 pr-4">Proyecto</th>}
-          {showCategory && <th className="py-2 pr-4">Categoría</th>}
-          <th className="py-2 pr-4">Descripción</th>
-          <th className="py-2 pr-4">Cuenta</th>
-          <th className="py-2 text-right">Monto</th>
+          <th className="py-2 pr-4"><SortBtn col="date" label="Fecha" /></th>
+          {showEntity && <th className="py-2 pr-4"><SortBtn col="entity" label="Proyecto" /></th>}
+          {showCategory && <th className="py-2 pr-4"><SortBtn col="category" label="Categoría" /></th>}
+          <th className="py-2 pr-4"><SortBtn col="description" label="Descripción" /></th>
+          <th className="py-2 pr-4"><SortBtn col="account" label="Cuenta" /></th>
+          <th className="py-2 text-right"><SortBtn col="amount" label="Monto" /></th>
+          {onEditTransaction && <th className="py-2 w-10"></th>}
         </tr>
       </thead>
       <tbody>
@@ -164,6 +203,11 @@ function ConfigDetailTable({
             <td className={`py-2 text-right font-medium ${(t.amount ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
               {(t.amount ?? 0) >= 0 ? '+' : ''}{(t.amount ?? 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
             </td>
+            {onEditTransaction && (
+              <td className="py-2">
+                <button type="button" onClick={() => onEditTransaction(t)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Editar"><Edit className="w-4 h-4 inline" /></button>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -384,6 +428,7 @@ export default function Contabilidad() {
   const [transactionsPageSize, setTransactionsPageSize] = useState(25);
   const [showSelectAllModal, setShowSelectAllModal] = useState(false);
   const [categorySearchFilter, setCategorySearchFilter] = useState('');
+  const [modalForTransaction, setModalForTransaction] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -405,7 +450,10 @@ export default function Contabilidad() {
   }, [filterStart, filterEnd, filterEntity, filterCategory, filterAccount]);
 
   useEffect(() => {
-    if (!showModal) setCategorySearchFilter('');
+    if (!showModal) {
+      setCategorySearchFilter('');
+      setModalForTransaction(false);
+    }
   }, [showModal]);
 
   useEffect(() => {
@@ -707,6 +755,8 @@ export default function Contabilidad() {
         description: '',
       });
       fetchTransactions();
+      if (modalForTransaction && configEntityExpanded) fetchConfigDetail('entity', configEntityExpanded);
+      if (modalForTransaction && configCategoryExpanded) fetchConfigDetail('category', configCategoryExpanded);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error');
       toast.error(err instanceof Error ? err.message : 'Error');
@@ -1453,7 +1503,7 @@ export default function Contabilidad() {
                               ) : configDetailTransactions.length === 0 ? (
                                 <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
                               ) : (
-                                <ConfigDetailTable transactions={configDetailTransactions} showEntity={false} showCategory />
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity={false} showCategory onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }} />
                               )}
                             </td>
                           </tr>
@@ -1552,7 +1602,7 @@ export default function Contabilidad() {
                               ) : configDetailTransactions.length === 0 ? (
                                 <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
                               ) : (
-                                <ConfigDetailTable transactions={configDetailTransactions} showEntity showCategory={false} />
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity showCategory={false} onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }} />
                               )}
                             </td>
                           </tr>
@@ -1641,22 +1691,22 @@ export default function Contabilidad() {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="font-semibold text-lg">
-                {activeTab === 'libro' && (modalMode === 'create' ? 'Nueva transacción' : 'Editar transacción')}
-                {activeTab === 'config' && configTab === 'entities' && (modalMode === 'create' ? 'Nueva entidad' : 'Editar entidad')}
-                {activeTab === 'config' && configTab === 'categories' && (modalMode === 'create' ? 'Nueva categoría' : 'Editar categoría')}
-                {activeTab === 'config' && configTab === 'accounts' && (modalMode === 'create' ? 'Nueva cuenta' : 'Editar cuenta')}
+                {(activeTab === 'libro' || modalForTransaction) && (modalMode === 'create' ? 'Nueva transacción' : 'Editar transacción')}
+                {activeTab === 'config' && !modalForTransaction && configTab === 'entities' && (modalMode === 'create' ? 'Nueva entidad' : 'Editar entidad')}
+                {activeTab === 'config' && !modalForTransaction && configTab === 'categories' && (modalMode === 'create' ? 'Nueva categoría' : 'Editar categoría')}
+                {activeTab === 'config' && !modalForTransaction && configTab === 'accounts' && (modalMode === 'create' ? 'Nueva cuenta' : 'Editar cuenta')}
               </h3>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={
-              activeTab === 'libro' ? handleSaveTransaction :
+              (activeTab === 'libro' || modalForTransaction) ? handleSaveTransaction :
               configTab === 'entities' ? handleSaveEntity :
               configTab === 'categories' ? handleSaveCategory :
               handleSaveAccount
             } className="p-4 space-y-4">
               {error && <div className="text-red-600 text-sm">{error}</div>}
 
-              {activeTab === 'libro' && (
+              {(activeTab === 'libro' || modalForTransaction) && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
@@ -1743,7 +1793,7 @@ export default function Contabilidad() {
                 </>
               )}
 
-              {activeTab === 'config' && configTab === 'entities' && (
+              {activeTab === 'config' && !modalForTransaction && configTab === 'entities' && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
@@ -1760,7 +1810,7 @@ export default function Contabilidad() {
                 </>
               )}
 
-              {activeTab === 'config' && configTab === 'categories' && (
+              {activeTab === 'config' && !modalForTransaction && configTab === 'categories' && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
@@ -1785,7 +1835,7 @@ export default function Contabilidad() {
                 </>
               )}
 
-              {activeTab === 'config' && configTab === 'accounts' && (
+              {activeTab === 'config' && !modalForTransaction && configTab === 'accounts' && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
