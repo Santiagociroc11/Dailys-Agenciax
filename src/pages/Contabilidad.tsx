@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type AccountBalanceRow } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -550,8 +550,9 @@ export default function Contabilidad() {
   const [transactions, setTransactions] = useState<AcctTransaction[]>([]);
   const [balanceData, setBalanceData] = useState<{ rows: BalanceRow[]; total_usd: number; total_cop: number } | null>(null);
   const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
+  const [pygByClientData, setPygByClientData] = useState<{ rows: PygRowByClient[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; total_usd: number; total_cop: number } | null>(null);
-  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'accounts'>('balance');
+  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'accounts'>('balance');
 
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -599,6 +600,8 @@ export default function Contabilidad() {
   const [sortDateOrder, setSortDateOrder] = useState<'asc' | 'desc'>('desc');
   const [pygSortBy, setPygSortBy] = useState<'entity' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
   const [pygSortOrder, setPygSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [pygClientSortBy, setPygClientSortBy] = useState<'client' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
+  const [pygClientSortOrder, setPygClientSortOrder] = useState<'asc' | 'desc'>('desc');
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
   const [pygFilterClient, setPygFilterClient] = useState('');
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
@@ -619,6 +622,7 @@ export default function Contabilidad() {
   const [modalForTransaction, setModalForTransaction] = useState(false);
   const [showCreateCategoryInTransaction, setShowCreateCategoryInTransaction] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [configSearch, setConfigSearch] = useState('');
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -636,6 +640,39 @@ export default function Contabilidad() {
       setShowModal(false);
     }
   }, [activeTab, configTab]);
+
+  const filteredClients = React.useMemo(() => {
+    if (!configSearch.trim()) return clients;
+    const q = configSearch.trim().toLowerCase();
+    return clients.filter((c) => (c.name ?? '').toLowerCase().includes(q));
+  }, [clients, configSearch]);
+
+  const filteredEntities = React.useMemo(() => {
+    if (!configSearch.trim()) return entities;
+    const q = configSearch.trim().toLowerCase();
+    return entities.filter((e) => {
+      const name = (e.name ?? '').toLowerCase();
+      const clientName = (e.client_id ? clients.find((c) => c.id === e.client_id)?.name ?? '' : '').toLowerCase();
+      const type = (e.type ?? '').toLowerCase();
+      return name.includes(q) || clientName.includes(q) || type.includes(q);
+    });
+  }, [entities, clients, configSearch]);
+
+  const filteredCategories = React.useMemo(() => {
+    if (!configSearch.trim()) return categories;
+    const q = configSearch.trim().toLowerCase();
+    return categories.filter((c) =>
+      (c.name ?? '').toLowerCase().includes(q) || (c.type ?? '').toLowerCase().includes(q)
+    );
+  }, [categories, configSearch]);
+
+  const filteredAccounts = React.useMemo(() => {
+    if (!configSearch.trim()) return accounts;
+    const q = configSearch.trim().toLowerCase();
+    return accounts.filter((a) =>
+      (a.name ?? '').toLowerCase().includes(q) || (a.currency ?? '').toLowerCase().includes(q)
+    );
+  }, [accounts, configSearch]);
 
   useEffect(() => {
     setTransactionsPage(1);
@@ -656,6 +693,7 @@ export default function Contabilidad() {
     if (activeTab === 'balance') {
       if (balanceView === 'balance') fetchBalance();
       else if (balanceView === 'pyg') fetchPyg();
+      else if (balanceView === 'pyg_client') fetchPygByClient();
       else fetchAccountBalances();
     }
   }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient]);
@@ -746,6 +784,23 @@ export default function Contabilidad() {
       console.error(e);
       toast.error('Error al cargar P&G');
       setPygData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchPygByClient() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      const data = await contabilidadApi.getPygByClient(params);
+      setPygByClientData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar P&G por cliente');
+      setPygByClientData(null);
     } finally {
       setLoading(false);
     }
@@ -1509,6 +1564,12 @@ export default function Contabilidad() {
                 P&G por proyecto
               </button>
               <button
+                onClick={() => setBalanceView('pyg_client')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_client' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                P&G por cliente
+              </button>
+              <button
                 onClick={() => setBalanceView('accounts')}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'accounts' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
@@ -1524,7 +1585,7 @@ export default function Contabilidad() {
                 onPreset={(id) => applyPeriodPreset(id, 'balance')}
               />
             )}
-            {balanceView === 'pyg' && (
+            {(balanceView === 'pyg' || balanceView === 'pyg_client') && balanceView === 'pyg' && (
               <>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Cliente</label>
@@ -1721,6 +1782,112 @@ export default function Contabilidad() {
             </div>
             );
             })()
+          ) : balanceView === 'pyg_client' && pygByClientData ? (
+            (() => {
+              const hasCopPygClient = pygByClientData.total_cop.ingresos !== 0 || pygByClientData.total_cop.gastos !== 0 || pygByClientData.total_cop.resultado !== 0 ||
+                pygByClientData.rows.some((r) => r.cop.ingresos !== 0 || r.cop.gastos !== 0 || r.cop.resultado !== 0);
+              const sortedPygClientRows = [...pygByClientData.rows].sort((a, b) => {
+                let cmp = 0;
+                if (pygClientSortBy === 'client') {
+                  cmp = (a.client_name ?? '').localeCompare(b.client_name ?? '', 'es');
+                } else if (pygClientSortBy === 'ing_usd') cmp = a.usd.ingresos - b.usd.ingresos;
+                else if (pygClientSortBy === 'gastos_usd') cmp = a.usd.gastos - b.usd.gastos;
+                else if (pygClientSortBy === 'resultado_usd') cmp = a.usd.resultado - b.usd.resultado;
+                else if (pygClientSortBy === 'ing_cop') cmp = a.cop.ingresos - b.cop.ingresos;
+                else if (pygClientSortBy === 'gastos_cop') cmp = a.cop.gastos - b.cop.gastos;
+                else cmp = a.cop.resultado - b.cop.resultado;
+                return pygClientSortOrder === 'asc' ? cmp : -cmp;
+              });
+              const handlePygClientSort = (col: typeof pygClientSortBy) => {
+                const isSame = pygClientSortBy === col;
+                const newOrder = isSame ? (pygClientSortOrder === 'asc' ? 'desc' : 'asc') : (col === 'client' ? 'asc' : 'desc');
+                setPygClientSortBy(col);
+                setPygClientSortOrder(newOrder);
+              };
+              const PygClientSortBtn = ({ col, label }: { col: typeof pygClientSortBy; label: string }) => (
+                <button type="button" onClick={() => handlePygClientSort(col)} className="flex items-center gap-1 hover:text-indigo-600 w-full justify-end">
+                  {label}
+                  {pygClientSortBy === col && (pygClientSortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                </button>
+              );
+              return (
+            <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Cliente</th>
+                    <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">USD</th>
+                    {hasCopPygClient && <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">COP</th>}
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <th>
+                      <button type="button" onClick={() => handlePygClientSort('client')} className="flex items-center gap-1 hover:text-indigo-600">
+                        Cliente
+                        {pygClientSortBy === 'client' && (pygClientSortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                      </button>
+                    </th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygClientSortBtn col="ing_usd" label="Ingresos" /></th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygClientSortBtn col="gastos_usd" label="Gastos" /></th>
+                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500"><PygClientSortBtn col="resultado_usd" label="Resultado" /></th>
+                    {hasCopPygClient && (
+                      <>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l"><PygClientSortBtn col="ing_cop" label="Ingresos" /></th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l"><PygClientSortBtn col="gastos_cop" label="Gastos" /></th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l"><PygClientSortBtn col="resultado_cop" label="Resultado" /></th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedPygClientRows.map((r) => {
+                    const rowKey = r.client_id ?? 'sin-cliente';
+                    return (
+                      <tr key={rowKey} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-6 py-3 font-medium">{r.client_name}</td>
+                        <td className="px-2 py-3 text-right text-emerald-600">{r.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-2 py-3 text-right text-red-600">{r.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {r.usd.resultado >= 0 ? '+' : ''}{r.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        {hasCopPygClient && (
+                          <>
+                            <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                            <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                            <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-100 font-semibold">
+                  <tr>
+                    <td className="px-6 py-3">Total</td>
+                    <td className="px-2 py-3 text-right text-emerald-700">{pygByClientData.total_usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-2 py-3 text-right text-red-700">{pygByClientData.total_usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className={`px-2 py-3 text-right ${pygByClientData.total_usd.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {pygByClientData.total_usd.resultado >= 0 ? '+' : ''}{pygByClientData.total_usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    {hasCopPygClient && (
+                      <>
+                        <td className="px-2 py-3 text-right text-emerald-700 border-l">{pygByClientData.total_cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className="px-2 py-3 text-right text-red-700">{pygByClientData.total_cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className={`px-2 py-3 text-right ${pygByClientData.total_cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {pygByClientData.total_cop.resultado >= 0 ? '+' : ''}{pygByClientData.total_cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                </tfoot>
+              </table>
+              {pygByClientData.rows.length === 0 && (
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado. Asigna clientes a las entidades para ver el P&G por cliente.</div>
+              )}
+            </div>
+            );
+            })()
           ) : balanceData ? (
             (() => {
               const hasCopBalance = balanceData.total_cop !== 0 || balanceData.rows.some((r) => r.cop !== 0);
@@ -1788,19 +1955,45 @@ export default function Contabilidad() {
 
       {activeTab === 'config' && (
         <div>
-          <div className="flex gap-2 mb-6">
-            {configTabs.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setConfigTab(t.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-                  configTab === t.id ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                <t.icon className="w-4 h-4" />
-                {t.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap gap-4 mb-6 items-center">
+            <div className="flex gap-2">
+              {configTabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setConfigTab(t.id)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
+                    configTab === t.id ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  <t.icon className="w-4 h-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-1 min-w-[200px] max-w-xs items-center gap-2">
+              <Search className="w-5 h-5 text-gray-400 shrink-0" />
+              <input
+                type="text"
+                placeholder={
+                  configTab === 'clients' ? 'Buscar clientes...' :
+                  configTab === 'entities' ? 'Buscar entidades...' :
+                  configTab === 'categories' ? 'Buscar categorías...' :
+                  'Buscar cuentas...'
+                }
+                value={configSearch}
+                onChange={(e) => setConfigSearch(e.target.value)}
+                className="flex-1 px-3 py-2 border rounded-lg text-sm"
+              />
+              {configSearch && (
+                <button
+                  type="button"
+                  onClick={() => setConfigSearch('')}
+                  className="text-gray-500 hover:text-gray-700 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
           {configTab === 'clients' && (
@@ -1821,7 +2014,7 @@ export default function Contabilidad() {
                     </tr>
                   </thead>
                   <tbody>
-                    {clients.map((c) => (
+                    {filteredClients.map((c) => (
                       <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
                         <td className="px-6 py-3 font-medium">{c.name}</td>
                         <td className="px-6 py-3 text-right">
@@ -1832,8 +2025,10 @@ export default function Contabilidad() {
                     ))}
                   </tbody>
                 </table>
-                {clients.length === 0 && (
-                  <div className="p-8 text-center text-gray-500">No hay clientes. Crea uno para agrupar entidades y filtrar P&G por cliente.</div>
+                {filteredClients.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">
+                    {configSearch ? 'No hay clientes que coincidan con la búsqueda.' : 'No hay clientes. Crea uno para agrupar entidades y filtrar P&G por cliente.'}
+                  </div>
                 )}
               </div>
             </div>
@@ -1885,7 +2080,7 @@ export default function Contabilidad() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...entities]
+                    {[...filteredEntities]
                       .sort((a, b) => {
                         if (entitySortBy === 'name') {
                           const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
@@ -1935,6 +2130,11 @@ export default function Contabilidad() {
                     ))}
                   </tbody>
                 </table>
+                {filteredEntities.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">
+                    {configSearch ? 'No hay entidades que coincidan con la búsqueda.' : 'No hay entidades.'}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1983,7 +2183,7 @@ export default function Contabilidad() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...categories]
+                    {[...filteredCategories]
                       .sort((a, b) => {
                         if (categorySortBy === 'name') {
                           const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
@@ -2034,6 +2234,11 @@ export default function Contabilidad() {
                     ))}
                   </tbody>
                 </table>
+                {filteredCategories.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">
+                    {configSearch ? 'No hay categorías que coincidan con la búsqueda.' : 'No hay categorías.'}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2057,7 +2262,7 @@ export default function Contabilidad() {
                     </tr>
                   </thead>
                   <tbody>
-                    {accounts.map((a) => (
+                    {filteredAccounts.map((a) => (
                       <tr key={a.id} className="border-t border-gray-100 hover:bg-gray-50">
                         <td className="px-6 py-3">{a.name}</td>
                         <td className="px-6 py-3">{a.currency ?? 'USD'}</td>
@@ -2069,6 +2274,11 @@ export default function Contabilidad() {
                     ))}
                   </tbody>
                 </table>
+                {filteredAccounts.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">
+                    {configSearch ? 'No hay cuentas que coincidan con la búsqueda.' : 'No hay cuentas de pago.'}
+                  </div>
+                )}
               </div>
             </div>
           )}

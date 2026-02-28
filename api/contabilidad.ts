@@ -930,6 +930,116 @@ router.get('/pyg', async (req: Request, res: Response) => {
   }
 });
 
+// --- P&G por cliente ---
+router.get('/pyg-by-client', async (req: Request, res: Response) => {
+  try {
+    const { start, end } = req.query;
+    const matchStage: Record<string, unknown> = {};
+    if (start && end) {
+      matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      matchStage.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      matchStage.date = { $lte: new Date(end as string) };
+    }
+
+    const excludedCategoryIds = (await AcctCategory.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((c) => (c as { id: string }).id);
+
+    const excludeTrasladoUtilidades: Record<string, unknown> = {
+      $and: [
+        { category_id: { $nin: excludedCategoryIds } },
+        {
+          $or: [
+            { description: { $in: [null, ''] } },
+            { description: { $not: { $regex: 'traslado.*utilidad|utilidad.*traslado|traslado\\s+utilidades', $options: 'i' } } },
+          ],
+        },
+      ],
+    };
+
+    const pipeline: Record<string, unknown>[] = [];
+    let fullMatch: Record<string, unknown> = excludeTrasladoUtilidades;
+    if (Object.keys(matchStage).length > 0) {
+      fullMatch = { $and: [matchStage, excludeTrasladoUtilidades] };
+    }
+    pipeline.push({ $match: fullMatch });
+    pipeline.push({
+      $lookup: {
+        from: 'acct_entities',
+        localField: 'entity_id',
+        foreignField: 'id',
+        as: 'entity',
+      },
+    });
+    pipeline.push({
+      $addFields: {
+        client_id: { $ifNull: [{ $arrayElemAt: ['$entity.client_id', 0] }, '__no_client__'] },
+      },
+    });
+    pipeline.push({
+      $group: {
+        _id: { client_id: '$client_id', currency: '$currency' },
+        ingresos: { $sum: { $cond: [{ $gte: ['$amount', 0] }, '$amount', 0] } },
+        gastos: { $sum: { $cond: [{ $lt: ['$amount', 0] }, { $abs: '$amount' }, 0] } },
+      },
+    });
+    pipeline.push({ $addFields: { resultado: { $subtract: ['$ingresos', '$gastos'] } } });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await AcctTransaction.aggregate(pipeline as any[]).exec();
+    const clientIds = [...new Set((results as { _id: { client_id: string } }[]).map((r) => r._id.client_id).filter((id) => id && id !== '__no_client__'))];
+    const clients = clientIds.length > 0
+      ? await AcctClient.find({ id: { $in: clientIds } }).select('id name').lean().exec()
+      : [];
+    const clientMap = new Map(
+      (clients as { id: string; name: string }[]).map((c) => [c.id, c.name])
+    );
+
+    const rowMap = new Map<string, { client_id: string | null; client_name: string; usd: { ingresos: number; gastos: number; resultado: number }; cop: { ingresos: number; gastos: number; resultado: number } }>();
+    for (const r of results as { _id: { client_id: string; currency: string }; ingresos: number; gastos: number; resultado: number }[]) {
+      const cid = r._id.client_id === '__no_client__' ? null : r._id.client_id;
+      const key = cid ?? '__no_client__';
+      const cur = normCurrency(r._id.currency || 'USD');
+      const ing = Math.round(r.ingresos * 100) / 100;
+      const gas = Math.round(r.gastos * 100) / 100;
+      const res = Math.round(r.resultado * 100) / 100;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
+          client_id: cid,
+          client_name: cid ? (clientMap.get(cid) ?? 'Sin asignar') : 'Sin cliente',
+          usd: { ingresos: 0, gastos: 0, resultado: 0 },
+          cop: { ingresos: 0, gastos: 0, resultado: 0 },
+        });
+      }
+      const row = rowMap.get(key)!;
+      const c = cur === 'COP' ? row.cop : row.usd;
+      c.ingresos += ing;
+      c.gastos += gas;
+      c.resultado += res;
+    }
+    let rows = Array.from(rowMap.values()).map((r) => ({
+      ...r,
+      usd: { ingresos: Math.round(r.usd.ingresos * 100) / 100, gastos: Math.round(r.usd.gastos * 100) / 100, resultado: Math.round(r.usd.resultado * 100) / 100 },
+      cop: { ingresos: Math.round(r.cop.ingresos * 100) / 100, gastos: Math.round(r.cop.gastos * 100) / 100, resultado: Math.round(r.cop.resultado * 100) / 100 },
+    }));
+
+    rows.sort((a, b) => (b.usd.resultado + b.cop.resultado) - (a.usd.resultado + a.cop.resultado));
+
+    const totalUsd = { ingresos: rows.reduce((a, r) => a + r.usd.ingresos, 0), gastos: rows.reduce((a, r) => a + r.usd.gastos, 0), resultado: rows.reduce((a, r) => a + r.usd.resultado, 0) };
+    const totalCop = { ingresos: rows.reduce((a, r) => a + r.cop.ingresos, 0), gastos: rows.reduce((a, r) => a + r.cop.gastos, 0), resultado: rows.reduce((a, r) => a + r.cop.resultado, 0) };
+
+    res.json({
+      rows,
+      total_usd: { ingresos: Math.round(totalUsd.ingresos * 100) / 100, gastos: Math.round(totalUsd.gastos * 100) / 100, resultado: Math.round(totalUsd.resultado * 100) / 100 },
+      total_cop: { ingresos: Math.round(totalCop.ingresos * 100) / 100, gastos: Math.round(totalCop.gastos * 100) / 100, resultado: Math.round(totalCop.resultado * 100) / 100 },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // --- Balance de cuentas (ubicación del dinero) ---
 router.get('/account-balances', async (req: Request, res: Response) => {
   try {

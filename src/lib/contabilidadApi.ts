@@ -86,6 +86,19 @@ export interface PygRow {
   cop: { ingresos: number; gastos: number; resultado: number };
 }
 
+export interface PygRowByClient {
+  client_id: string | null;
+  client_name: string;
+  usd: { ingresos: number; gastos: number; resultado: number };
+  cop: { ingresos: number; gastos: number; resultado: number };
+}
+
+export interface PygByClientResponse {
+  rows: PygRowByClient[];
+  total_usd: { ingresos: number; gastos: number; resultado: number };
+  total_cop: { ingresos: number; gastos: number; resultado: number };
+}
+
 export interface PygResponse {
   rows: PygRow[];
   total_usd: { ingresos: number; gastos: number; resultado: number };
@@ -262,6 +275,13 @@ export const contabilidadApi = {
     if (params?.projects_only) search.projects_only = 'true';
     if (params?.client_id) search.client_id = params.client_id;
     return fetchJson<PygResponse>(url('/pyg', Object.keys(search).length > 0 ? search : undefined));
+  },
+
+  async getPygByClient(params?: { start?: string; end?: string }): Promise<PygByClientResponse> {
+    const search: Record<string, string> = {};
+    if (params?.start) search.start = params.start;
+    if (params?.end) search.end = params.end;
+    return fetchJson<PygByClientResponse>(url('/pyg-by-client', Object.keys(search).length > 0 ? search : undefined));
   },
 
   async getAccountBalances(params?: { start?: string; end?: string }): Promise<AccountBalancesResponse> {
