@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { parse } from 'csv-parse/sync';
 import {
+  AcctClient,
   AcctEntity,
   AcctCategory,
   AcctPaymentAccount,
@@ -34,6 +35,107 @@ function parseAmount(str: string): number | null {
   return neg ? -num : num;
 }
 
+// --- Clients ---
+router.get('/clients', async (_req: Request, res: Response) => {
+  try {
+    const list = await AcctClient.find({}).sort({ sort_order: 1, name: 1 }).lean().exec();
+    res.json(list);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/clients', async (req: Request, res: Response) => {
+  try {
+    const { name, sort_order } = req.body;
+    const created_by = req.body.created_by as string | undefined;
+    if (!name) {
+      res.status(400).json({ error: 'Falta name' });
+      return;
+    }
+    const doc = await AcctClient.create({ name, sort_order: sort_order ?? 0 });
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_client',
+        entity_id: doc.id,
+        action: 'create',
+        summary: `Cliente creado: ${name}`,
+      });
+    }
+    res.status(201).json(doc.toObject ? doc.toObject() : doc);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.put('/clients/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, sort_order } = req.body;
+    const created_by = req.body.created_by as string | undefined;
+    const update: Record<string, unknown> = {};
+    if (name != null) update.name = name;
+    if (sort_order != null) update.sort_order = sort_order;
+    const doc = await AcctClient.findOneAndUpdate(
+      { id },
+      Object.keys(update).length > 0 ? { $set: update } : {},
+      { new: true }
+    )
+      .lean()
+      .exec();
+    if (!doc) {
+      res.status(404).json({ error: 'Cliente no encontrado' });
+      return;
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_client',
+        entity_id: id,
+        action: 'update',
+        summary: `Cliente actualizado: ${name}`,
+      });
+    }
+    res.json(doc);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/clients/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const created_by = req.query.created_by as string | undefined;
+    const count = await AcctEntity.countDocuments({ client_id: id }).exec();
+    if (count > 0) {
+      res.status(400).json({ error: `Hay ${count} entidades vinculadas a este cliente. Desvincula las entidades antes de eliminar.` });
+      return;
+    }
+    const doc = await AcctClient.findOneAndDelete({ id }).lean().exec();
+    if (!doc) {
+      res.status(404).json({ error: 'Cliente no encontrado' });
+      return;
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_client',
+        entity_id: id,
+        action: 'delete',
+        summary: `Cliente eliminado: ${(doc as { name: string }).name}`,
+      });
+    }
+    res.json({ id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // --- Entities ---
 router.get('/entities', async (_req: Request, res: Response) => {
   try {
@@ -53,7 +155,7 @@ router.post('/entities', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Faltan name o type' });
       return;
     }
-    const doc = await AcctEntity.create({ name, type, sort_order: sort_order ?? 0 });
+    const doc = await AcctEntity.create({ name, type, client_id: req.body.client_id ?? null, sort_order: sort_order ?? 0 });
     if (created_by) {
       await AuditLog.create({
         user_id: created_by,
@@ -73,9 +175,9 @@ router.post('/entities', async (req: Request, res: Response) => {
 router.put('/entities/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, type, sort_order } = req.body;
+    const { name, type, client_id, sort_order } = req.body;
     const created_by = req.body.created_by as string | undefined;
-    const existing = await AcctEntity.findOne({ id }).select('id name').lean().exec();
+    const existing = await AcctEntity.findOne({ id }).select('id name type client_id sort_order').lean().exec();
     if (!existing) {
       res.status(404).json({ error: 'Entidad no encontrada' });
       return;
@@ -105,9 +207,10 @@ router.put('/entities/:id', async (req: Request, res: Response) => {
       const merged = await AcctEntity.findOne({ id: targetId }).lean().exec();
       return res.json({ ...merged, _merged: true, merged_count: result.modifiedCount });
     }
+    const ex = existing as { name?: string; type?: string; client_id?: string | null; sort_order?: number };
     const doc = await AcctEntity.findOneAndUpdate(
       { id },
-      { $set: { name: name ?? existing.name, type: type ?? (existing as { type?: string }).type, sort_order: sort_order ?? (existing as { sort_order?: number }).sort_order } },
+      { $set: { name: name ?? ex.name, type: type ?? ex.type, client_id: client_id !== undefined ? (client_id || null) : ex.client_id, sort_order: sort_order ?? ex.sort_order } },
       { new: true }
     )
       .lean()
@@ -712,7 +815,7 @@ const TRASLADO_UTILIDADES_REGEX = /traslado.*utilidad|utilidad.*traslado|traslad
 
 router.get('/pyg', async (req: Request, res: Response) => {
   try {
-    const { start, end } = req.query;
+    const { start, end, client_id } = req.query;
     const matchStage: Record<string, unknown> = {};
     if (start && end) {
       matchStage.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
@@ -737,10 +840,27 @@ router.get('/pyg', async (req: Request, res: Response) => {
       ],
     };
 
+    let entityFilter: { id: { $in: string[] } } | null = null;
+    if (client_id && typeof client_id === 'string') {
+      const entityIds = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+      if (entityIds.length === 0) {
+        return res.json({
+          rows: [],
+          total_usd: { ingresos: 0, gastos: 0, resultado: 0 },
+          total_cop: { ingresos: 0, gastos: 0, resultado: 0 },
+        });
+      }
+      entityFilter = { id: { $in: entityIds } };
+    }
+
     const pipeline: Record<string, unknown>[] = [];
-    const fullMatch = Object.keys(matchStage).length > 0
-      ? { $and: [matchStage, excludeTrasladoUtilidades] }
-      : excludeTrasladoUtilidades;
+    let fullMatch: Record<string, unknown> = excludeTrasladoUtilidades;
+    if (Object.keys(matchStage).length > 0) {
+      fullMatch = { $and: [matchStage, excludeTrasladoUtilidades] };
+    }
+    if (entityFilter) {
+      fullMatch = { $and: [fullMatch, { entity_id: { $in: entityFilter.id.$in } }] };
+    }
     pipeline.push({ $match: fullMatch });
     pipeline.push({
       $group: {

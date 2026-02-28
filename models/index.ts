@@ -16,6 +16,7 @@ export { WorkSession } from './WorkSession.js';
 export { AuditLog } from './AuditLog.js';
 export { PayrollPayment } from './PayrollPayment.js';
 export { TelegramNotificationLog } from './TelegramNotificationLog.js';
+export { AcctClient } from './AcctClient.js';
 export { AcctEntity } from './AcctEntity.js';
 export { AcctCategory } from './AcctCategory.js';
 export { AcctPaymentAccount } from './AcctPaymentAccount.js';

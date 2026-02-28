@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type AccountBalanceRow } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type AccountBalanceRow } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -21,13 +21,14 @@ import {
   ChevronRight,
   Calendar,
   Search,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 type MainTab = 'libro' | 'balance' | 'config';
-type ConfigTab = 'entities' | 'categories' | 'accounts';
+type ConfigTab = 'clients' | 'entities' | 'categories' | 'accounts';
 
 const PERIOD_PRESETS = [
   { id: 'all', label: 'Todo el tiempo' },
@@ -540,8 +541,9 @@ function PygDetailPanel({
 export default function Contabilidad() {
   const { isAdmin, user: currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<MainTab>('libro');
-  const [configTab, setConfigTab] = useState<ConfigTab>('entities');
+  const [configTab, setConfigTab] = useState<ConfigTab>('clients');
 
+  const [clients, setClients] = useState<AcctClient[]>([]);
   const [entities, setEntities] = useState<AcctEntity[]>([]);
   const [categories, setCategories] = useState<AcctCategory[]>([]);
   const [accounts, setAccounts] = useState<AcctPaymentAccount[]>([]);
@@ -571,6 +573,7 @@ export default function Contabilidad() {
   });
   const [balanceEnd, setBalanceEnd] = useState(() => new Date().toISOString().split('T')[0]);
 
+  const [currentClient, setCurrentClient] = useState<Partial<AcctClient>>({ name: '', sort_order: 0 });
   const [currentEntity, setCurrentEntity] = useState<Partial<AcctEntity>>({ name: '', type: 'project', sort_order: 0 });
   const [currentCategory, setCurrentCategory] = useState<Partial<AcctCategory>>({ name: '', type: 'expense', parent_id: null });
   const [currentAccount, setCurrentAccount] = useState<Partial<AcctPaymentAccount>>({ name: '', currency: 'USD' });
@@ -597,6 +600,7 @@ export default function Contabilidad() {
   const [pygSortBy, setPygSortBy] = useState<'entity' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
   const [pygSortOrder, setPygSortOrder] = useState<'asc' | 'desc'>('desc');
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
+  const [pygFilterClient, setPygFilterClient] = useState('');
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
   const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
@@ -613,9 +617,12 @@ export default function Contabilidad() {
   const [showSelectAllModal, setShowSelectAllModal] = useState(false);
   const [categorySearchFilter, setCategorySearchFilter] = useState('');
   const [modalForTransaction, setModalForTransaction] = useState(false);
+  const [showCreateCategoryInTransaction, setShowCreateCategoryInTransaction] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   useEffect(() => {
     if (!isAdmin) return;
+    fetchClients();
     fetchEntities();
     fetchCategories();
     fetchAccounts();
@@ -626,6 +633,7 @@ export default function Contabilidad() {
       setConfigEntityExpanded(null);
       setConfigCategoryExpanded(null);
       setConfigDetailTransactions([]);
+      setShowModal(false);
     }
   }, [activeTab, configTab]);
 
@@ -637,6 +645,8 @@ export default function Contabilidad() {
     if (!showModal) {
       setCategorySearchFilter('');
       setModalForTransaction(false);
+      setShowCreateCategoryInTransaction(false);
+      setNewCategoryName('');
     }
   }, [showModal]);
 
@@ -648,8 +658,17 @@ export default function Contabilidad() {
       else if (balanceView === 'pyg') fetchPyg();
       else fetchAccountBalances();
     }
-  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly]);
+  }, [isAdmin, activeTab, balanceView, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient]);
 
+  async function fetchClients() {
+    try {
+      const data = await contabilidadApi.getClients();
+      setClients(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar clientes');
+    }
+  }
   async function fetchEntities() {
     try {
       const data = await contabilidadApi.getEntities();
@@ -720,6 +739,7 @@ export default function Contabilidad() {
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
       params.projects_only = pygProjectsOnly;
+      if (pygFilterClient) params.client_id = pygFilterClient;
       const data = await contabilidadApi.getPyg(params);
       setPygData(data);
     } catch (e) {
@@ -808,20 +828,56 @@ export default function Contabilidad() {
     }
   }
 
+  async function handleSaveClient(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    try {
+      if (modalMode === 'create') {
+        await contabilidadApi.createClient(
+          { name: currentClient.name!, sort_order: currentClient.sort_order ?? 0 },
+          currentUser?.id
+        );
+        toast.success('Cliente creado');
+      } else {
+        await contabilidadApi.updateClient(
+          currentClient.id!,
+          { name: (currentClient.name ?? '').trim(), sort_order: currentClient.sort_order },
+          currentUser?.id
+        );
+        toast.success('Cliente actualizado');
+      }
+      setShowModal(false);
+      setCurrentClient({ name: '', sort_order: 0 });
+      fetchClients();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error');
+      toast.error(err instanceof Error ? err.message : 'Error');
+    }
+  }
+  async function handleDeleteClient(id: string) {
+    if (!window.confirm('¿Eliminar este cliente? Las entidades quedarán sin cliente asignado.')) return;
+    try {
+      await contabilidadApi.deleteClient(id, currentUser?.id);
+      toast.success('Cliente eliminado');
+      fetchClients();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar');
+    }
+  }
   async function handleSaveEntity(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     try {
       if (modalMode === 'create') {
         await contabilidadApi.createEntity(
-          { name: currentEntity.name!, type: currentEntity.type!, sort_order: currentEntity.sort_order ?? 0 },
+          { name: currentEntity.name!, type: currentEntity.type!, client_id: currentEntity.client_id || null, sort_order: currentEntity.sort_order ?? 0 },
           currentUser?.id
         );
         toast.success('Entidad creada');
       } else {
         const res = await contabilidadApi.updateEntity(
           currentEntity.id!,
-          { name: (currentEntity.name ?? '').trim(), type: currentEntity.type, sort_order: currentEntity.sort_order },
+          { name: (currentEntity.name ?? '').trim(), type: currentEntity.type, client_id: currentEntity.client_id ?? null, sort_order: currentEntity.sort_order },
           currentUser?.id
         );
         const merged = (res as { _merged?: boolean; merged_count?: number })._merged;
@@ -860,6 +916,27 @@ export default function Contabilidad() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error');
       toast.error(err instanceof Error ? err.message : 'Error');
+    }
+  }
+  async function handleCreateCategoryFromTransaction() {
+    const name = newCategoryName.trim();
+    if (!name) {
+      toast.error('Escribe el nombre de la categoría');
+      return;
+    }
+    try {
+      const type = (currentTransaction.type === 'income' ? 'income' : 'expense') as 'income' | 'expense';
+      const cat = await contabilidadApi.createCategory(
+        { name, type, parent_id: null },
+        currentUser?.id
+      );
+      await fetchCategories();
+      setCurrentTransaction((p) => ({ ...p, category_id: cat.id }));
+      setNewCategoryName('');
+      setShowCreateCategoryInTransaction(false);
+      toast.success('Categoría creada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear');
     }
   }
   async function handleSaveAccount(e: React.FormEvent) {
@@ -1135,6 +1212,7 @@ export default function Contabilidad() {
   ];
 
   const configTabs = [
+    { id: 'clients' as ConfigTab, label: 'Clientes', icon: Users },
     { id: 'entities' as ConfigTab, label: 'Entidades', icon: Building2 },
     { id: 'categories' as ConfigTab, label: 'Categorías', icon: Tag },
     { id: 'accounts' as ConfigTab, label: 'Cuentas de pago', icon: CreditCard },
@@ -1447,15 +1525,30 @@ export default function Contabilidad() {
               />
             )}
             {balanceView === 'pyg' && (
-              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pygProjectsOnly}
-                  onChange={(e) => setPygProjectsOnly(e.target.checked)}
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                Solo proyectos (excluir Hotmart, Fondo libre, etc.)
-              </label>
+              <>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Cliente</label>
+                  <select
+                    value={pygFilterClient}
+                    onChange={(e) => setPygFilterClient(e.target.value)}
+                    className="px-3 py-2 border rounded-lg text-sm min-w-[160px]"
+                  >
+                    <option value="">Todos</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pygProjectsOnly}
+                    onChange={(e) => setPygProjectsOnly(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Solo proyectos (excluir Hotmart, Fondo libre, etc.)
+                </label>
+              </>
             )}
             {balanceView === 'accounts' && (
               <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
@@ -1710,6 +1803,42 @@ export default function Contabilidad() {
             ))}
           </div>
 
+          {configTab === 'clients' && (
+            <div>
+              <button
+                onClick={() => { setCurrentClient({ name: '', sort_order: 0 }); setModalMode('create'); setShowModal(true); }}
+                className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Nuevo cliente
+              </button>
+              <div className="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm min-w-[400px]">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.map((c) => (
+                      <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        <td className="px-6 py-3 font-medium">{c.name}</td>
+                        <td className="px-6 py-3 text-right">
+                          <button onClick={() => { setCurrentClient(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
+                          <button onClick={() => handleDeleteClient(c.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {clients.length === 0 && (
+                  <div className="p-8 text-center text-gray-500">No hay clientes. Crea uno para agrupar entidades y filtrar P&G por cliente.</div>
+                )}
+              </div>
+            </div>
+          )}
+
           {configTab === 'entities' && (
             <div>
               <button
@@ -1737,6 +1866,7 @@ export default function Contabilidad() {
                           {entitySortBy === 'name' && (entitySortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
                         </button>
                       </th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Cliente</th>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">
                         <button
                           type="button"
@@ -1780,6 +1910,7 @@ export default function Contabilidad() {
                               {e.name}
                             </span>
                           </td>
+                          <td className="px-6 py-3 text-gray-600">{e.client_id ? (clients.find((c) => c.id === e.client_id)?.name ?? '—') : '—'}</td>
                           <td className="px-6 py-3 capitalize">{e.type}</td>
                           <td className="px-6 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                             <button onClick={() => { setMergeSourceEntity(e); setMergeTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra entidad"><Merge className="w-4 h-4 inline" /></button>
@@ -1789,7 +1920,7 @@ export default function Contabilidad() {
                         </tr>
                         {configEntityExpanded === e.id && (
                           <tr className="border-t border-gray-100 bg-gray-50/80">
-                            <td colSpan={3} className="px-6 py-4">
+                            <td colSpan={4} className="px-6 py-4">
                               {configDetailLoading ? (
                                 <div className="text-sm text-gray-500 py-4">Cargando…</div>
                               ) : configDetailTransactions.length === 0 ? (
@@ -2007,6 +2138,7 @@ export default function Contabilidad() {
             <div className="flex justify-between items-center p-4 border-b">
               <h3 className="font-semibold text-lg">
                 {(activeTab === 'libro' || modalForTransaction) && (modalMode === 'create' ? 'Nueva transacción' : 'Editar transacción')}
+                {activeTab === 'config' && !modalForTransaction && configTab === 'clients' && (modalMode === 'create' ? 'Nuevo cliente' : 'Editar cliente')}
                 {activeTab === 'config' && !modalForTransaction && configTab === 'entities' && (modalMode === 'create' ? 'Nueva entidad' : 'Editar entidad')}
                 {activeTab === 'config' && !modalForTransaction && configTab === 'categories' && (modalMode === 'create' ? 'Nueva categoría' : 'Editar categoría')}
                 {activeTab === 'config' && !modalForTransaction && configTab === 'accounts' && (modalMode === 'create' ? 'Nueva cuenta' : 'Editar cuenta')}
@@ -2015,6 +2147,7 @@ export default function Contabilidad() {
             </div>
             <form onSubmit={
               (activeTab === 'libro' || modalForTransaction) ? handleSaveTransaction :
+              configTab === 'clients' ? handleSaveClient :
               configTab === 'entities' ? handleSaveEntity :
               configTab === 'categories' ? handleSaveCategory :
               handleSaveAccount
@@ -2090,6 +2223,45 @@ export default function Contabilidad() {
                             {c.name}
                           </button>
                         ))}
+                      {!showCreateCategoryInTransaction ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateCategoryInTransaction(true)}
+                          className="w-full px-3 py-2 text-left text-sm text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 border-t"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Crear categoría
+                        </button>
+                      ) : (
+                        <div className="p-3 border-t bg-gray-50/80 space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Nombre de la categoría"
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleCreateCategoryFromTransaction())}
+                            className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCreateCategoryFromTransaction}
+                              disabled={!newCategoryName.trim()}
+                              className="flex-1 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Crear
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setShowCreateCategoryInTransaction(false); setNewCategoryName(''); }}
+                              className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -2108,11 +2280,29 @@ export default function Contabilidad() {
                 </>
               )}
 
+              {activeTab === 'config' && !modalForTransaction && configTab === 'clients' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                    <input type="text" value={currentClient.name ?? ''} onChange={(e) => setCurrentClient((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" required />
+                  </div>
+                </>
+              )}
+
               {activeTab === 'config' && !modalForTransaction && configTab === 'entities' && (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
                     <input type="text" value={currentEntity.name ?? ''} onChange={(e) => setCurrentEntity((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border rounded-lg" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+                    <select value={currentEntity.client_id ?? ''} onChange={(e) => setCurrentEntity((p) => ({ ...p, client_id: e.target.value || null }))} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="">Sin asignar</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>

@@ -20,10 +20,17 @@ async function fetchJson<T>(urlStr: string, options?: RequestInit): Promise<T> {
   return json as T;
 }
 
+export interface AcctClient {
+  id: string;
+  name: string;
+  sort_order?: number;
+}
+
 export interface AcctEntity {
   id: string;
   name: string;
   type: 'project' | 'agency' | 'internal';
+  client_id?: string | null;
   sort_order?: number;
 }
 
@@ -99,16 +106,36 @@ export interface AccountBalancesResponse {
 }
 
 export const contabilidadApi = {
+  async getClients(): Promise<AcctClient[]> {
+    return fetchJson<AcctClient[]>(url('/clients'));
+  },
+  async createClient(data: { name: string; sort_order?: number }, createdBy?: string): Promise<AcctClient> {
+    return fetchJson<AcctClient>(url('/clients'), {
+      method: 'POST',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async updateClient(id: string, data: { name?: string; sort_order?: number }, createdBy?: string): Promise<AcctClient> {
+    return fetchJson<AcctClient>(url(`/clients/${id}`), {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, created_by: createdBy }),
+    });
+  },
+  async deleteClient(id: string, createdBy?: string): Promise<{ id: string }> {
+    return fetchJson<{ id: string }>(url(`/clients/${id}`, createdBy ? { created_by: createdBy } : undefined), {
+      method: 'DELETE',
+    });
+  },
   async getEntities(): Promise<AcctEntity[]> {
     return fetchJson<AcctEntity[]>(url('/entities'));
   },
-  async createEntity(data: { name: string; type: string; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
+  async createEntity(data: { name: string; type: string; client_id?: string | null; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
     return fetchJson<AcctEntity>(url('/entities'), {
       method: 'POST',
       body: JSON.stringify({ ...data, created_by: createdBy }),
     });
   },
-  async updateEntity(id: string, data: { name?: string; type?: string; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
+  async updateEntity(id: string, data: { name?: string; type?: string; client_id?: string | null; sort_order?: number }, createdBy?: string): Promise<AcctEntity> {
     return fetchJson<AcctEntity>(url(`/entities/${id}`), {
       method: 'PUT',
       body: JSON.stringify({ ...data, created_by: createdBy }),
@@ -228,11 +255,12 @@ export const contabilidadApi = {
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
   },
 
-  async getPyg(params?: { start?: string; end?: string; projects_only?: boolean }): Promise<PygResponse> {
+  async getPyg(params?: { start?: string; end?: string; projects_only?: boolean; client_id?: string }): Promise<PygResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
     if (params?.projects_only) search.projects_only = 'true';
+    if (params?.client_id) search.client_id = params.client_id;
     return fetchJson<PygResponse>(url('/pyg', Object.keys(search).length > 0 ? search : undefined));
   },
 
