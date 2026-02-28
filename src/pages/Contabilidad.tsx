@@ -297,6 +297,10 @@ function PygDetailPanel({
     return { totIngUsd, totIngCop, totSalUsd, totSalCop, balanceUsd: totIngUsd - totSalUsd, balanceCop: totIngCop - totSalCop };
   }, [transactions, months]);
 
+  const hasCop = transactions.some((t) => (t.currency || 'USD') === 'COP');
+  const colsPerMonth = hasCop ? 4 : 2;
+  const colsTotal = hasCop ? 4 : 2;
+
   if (transactions.length === 0) {
     return <div className="text-sm text-gray-500 py-2">No hay transacciones en este período.</div>;
   }
@@ -311,12 +315,12 @@ function PygDetailPanel({
               const [y, mo] = m.split('-');
               const label = format(new Date(parseInt(y, 10), parseInt(mo, 10) - 1, 1), 'MMM yy', { locale: es });
               return (
-                <th key={m} colSpan={4} className="px-1 py-2 text-center font-medium text-gray-700 border-l">
+                <th key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center font-medium text-gray-700 border-l">
                   {label}
                 </th>
               );
             })}
-            <th colSpan={4} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
+            <th colSpan={colsTotal} className="px-1 py-2 text-center font-medium text-gray-700 border-l bg-gray-100">Total</th>
           </tr>
           <tr className="bg-gray-50">
             <th className="px-3 py-1 text-xs text-gray-500 sticky left-0 bg-gray-50 z-10"></th>
@@ -324,27 +328,38 @@ function PygDetailPanel({
               <React.Fragment key={m}>
                 <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16">Ing</th>
                 <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
-                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+                {hasCop && (
+                  <>
+                    <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+                    <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+                  </>
+                )}
               </React.Fragment>
             ))}
             <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l">Ing</th>
             <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
-            <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
-            <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+            {hasCop && (
+              <>
+                <th className="px-1 py-1 text-right text-xs text-emerald-600 w-16 border-l border-gray-200">Ing</th>
+                <th className="px-1 py-1 text-right text-xs text-red-600 w-16">Sal</th>
+              </>
+            )}
           </tr>
           <tr className="bg-gray-50 text-xs text-gray-500">
             <th className="px-3 py-1 sticky left-0 bg-gray-50 z-10"></th>
             {months.flatMap((m) => [
               <th key={`${m}-u1`} className="px-1 py-0.5 text-right">USD</th>,
               <th key={`${m}-u2`} className="px-1 py-0.5 text-right">USD</th>,
-              <th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>,
-              <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>,
+              ...(hasCop ? [<th key={`${m}-c1`} className="px-1 py-0.5 text-right border-l">COP</th>, <th key={`${m}-c2`} className="px-1 py-0.5 text-right">COP</th>] : []),
             ])}
             <th className="px-1 py-0.5 text-right border-l">USD</th>
             <th className="px-1 py-0.5 text-right">USD</th>
-            <th className="px-1 py-0.5 text-right border-l">COP</th>
-            <th className="px-1 py-0.5 text-right">COP</th>
+            {hasCop && (
+              <>
+                <th className="px-1 py-0.5 text-right border-l">COP</th>
+                <th className="px-1 py-0.5 text-right">COP</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -368,8 +383,12 @@ function PygDetailPanel({
                     <React.Fragment key={m}>
                       <td className="px-1 py-2 text-right text-emerald-600">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
                       <td className="px-1 py-2 text-right text-red-600">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
-                      <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
-                      <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                      {hasCop && (
+                        <>
+                          <td className="px-1 py-2 text-right text-emerald-600 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                          <td className="px-1 py-2 text-right text-red-600">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                        </>
+                      )}
                     </React.Fragment>
                   ))}
                   <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
@@ -378,12 +397,16 @@ function PygDetailPanel({
                   <td className="px-1 py-2 text-right text-red-600 font-medium">
                     {fmt(months.reduce((s, m) => s + (sal[m]?.usd ?? 0), 0), 'usd')}
                   </td>
-                  <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
-                    {fmt(months.reduce((s, m) => s + (ing[m]?.cop ?? 0), 0), 'cop')}
-                  </td>
-                  <td className="px-1 py-2 text-right text-red-600 font-medium">
-                    {fmt(months.reduce((s, m) => s + (sal[m]?.cop ?? 0), 0), 'cop')}
-                  </td>
+                  {hasCop && (
+                    <>
+                      <td className="px-1 py-2 text-right text-emerald-600 border-l font-medium">
+                        {fmt(months.reduce((s, m) => s + (ing[m]?.cop ?? 0), 0), 'cop')}
+                      </td>
+                      <td className="px-1 py-2 text-right text-red-600 font-medium">
+                        {fmt(months.reduce((s, m) => s + (sal[m]?.cop ?? 0), 0), 'cop')}
+                      </td>
+                    </>
+                  )}
                 </tr>
                 {isExpanded &&
                   items.map((t) => {
@@ -407,20 +430,28 @@ function PygDetailPanel({
                               <>
                                 <td className={`px-1 py-1.5 text-right text-sm ${isPos ? 'text-emerald-600' : 'text-gray-400'}`}>{isPos && curr === 'USD' ? fmt(amt, 'usd') : '—'}</td>
                                 <td className={`px-1 py-1.5 text-right text-sm ${!isPos ? 'text-red-600' : 'text-gray-400'}`}>{!isPos && curr === 'USD' ? fmt(Math.abs(amt), 'usd') : '—'}</td>
-                                <td className={`px-1 py-1.5 text-right text-sm border-l ${isPos ? 'text-emerald-600' : 'text-gray-400'}`}>{isPos && curr === 'COP' ? fmt(amt, 'cop') : '—'}</td>
-                                <td className={`px-1 py-1.5 text-right text-sm ${!isPos ? 'text-red-600' : 'text-gray-400'}`}>{!isPos && curr === 'COP' ? fmt(Math.abs(amt), 'cop') : '—'}</td>
+                                {hasCop && (
+                                  <>
+                                    <td className={`px-1 py-1.5 text-right text-sm border-l ${isPos ? 'text-emerald-600' : 'text-gray-400'}`}>{isPos && curr === 'COP' ? fmt(amt, 'cop') : '—'}</td>
+                                    <td className={`px-1 py-1.5 text-right text-sm ${!isPos ? 'text-red-600' : 'text-gray-400'}`}>{!isPos && curr === 'COP' ? fmt(Math.abs(amt), 'cop') : '—'}</td>
+                                  </>
+                                )}
                               </>
                             ) : (
                               <>
                                 <td className="px-1 py-1.5 text-right text-gray-300">—</td>
                                 <td className="px-1 py-1.5 text-right text-gray-300">—</td>
-                                <td className="px-1 py-1.5 text-right text-gray-300 border-l">—</td>
-                                <td className="px-1 py-1.5 text-right text-gray-300">—</td>
+                                {hasCop && (
+                                  <>
+                                    <td className="px-1 py-1.5 text-right text-gray-300 border-l">—</td>
+                                    <td className="px-1 py-1.5 text-right text-gray-300">—</td>
+                                  </>
+                                )}
                               </>
                             )}
                           </React.Fragment>
                         ))}
-                        <td colSpan={4} className="px-1 py-1.5 border-l" />
+                        <td colSpan={colsTotal} className="px-1 py-1.5 border-l" />
                       </tr>
                     );
                   })}
@@ -437,15 +468,23 @@ function PygDetailPanel({
                 <React.Fragment key={m}>
                   <td className="px-1 py-2 text-right text-emerald-700">{ing[m].usd ? fmt(ing[m].usd, 'usd') : '—'}</td>
                   <td className="px-1 py-2 text-right text-red-700">{sal[m].usd ? fmt(sal[m].usd, 'usd') : '—'}</td>
-                  <td className="px-1 py-2 text-right text-emerald-700 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
-                  <td className="px-1 py-2 text-right text-red-700">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                  {hasCop && (
+                    <>
+                      <td className="px-1 py-2 text-right text-emerald-700 border-l">{ing[m].cop ? fmt(ing[m].cop, 'cop') : '—'}</td>
+                      <td className="px-1 py-2 text-right text-red-700">{sal[m].cop ? fmt(sal[m].cop, 'cop') : '—'}</td>
+                    </>
+                  )}
                 </React.Fragment>
               );
             })}
             <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngUsd, 'usd')}</td>
             <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalUsd, 'usd')}</td>
-            <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
-            <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
+            {hasCop && (
+              <>
+                <td className="px-1 py-2 text-right text-emerald-700 border-l">{fmt(totals.totIngCop, 'cop')}</td>
+                <td className="px-1 py-2 text-right text-red-700">{fmt(totals.totSalCop, 'cop')}</td>
+              </>
+            )}
           </tr>
           <tr className="bg-indigo-50">
             <td className="px-3 py-2 sticky left-0 bg-indigo-50 font-medium">Balance global</td>
@@ -458,29 +497,33 @@ function PygDetailPanel({
                   <td colSpan={2} className={`px-1 py-2 text-right font-medium ${balUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {balUsd >= 0 ? '+' : ''}{fmt(balUsd, 'usd')} USD
                   </td>
-                  <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${balCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {balCop >= 0 ? '+' : ''}{fmt(balCop, 'cop')} COP
-                  </td>
+                  {hasCop && (
+                    <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${balCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {balCop >= 0 ? '+' : ''}{fmt(balCop, 'cop')} COP
+                    </td>
+                  )}
                 </React.Fragment>
               );
             })}
             <td colSpan={2} className={`px-1 py-2 text-right font-medium border-l ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
               {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
             </td>
-            <td colSpan={2} className={`px-1 py-2 text-right font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-              {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
-            </td>
+            {hasCop && (
+              <td colSpan={2} className={`px-1 py-2 text-right font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
+              </td>
+            )}
           </tr>
           <tr className="bg-amber-50">
             <td className="px-3 py-2 sticky left-0 bg-amber-50 font-medium">Pendiente por liquidar</td>
             {months.map((m) => (
-              <td key={m} colSpan={4} className="px-1 py-2 text-center text-gray-500 border-l text-xs">—</td>
+              <td key={m} colSpan={colsPerMonth} className="px-1 py-2 text-center text-gray-500 border-l text-xs">—</td>
             ))}
-            <td colSpan={4} className="px-1 py-2 border-l">
+            <td colSpan={colsTotal} className="px-1 py-2 border-l">
               <span className={`font-medium ${totals.balanceUsd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                 {totals.balanceUsd >= 0 ? '+' : ''}{fmt(totals.balanceUsd, 'usd')} USD
               </span>
-              {totals.balanceCop !== 0 && (
+              {hasCop && totals.balanceCop !== 0 && (
                 <span className={`ml-2 font-medium ${totals.balanceCop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                   {totals.balanceCop >= 0 ? '+' : ''}{fmt(totals.balanceCop, 'cop')} COP
                 </span>
@@ -1385,13 +1428,16 @@ export default function Contabilidad() {
           {loading ? (
             <div className="animate-pulse h-48 bg-gray-200 rounded-lg" />
           ) : balanceView === 'accounts' && accountBalancesData ? (
+            (() => {
+              const hasCopAccounts = accountBalancesData.total_cop !== 0 || accountBalancesData.rows.some((r) => r.cop !== 0);
+              return (
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
                     <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>
+                    {hasCopAccounts && <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1401,9 +1447,11 @@ export default function Contabilidad() {
                       <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {r.usd >= 0 ? '+' : ''}{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-                      </td>
+                      {hasCopAccounts && (
+                        <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1413,9 +1461,11 @@ export default function Contabilidad() {
                     <td className={`px-6 py-3 text-right ${accountBalancesData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {accountBalancesData.total_usd >= 0 ? '+' : ''}{accountBalancesData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
-                    <td className={`px-6 py-3 text-right ${accountBalancesData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {accountBalancesData.total_cop >= 0 ? '+' : ''}{accountBalancesData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
-                    </td>
+                    {hasCopAccounts && (
+                      <td className={`px-6 py-3 text-right ${accountBalancesData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {accountBalancesData.total_cop >= 0 ? '+' : ''}{accountBalancesData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                      </td>
+                    )}
                   </tr>
                 </tfoot>
               </table>
@@ -1423,23 +1473,33 @@ export default function Contabilidad() {
                 <div className="p-12 text-center text-gray-500">No hay movimientos en las cuentas.</div>
               )}
             </div>
+            );
+            })()
           ) : balanceView === 'pyg' && pygData ? (
+            (() => {
+              const hasCopPyg = pygData.total_cop.ingresos !== 0 || pygData.total_cop.gastos !== 0 || pygData.total_cop.resultado !== 0 ||
+                pygData.rows.some((r) => r.cop.ingresos !== 0 || r.cop.gastos !== 0 || r.cop.resultado !== 0);
+              return (
             <div className="bg-white rounded-lg shadow overflow-x-auto">
               <table className="w-full text-sm min-w-[600px]">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto / Entidad</th>
                     <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">USD</th>
-                    <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">COP</th>
+                    {hasCopPyg && <th colSpan={3} className="px-2 py-3 text-center font-medium text-gray-700 border-l">COP</th>}
                   </tr>
                   <tr className="bg-gray-50">
                     <th></th>
                     <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Ingresos</th>
                     <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
                     <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l">Ingresos</th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
-                    <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
+                    {hasCopPyg && (
+                      <>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500 border-l">Ingresos</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Gastos</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-500">Resultado</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1468,15 +1528,19 @@ export default function Contabilidad() {
                           <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                             {r.usd.resultado >= 0 ? '+' : ''}{r.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                           </td>
-                          <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                          <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                          <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-                          </td>
+                          {hasCopPyg && (
+                            <>
+                              <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                              <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                              <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                              </td>
+                            </>
+                          )}
                         </tr>
                         {isThisRowDetail && (
                           <tr className="border-t border-gray-100 bg-gray-50/80">
-                            <td colSpan={7} className="px-6 py-4">
+                            <td colSpan={hasCopPyg ? 7 : 4} className="px-6 py-4">
                               {pygDetailLoading ? (
                                 <div className="text-sm text-gray-500 py-4">Cargando detalle…</div>
                               ) : pygDetailTransactions.length === 0 ? (
@@ -1502,11 +1566,15 @@ export default function Contabilidad() {
                     <td className={`px-2 py-3 text-right ${pygData.total_usd.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {pygData.total_usd.resultado >= 0 ? '+' : ''}{pygData.total_usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="px-2 py-3 text-right text-emerald-700 border-l">{pygData.total_cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                    <td className="px-2 py-3 text-right text-red-700">{pygData.total_cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                    <td className={`px-2 py-3 text-right ${pygData.total_cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {pygData.total_cop.resultado >= 0 ? '+' : ''}{pygData.total_cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-                    </td>
+                    {hasCopPyg && (
+                      <>
+                        <td className="px-2 py-3 text-right text-emerald-700 border-l">{pygData.total_cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className="px-2 py-3 text-right text-red-700">{pygData.total_cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className={`px-2 py-3 text-right ${pygData.total_cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {pygData.total_cop.resultado >= 0 ? '+' : ''}{pygData.total_cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 </tfoot>
               </table>
@@ -1514,14 +1582,19 @@ export default function Contabilidad() {
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
               )}
             </div>
+            );
+            })()
           ) : balanceData ? (
+            (() => {
+              const hasCopBalance = balanceData.total_cop !== 0 || balanceData.rows.some((r) => r.cop !== 0);
+              return (
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Entidad</th>
                     <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>
+                    {hasCopBalance && <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1531,9 +1604,11 @@ export default function Contabilidad() {
                       <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {r.usd >= 0 ? '+' : ''}{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-                      </td>
+                      {hasCopBalance && (
+                        <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -1543,18 +1618,22 @@ export default function Contabilidad() {
                     <td className={`px-6 py-3 text-right ${balanceData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
-                    <td className={`px-6 py-3 text-right ${balanceData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
-                    </td>
+                    {hasCopBalance && (
+                      <td className={`px-6 py-3 text-right ${balanceData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                      </td>
+                    )}
                   </tr>
                   <tr>
                     <td className="px-6 py-3 text-indigo-700">Utilidad distribuible</td>
                     <td className="px-6 py-3 text-right text-indigo-700 font-bold">
                       {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
-                    <td className="px-6 py-3 text-right text-indigo-700 font-bold">
-                      {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
-                    </td>
+                    {hasCopBalance && (
+                      <td className="px-6 py-3 text-right text-indigo-700 font-bold">
+                        {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                      </td>
+                    )}
                   </tr>
                 </tfoot>
               </table>
@@ -1562,6 +1641,8 @@ export default function Contabilidad() {
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
               )}
             </div>
+            );
+            })()
           ) : (
             <div className="p-12 text-center text-gray-500">Error al cargar los datos.</div>
           )}
