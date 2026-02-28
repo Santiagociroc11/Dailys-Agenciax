@@ -419,7 +419,13 @@ router.get('/transactions', async (req: Request, res: Response) => {
     } else if (end) {
       filter.date = { $lte: new Date(end as string) };
     }
-    if (entity_id) filter.entity_id = entity_id;
+    if (entity_id !== undefined && entity_id !== null && entity_id !== '') {
+      if (entity_id === '__null__' || entity_id === 'null') {
+        filter.entity_id = null;
+      } else {
+        filter.entity_id = entity_id;
+      }
+    }
     if (category_id) filter.category_id = category_id;
     if (payment_account_id) filter.payment_account_id = payment_account_id;
 
@@ -793,6 +799,7 @@ router.post('/import', async (req: Request, res: Response) => {
     if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
     if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
     const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
+    const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
 
     if (idxFecha < 0 || idxProyecto < 0) {
       res.status(400).json({ error: 'CSV debe tener columnas FECHA y PROYECTO' });
@@ -863,9 +870,13 @@ router.post('/import', async (req: Request, res: Response) => {
     for (let i = headerRow + 1; i < records.length; i++) {
       const row = records[i];
       const fechaStr = (row[idxFecha] || '').trim();
-      const proyectoStr = (row[idxProyecto] || '').trim();
+      let proyectoStr = (row[idxProyecto] || '').trim();
+      const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
       const descripcion = ((row[idxCategoria] || '') || (row[idxDescripcion] || '')).trim() || 'Sin descripción';
       const subcategoria = (row[idxSubcategoria] || '').trim();
+
+      if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
+      if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
 
       const date = parseSpanishDate(fechaStr);
       if (!date) {
@@ -905,12 +916,14 @@ router.post('/import', async (req: Request, res: Response) => {
         rowCreated++;
       }
 
-      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE, usar primera cuenta
+      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE, usar cuenta apropiada
       if (rowCreated === 0) {
         const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
         const amount = parseAmount(importeCell);
-        if (amount != null && amount !== 0 && accountHeaders.length > 0) {
-          const accountId = await getOrCreateAccount(accountHeaders[0]);
+        const isMovContable = /SALIDA\s*CONTABLE|INGRESO\s*CONTABLE/i.test(tipoStr);
+        if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
+          const accountName = isMovContable ? 'Mov. Contable' : accountHeaders[0];
+          const accountId = await getOrCreateAccount(accountName);
           const categoryName = subcategoria || 'Importación';
           const categoryId = await getOrCreateCategory(categoryName, amount < 0);
           const type = amount >= 0 ? 'income' : 'expense';

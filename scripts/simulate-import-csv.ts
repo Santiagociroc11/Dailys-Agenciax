@@ -55,6 +55,7 @@ if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO
 let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
 if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
 if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
+const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
 const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
 const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
 const accountHeaders = headers.slice(accountColStart).filter((h) => h && !/^\s*$/.test(h));
@@ -89,7 +90,10 @@ let skipped = 0;
 for (let i = headerRow + 1; i < records.length; i++) {
   const row = records[i];
   const fechaStr = (row[idxFecha] || '').trim();
-  const proyectoStr = (row[idxProyecto] || '').trim();
+  let proyectoStr = (row[idxProyecto] || '').trim();
+  const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
+  if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
+  if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
 
   const date = parseSpanishDate(fechaStr);
   if (!date) {
@@ -127,8 +131,9 @@ for (let i = headerRow + 1; i < records.length; i++) {
   if (rowCreated === 0) {
     const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
     const amount = parseAmount(importeCell);
-    if (amount != null && amount !== 0 && accountHeaders.length > 0) {
-      const firstAccount = accountHeaders[0];
+    const isMovContable = /SALIDA\s*CONTABLE|INGRESO\s*CONTABLE/i.test(tipoStr);
+    if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
+      const firstAccount = isMovContable ? 'Mov. Contable' : accountHeaders[0];
       totals[firstAccount] = (totals[firstAccount] ?? 0) + Math.round(amount * 100) / 100;
       created++;
     }

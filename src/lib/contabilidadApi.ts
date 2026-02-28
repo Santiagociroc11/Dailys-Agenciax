@@ -173,11 +173,13 @@ export const contabilidadApi = {
     });
   },
 
-  async getTransactions(params?: { start?: string; end?: string; entity_id?: string; category_id?: string; payment_account_id?: string }): Promise<AcctTransaction[]> {
+  async getTransactions(params?: { start?: string; end?: string; entity_id?: string | null; category_id?: string; payment_account_id?: string }): Promise<AcctTransaction[]> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
-    if (params?.entity_id) search.entity_id = params.entity_id;
+    if (params?.entity_id !== undefined) {
+      search.entity_id = params.entity_id == null || params.entity_id === '' ? '__null__' : params.entity_id;
+    }
     if (params?.category_id) search.category_id = params.category_id;
     if (params?.payment_account_id) search.payment_account_id = params.payment_account_id;
     return fetchJson<AcctTransaction[]>(url('/transactions', Object.keys(search).length > 0 ? search : undefined));

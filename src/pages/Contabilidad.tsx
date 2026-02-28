@@ -17,6 +17,8 @@ import {
   Merge,
   ArrowUp,
   ArrowDown,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -82,6 +84,9 @@ export default function Contabilidad() {
   const [mergeSourceCategory, setMergeSourceCategory] = useState<AcctCategory | null>(null);
   const [mergeCategoryTargetId, setMergeCategoryTargetId] = useState('');
   const [sortDateOrder, setSortDateOrder] = useState<'asc' | 'desc'>('desc');
+  const [pygExpandedEntity, setPygExpandedEntity] = useState<string | null>(null);
+  const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
+  const [pygDetailLoading, setPygDetailLoading] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -177,6 +182,36 @@ export default function Contabilidad() {
       setPygData(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchPygDetail(entityId: string | null) {
+    if (!entityId) return;
+    setPygDetailLoading(true);
+    try {
+      const params: { start?: string; end?: string; entity_id?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      params.entity_id = entityId;
+      const data = await contabilidadApi.getTransactions(params);
+      setPygDetailTransactions(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar detalle');
+      setPygDetailTransactions([]);
+    } finally {
+      setPygDetailLoading(false);
+    }
+  }
+
+  function togglePygExpand(row: PygRow) {
+    const key = row.entity_id ?? 'sin-asignar';
+    if (pygExpandedEntity === key) {
+      setPygExpandedEntity(null);
+      setPygDetailTransactions([]);
+    } else {
+      setPygExpandedEntity(key);
+      fetchPygDetail(row.entity_id ?? null);
     }
   }
 
@@ -785,21 +820,96 @@ export default function Contabilidad() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pygData.rows.map((r) => (
-                    <tr key={r.entity_id ?? 'sin-asignar'} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-6 py-3 font-medium">{r.entity_name}</td>
-                      <td className="px-2 py-3 text-right text-emerald-600">{r.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="px-2 py-3 text-right text-red-600">{r.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.usd.resultado >= 0 ? '+' : ''}{r.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                      <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                      <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
-                      </td>
-                    </tr>
-                  ))}
+                  {pygData.rows.map((r) => {
+                    const rowKey = r.entity_id ?? 'sin-asignar';
+                    const isExpanded = pygExpandedEntity === rowKey;
+                    const isThisRowDetail = pygExpandedEntity === rowKey;
+                    return (
+                      <React.Fragment key={rowKey}>
+                        <tr
+                          onClick={() => togglePygExpand(r)}
+                          className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none"
+                        >
+                          <td className="px-6 py-3 font-medium">
+                            <span className="inline-flex items-center gap-1">
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
+                              )}
+                              {r.entity_name}
+                            </span>
+                          </td>
+                          <td className="px-2 py-3 text-right text-emerald-600">{r.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className="px-2 py-3 text-right text-red-600">{r.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {r.usd.resultado >= 0 ? '+' : ''}{r.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-2 py-3 text-right text-emerald-600 border-l">{r.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                          <td className="px-2 py-3 text-right text-red-600">{r.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                          <td className={`px-2 py-3 text-right font-medium ${r.cop.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {r.cop.resultado >= 0 ? '+' : ''}{r.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                          </td>
+                        </tr>
+                        {isThisRowDetail && (
+                          <tr className="border-t border-gray-100 bg-gray-50/80">
+                            <td colSpan={7} className="px-6 py-4">
+                              {pygDetailLoading ? (
+                                <div className="text-sm text-gray-500 py-4">Cargando detalle…</div>
+                              ) : pygDetailTransactions.length === 0 ? (
+                                <div className="text-sm text-gray-500 py-2">No hay transacciones en este período.</div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div>
+                                    <h4 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">Entradas (ingresos)</h4>
+                                    <ul className="space-y-1 text-sm">
+                                      {pygDetailTransactions
+                                        .filter((t) => (t.amount ?? 0) > 0)
+                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                        .map((t) => (
+                                          <li key={t.id} className="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
+                                            <span className="text-gray-700">
+                                              {format(new Date(t.date), 'dd MMM yyyy', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
+                                            </span>
+                                            <span className="font-medium text-emerald-600">
+                                              +{(t.amount || 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
+                                            </span>
+                                          </li>
+                                        ))}
+                                      {pygDetailTransactions.filter((t) => (t.amount ?? 0) > 0).length === 0 && (
+                                        <li className="text-gray-500 py-1">Ninguna</li>
+                                      )}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">Salidas (gastos)</h4>
+                                    <ul className="space-y-1 text-sm">
+                                      {pygDetailTransactions
+                                        .filter((t) => (t.amount ?? 0) < 0)
+                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                        .map((t) => (
+                                          <li key={t.id} className="flex justify-between items-center py-1 border-b border-gray-100 last:border-0">
+                                            <span className="text-gray-700">
+                                              {format(new Date(t.date), 'dd MMM yyyy', { locale: es })} — {t.description || t.category_name || 'Sin descripción'}
+                                            </span>
+                                            <span className="font-medium text-red-600">
+                                              {(t.amount || 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
+                                            </span>
+                                          </li>
+                                        ))}
+                                      {pygDetailTransactions.filter((t) => (t.amount ?? 0) < 0).length === 0 && (
+                                        <li className="text-gray-500 py-1">Ninguna</li>
+                                      )}
+                                    </ul>
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
@@ -1027,7 +1137,7 @@ export default function Contabilidad() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
                     <input
                       type="date"
-                      value={currentTransaction.date ? new Date(currentTransaction.date).toISOString().split('T')[0] : ''}
+                      value={currentTransaction.date ? format(new Date(currentTransaction.date), 'yyyy-MM-dd') : ''}
                       onChange={(e) => setCurrentTransaction((p) => ({ ...p, date: e.target.value }))}
                       className="w-full px-3 py-2 border rounded-lg"
                       required
