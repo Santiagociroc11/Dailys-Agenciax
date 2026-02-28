@@ -59,13 +59,37 @@ export default function Payroll() {
   const [beneficiaries, setBeneficiaries] = useState<PayrollBeneficiaryRow[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [utilizationData, setUtilizationData] = useState<CostByUserRow[] | null>(null);
+  const [salaryUsersFull, setSalaryUsersFull] = useState<{ id: string; name: string; monthly_salary: number; currency: string }[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
     fetchRecords();
     fetchActivePayroll();
     fetchUtilizationData();
+    fetchSalaryUsers();
   }, [isAdmin]);
+
+  async function fetchSalaryUsers() {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, name, monthly_salary, currency')
+        .not('monthly_salary', 'is', null)
+        .gt('monthly_salary', 0);
+      if (error) throw error;
+      setSalaryUsersFull(
+        (data || []).map((u: { id: string; name: string; monthly_salary: number; currency?: string }) => ({
+          id: u.id,
+          name: u.name,
+          monthly_salary: u.monthly_salary,
+          currency: u.currency || 'COP',
+        }))
+      );
+    } catch (e) {
+      console.error('Error fetching salary users:', e);
+      setSalaryUsersFull([]);
+    }
+  }
 
   async function fetchUtilizationData() {
     try {
@@ -374,6 +398,9 @@ export default function Payroll() {
                 </span>
               ))}
             </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Incluye salarios fijos + tarifa por hora (estimada × 160h). Es lo que pagas en total al equipo.
+            </p>
           </div>
         )}
         {(Object.keys(totalByYearByCurrency).length > 0 || records.length > 0) && (
@@ -397,24 +424,25 @@ export default function Payroll() {
       </div>
 
       {/* Utilización de nómina: pagas igual trabajen o no */}
-      {utilizationData && utilizationData.length > 0 && (() => {
-        const salaryUsers = utilizationData.filter((m) => m.rate_source === 'salary' && m.monthly_salary != null && m.monthly_salary > 0);
-        if (salaryUsers.length === 0) return null;
-        const underutilized = salaryUsers.filter((m) => {
-          const hours = m.total_hours || 0;
-          const utilization = (hours / 160) * 100;
-          return utilization < 80 && hours < 160; // menos del 80% de jornada
+      {salaryUsersFull.length > 0 && utilizationData !== null && (() => {
+        const hoursByUser = new Map(utilizationData.map((m) => [m.user_id, m.total_hours]));
+        const userList = salaryUsersFull.map((u) => {
+          const hours = hoursByUser.get(u.id) ?? 0;
+          return { ...u, hours };
         });
-        const totalSalaryByCur = salaryUsers.reduce((acc, m) => {
-          const c = m.currency || 'COP';
-          acc[c] = (acc[c] || 0) + (m.total_cost ?? 0);
+        const totalSalaryByCur = userList.reduce((acc, u) => {
+          acc[u.currency] = (acc[u.currency] || 0) + u.monthly_salary;
           return acc;
         }, {} as Record<string, number>);
-        const totalHoursWorked = salaryUsers.reduce((acc, m) => acc + m.total_hours, 0);
-        const expectedHours = salaryUsers.length * 160;
+        const totalHoursWorked = userList.reduce((acc, u) => acc + u.hours, 0);
+        const expectedHours = userList.length * 160;
         const utilizationPct = expectedHours > 0 ? Math.round((totalHoursWorked / expectedHours) * 100) : 0;
         const totalSalaryPaid = Object.values(totalSalaryByCur).reduce((a, b) => a + b, 0);
         const effectiveCostPerHour = totalHoursWorked > 0 ? totalSalaryPaid / totalHoursWorked : 0;
+        const underutilized = userList.filter((u) => {
+          const util = (u.hours / 160) * 100;
+          return util < 80;
+        });
         return (
           <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-5">
             <h3 className="text-lg font-semibold text-amber-900 flex items-center gap-2 mb-3">
@@ -426,7 +454,7 @@ export default function Payroll() {
             </p>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
               <div className="bg-white rounded-lg p-3 text-sm">
-                <p className="text-gray-600">Nómina fija (empleados)</p>
+                <p className="text-gray-600">Nómina fija ({userList.length} empleados)</p>
                 <p className="font-bold text-amber-900">
                   {Object.entries(totalSalaryByCur).map(([cur, tot], i) => (
                     <span key={cur}>{i > 0 && ' · '}{tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}</span>
@@ -452,13 +480,13 @@ export default function Payroll() {
               <div>
                 <p className="text-sm font-medium text-amber-900 mb-2">Empleados con posible subutilización (&lt;80% jornada):</p>
                 <ul className="space-y-1 text-sm">
-                  {underutilized.map((m) => {
-                    const util = Math.round((m.total_hours / 160) * 100);
+                  {underutilized.map((u) => {
+                    const util = Math.round((u.hours / 160) * 100);
                     return (
-                      <li key={m.user_id} className="flex justify-between items-center py-1 bg-white/60 rounded px-2">
-                        <span>{m.user_name}</span>
+                      <li key={u.id} className="flex justify-between items-center py-1 bg-white/60 rounded px-2">
+                        <span>{u.name}</span>
                         <span className="text-amber-800 font-medium">
-                          {m.total_hours.toFixed(1)}h ({util}%) · {m.total_cost != null ? m.total_cost.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '—'} {m.currency}
+                          {u.hours.toFixed(1)}h ({util}%) · {u.monthly_salary.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {u.currency}
                         </span>
                       </li>
                     );
