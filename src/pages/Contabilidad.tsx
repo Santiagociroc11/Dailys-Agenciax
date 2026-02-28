@@ -29,6 +29,46 @@ type ConfigTab = 'entities' | 'categories' | 'accounts';
 
 type PygDetailSort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 
+function ConfigDetailTable({
+  transactions,
+  showEntity = true,
+  showCategory = true,
+}: {
+  transactions: AcctTransaction[];
+  showEntity?: boolean;
+  showCategory?: boolean;
+}) {
+  const sorted = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-gray-600 border-b">
+          <th className="py-2 pr-4">Fecha</th>
+          {showEntity && <th className="py-2 pr-4">Proyecto</th>}
+          {showCategory && <th className="py-2 pr-4">Categoría</th>}
+          <th className="py-2 pr-4">Descripción</th>
+          <th className="py-2 pr-4">Cuenta</th>
+          <th className="py-2 text-right">Monto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((t) => (
+          <tr key={t.id} className="border-b border-gray-100 last:border-0">
+            <td className="py-2 pr-4">{format(new Date(t.date), 'dd/MM/yyyy', { locale: es })}</td>
+            {showEntity && <td className="py-2 pr-4">{t.entity_name ?? '—'}</td>}
+            {showCategory && <td className="py-2 pr-4">{t.category_name ?? '—'}</td>}
+            <td className="py-2 pr-4 max-w-[200px] truncate">{t.description || '—'}</td>
+            <td className="py-2 pr-4">{t.payment_account_name ?? '—'}</td>
+            <td className={`py-2 text-right font-medium ${(t.amount ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {(t.amount ?? 0) >= 0 ? '+' : ''}{(t.amount ?? 0).toLocaleString(t.currency === 'COP' ? 'es-CO' : 'en-US', { minimumFractionDigits: t.currency === 'COP' ? 0 : 2 })} {t.currency || 'USD'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function PygDetailPanel({
   transactions,
   groupBy,
@@ -232,6 +272,14 @@ export default function Contabilidad() {
   const [pygDetailLoading, setPygDetailLoading] = useState(false);
   const [pygDetailGroup, setPygDetailGroup] = useState<'month' | 'category'>('month');
   const [pygDetailSort, setPygDetailSort] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+  const [configEntityExpanded, setConfigEntityExpanded] = useState<string | null>(null);
+  const [configCategoryExpanded, setConfigCategoryExpanded] = useState<string | null>(null);
+  const [configDetailTransactions, setConfigDetailTransactions] = useState<AcctTransaction[]>([]);
+  const [configDetailLoading, setConfigDetailLoading] = useState(false);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
+  const [transactionsPage, setTransactionsPage] = useState(1);
+  const [transactionsPageSize, setTransactionsPageSize] = useState(25);
+  const [showSelectAllModal, setShowSelectAllModal] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -239,6 +287,18 @@ export default function Contabilidad() {
     fetchCategories();
     fetchAccounts();
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (activeTab === 'config') {
+      setConfigEntityExpanded(null);
+      setConfigCategoryExpanded(null);
+      setConfigDetailTransactions([]);
+    }
+  }, [activeTab, configTab]);
+
+  useEffect(() => {
+    setTransactionsPage(1);
+  }, [filterStart, filterEnd, filterEntity, filterCategory, filterAccount]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -357,6 +417,43 @@ export default function Contabilidad() {
     } else {
       setPygExpandedEntity(key);
       fetchPygDetail(row.entity_id ?? null);
+    }
+  }
+
+  async function fetchConfigDetail(type: 'entity' | 'category', id: string) {
+    setConfigDetailLoading(true);
+    try {
+      const params = type === 'entity' ? { entity_id: id } : { category_id: id };
+      const data = await contabilidadApi.getTransactions(params);
+      setConfigDetailTransactions(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar detalle');
+      setConfigDetailTransactions([]);
+    } finally {
+      setConfigDetailLoading(false);
+    }
+  }
+
+  function toggleConfigEntityExpand(e: AcctEntity) {
+    if (configEntityExpanded === e.id) {
+      setConfigEntityExpanded(null);
+      setConfigDetailTransactions([]);
+    } else {
+      setConfigEntityExpanded(e.id);
+      setConfigCategoryExpanded(null);
+      fetchConfigDetail('entity', e.id);
+    }
+  }
+
+  function toggleConfigCategoryExpand(c: AcctCategory) {
+    if (configCategoryExpanded === c.id) {
+      setConfigCategoryExpanded(null);
+      setConfigDetailTransactions([]);
+    } else {
+      setConfigCategoryExpanded(c.id);
+      setConfigEntityExpanded(null);
+      fetchConfigDetail('category', c.id);
     }
   }
 
@@ -582,6 +679,71 @@ export default function Contabilidad() {
     }
   }
 
+  async function handleDeleteSelected() {
+    const ids = Array.from(selectedTransactionIds).filter((id) => transactions.some((t) => t.id === id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Eliminar ${ids.length} transacción(es) seleccionada(s)?`)) return;
+    try {
+      await Promise.all(ids.map((id) => contabilidadApi.deleteTransaction(id, currentUser?.id)));
+      toast.success(`${ids.length} transacción(es) eliminada(s)`);
+      setSelectedTransactionIds(new Set());
+      fetchTransactions();
+    } catch (e) {
+      toast.error('Error al eliminar');
+    }
+  }
+
+  function toggleSelectTransaction(id: string) {
+    setSelectedTransactionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const sortedTransactions = React.useMemo(
+    () =>
+      [...transactions].sort((a, b) => {
+        const da = new Date(a.date).getTime();
+        const db = new Date(b.date).getTime();
+        return sortDateOrder === 'desc' ? db - da : da - db;
+      }),
+    [transactions, sortDateOrder]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedTransactions.length / transactionsPageSize));
+  const paginatedTransactions = sortedTransactions.slice(
+    (transactionsPage - 1) * transactionsPageSize,
+    transactionsPage * transactionsPageSize
+  );
+
+  const allOnPageSelected = paginatedTransactions.length > 0 && paginatedTransactions.every((t) => selectedTransactionIds.has(t.id));
+  const allTotalSelected = sortedTransactions.length > 0 && sortedTransactions.every((t) => selectedTransactionIds.has(t.id));
+  const hasMultiplePages = sortedTransactions.length > transactionsPageSize;
+
+  function handleSelectAllClick() {
+    if (allTotalSelected) {
+      setSelectedTransactionIds(new Set());
+      return;
+    }
+    if (hasMultiplePages) {
+      setShowSelectAllModal(true);
+    } else {
+      setSelectedTransactionIds(new Set(paginatedTransactions.map((t) => t.id)));
+    }
+  }
+
+  function selectAllPage() {
+    setSelectedTransactionIds(new Set(paginatedTransactions.map((t) => t.id)));
+    setShowSelectAllModal(false);
+  }
+
+  function selectAllTotal() {
+    setSelectedTransactionIds(new Set(sortedTransactions.map((t) => t.id)));
+    setShowSelectAllModal(false);
+  }
+
   async function handleImportCsv() {
     if (!importCsvText.trim()) {
       toast.error('Pega el contenido del CSV');
@@ -765,6 +927,15 @@ export default function Contabilidad() {
                 ))}
               </select>
             </div>
+            {selectedTransactionIds.size > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                className="bg-red-100 text-red-700 px-4 py-2 rounded-lg hover:bg-red-200 flex items-center gap-2"
+              >
+                <Trash2 className="w-5 h-5" />
+                Borrar {selectedTransactionIds.size} seleccionada(s)
+              </button>
+            )}
             <button
               onClick={() => setShowImportModal(true)}
               className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2"
@@ -805,6 +976,14 @@ export default function Contabilidad() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-4 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allTotalSelected || allOnPageSelected}
+                        onChange={handleSelectAllClick}
+                        className="rounded border-gray-300"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">
                       <button
                         onClick={() => setSortDateOrder((o) => (o === 'desc' ? 'asc' : 'desc'))}
@@ -824,14 +1003,16 @@ export default function Contabilidad() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...transactions]
-                    .sort((a, b) => {
-                      const da = new Date(a.date).getTime();
-                      const db = new Date(b.date).getTime();
-                      return sortDateOrder === 'desc' ? db - da : da - db;
-                    })
-                    .map((t) => (
+                  {paginatedTransactions.map((t) => (
                     <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3 w-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedTransactionIds.has(t.id)}
+                          onChange={() => toggleSelectTransaction(t.id)}
+                          className="rounded border-gray-300"
+                        />
+                      </td>
                       <td className="px-6 py-3">{format(new Date(t.date), 'dd/MM/yyyy', { locale: es })}</td>
                       <td className="px-6 py-3 capitalize">{t.type}</td>
                       <td className="px-6 py-3">{t.entity_name ?? '—'}</td>
@@ -849,8 +1030,50 @@ export default function Contabilidad() {
                   ))}
                 </tbody>
               </table>
-              {transactions.length === 0 && (
+              {transactions.length === 0 ? (
                 <div className="p-12 text-center text-gray-500">No hay transacciones en el período seleccionado.</div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-t border-gray-100 bg-gray-50 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600">Filas por página:</span>
+                    <select
+                      value={transactionsPageSize}
+                      onChange={(e) => {
+                        setTransactionsPageSize(Number(e.target.value));
+                        setTransactionsPage(1);
+                      }}
+                      className="px-2 py-1 border rounded text-gray-700"
+                    >
+                      {[10, 25, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                    <span className="text-gray-500">
+                      {((transactionsPage - 1) * transactionsPageSize) + 1}–{Math.min(transactionsPage * transactionsPageSize, sortedTransactions.length)} de {sortedTransactions.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setTransactionsPage((p) => Math.max(1, p - 1))}
+                      disabled={transactionsPage <= 1}
+                      className="px-3 py-1 rounded border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      Anterior
+                    </button>
+                    <span className="px-2 text-gray-600">
+                      Página {transactionsPage} de {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTransactionsPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={transactionsPage >= totalPages}
+                      className="px-3 py-1 rounded border bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -1123,8 +1346,8 @@ export default function Contabilidad() {
                 <Plus className="w-5 h-5" />
                 Nueva entidad
               </button>
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
@@ -1134,15 +1357,42 @@ export default function Contabilidad() {
                   </thead>
                   <tbody>
                     {entities.map((e) => (
-                      <tr key={e.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-6 py-3">{e.name}</td>
-                        <td className="px-6 py-3 capitalize">{e.type}</td>
-                        <td className="px-6 py-3 text-right">
-                          <button onClick={() => { setMergeSourceEntity(e); setMergeTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra entidad"><Merge className="w-4 h-4 inline" /></button>
-                          <button onClick={() => { setCurrentEntity(e); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
-                          <button onClick={() => handleDeleteEntity(e.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={e.id}>
+                        <tr
+                          onClick={() => toggleConfigEntityExpand(e)}
+                          className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none"
+                        >
+                          <td className="px-6 py-3">
+                            <span className="inline-flex items-center gap-1">
+                              {configEntityExpanded === e.id ? (
+                                <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
+                              )}
+                              {e.name}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 capitalize">{e.type}</td>
+                          <td className="px-6 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                            <button onClick={() => { setMergeSourceEntity(e); setMergeTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra entidad"><Merge className="w-4 h-4 inline" /></button>
+                            <button onClick={() => { setCurrentEntity(e); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
+                            <button onClick={() => handleDeleteEntity(e.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
+                          </td>
+                        </tr>
+                        {configEntityExpanded === e.id && (
+                          <tr className="border-t border-gray-100 bg-gray-50/80">
+                            <td colSpan={3} className="px-6 py-4">
+                              {configDetailLoading ? (
+                                <div className="text-sm text-gray-500 py-4">Cargando…</div>
+                              ) : configDetailTransactions.length === 0 ? (
+                                <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
+                              ) : (
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity={false} showCategory />
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1159,8 +1409,8 @@ export default function Contabilidad() {
                 <Plus className="w-5 h-5" />
                 Nueva categoría
               </button>
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
@@ -1170,15 +1420,42 @@ export default function Contabilidad() {
                   </thead>
                   <tbody>
                     {categories.map((c) => (
-                      <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-6 py-3">{c.name}</td>
-                        <td className="px-6 py-3 capitalize">{c.type}</td>
-                        <td className="px-6 py-3 text-right">
-                          <button onClick={() => { setMergeSourceCategory(c); setMergeCategoryTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra categoría"><Merge className="w-4 h-4 inline" /></button>
-                          <button onClick={() => { setCurrentCategory(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
-                          <button onClick={() => handleDeleteCategory(c.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={c.id}>
+                        <tr
+                          onClick={() => toggleConfigCategoryExpand(c)}
+                          className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none"
+                        >
+                          <td className="px-6 py-3">
+                            <span className="inline-flex items-center gap-1">
+                              {configCategoryExpanded === c.id ? (
+                                <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
+                              )}
+                              {c.name}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 capitalize">{c.type}</td>
+                          <td className="px-6 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                            <button onClick={() => { setMergeSourceCategory(c); setMergeCategoryTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra categoría"><Merge className="w-4 h-4 inline" /></button>
+                            <button onClick={() => { setCurrentCategory(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
+                            <button onClick={() => handleDeleteCategory(c.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
+                          </td>
+                        </tr>
+                        {configCategoryExpanded === c.id && (
+                          <tr className="border-t border-gray-100 bg-gray-50/80">
+                            <td colSpan={3} className="px-6 py-4">
+                              {configDetailLoading ? (
+                                <div className="text-sm text-gray-500 py-4">Cargando…</div>
+                              ) : configDetailTransactions.length === 0 ? (
+                                <div className="text-sm text-gray-500 py-2">No hay transacciones.</div>
+                              ) : (
+                                <ConfigDetailTable transactions={configDetailTransactions} showEntity showCategory={false} />
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1220,6 +1497,40 @@ export default function Contabilidad() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showSelectAllModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-4">
+            <h3 className="font-semibold text-lg mb-3">Seleccionar transacciones</h3>
+            <p className="text-gray-600 text-sm mb-4">
+              ¿Seleccionar solo las de esta página o todas las transacciones filtradas?
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={selectAllPage}
+                className="w-full px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-left"
+              >
+                Solo esta página ({paginatedTransactions.length})
+              </button>
+              <button
+                type="button"
+                onClick={selectAllTotal}
+                className="w-full px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-left"
+              >
+                Todas ({sortedTransactions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSelectAllModal(false)}
+                className="w-full px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 mt-2"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

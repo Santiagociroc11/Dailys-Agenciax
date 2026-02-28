@@ -891,8 +891,10 @@ router.post('/import', async (req: Request, res: Response) => {
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
       const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-      const descripcion = ((row[idxCategoria] || '') || (row[idxDescripcion] || '')).trim() || 'Sin descripción';
-      const subcategoria = (row[idxSubcategoria] || '').trim();
+      const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+      const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
+      const categoryName = subcategoria || categoriaDetalle || 'Importación';
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
@@ -916,7 +918,6 @@ router.post('/import', async (req: Request, res: Response) => {
         if (!accountName) continue;
 
         const accountId = await getOrCreateAccount(accountName);
-        const categoryName = subcategoria || 'Importación';
         const categoryId = await getOrCreateCategory(categoryName, amount < 0);
         const type = amount >= 0 ? 'income' : 'expense';
 
@@ -943,7 +944,6 @@ router.post('/import', async (req: Request, res: Response) => {
         if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
           const accountName = isMovContable ? 'Mov. Contable' : accountHeaders[0];
           const accountId = await getOrCreateAccount(accountName);
-          const categoryName = subcategoria || 'Importación';
           const categoryId = await getOrCreateCategory(categoryName, amount < 0);
           const type = amount >= 0 ? 'income' : 'expense';
           await AcctTransaction.create({
