@@ -992,6 +992,49 @@ export async function getProjectHoursConsumed(): Promise<Record<string, number>>
   }
 }
 
+export interface ProjectCostConsumedRow {
+  project_id: string;
+  cost_consumed: number;
+  currency: string;
+}
+
+/** Obtiene coste consumido por proyecto (horas × tarifa de usuarios) */
+export async function getProjectCostConsumed(): Promise<ProjectCostConsumedRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_project_cost_consumed', {});
+    if (error) throw error;
+    return (data as ProjectCostConsumedRow[]) || [];
+  } catch (error) {
+    console.error('Error getting project cost consumed:', error);
+    return [];
+  }
+}
+
+export interface CostByClientRow {
+  client_id: string;
+  client_name: string;
+  cost_consumed: number;
+  currency: string;
+}
+
+/** Obtiene coste consumido por cliente en un período (proyectos del cliente) */
+export async function getCostByClient(
+  startDate: string,
+  endDate: string
+): Promise<CostByClientRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_cost_by_client', {
+      start_date: startDate,
+      end_date: endDate,
+    });
+    if (error) throw error;
+    return (data as CostByClientRow[]) || [];
+  } catch (error) {
+    console.error('Error getting cost by client:', error);
+    return [];
+  }
+}
+
 /** Obtiene horas trabajadas para facturación (por proyecto y usuario) */
 export async function getHoursForBilling(
   startDate: string,

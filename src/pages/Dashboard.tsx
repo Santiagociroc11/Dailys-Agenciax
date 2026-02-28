@@ -13,7 +13,7 @@ import {
   Briefcase,
   DollarSign
 } from 'lucide-react';
-import { getProjectHoursConsumed } from '../lib/metrics';
+import { getProjectHoursConsumed, getProjectCostConsumed } from '../lib/metrics';
 
 interface PerformanceMetrics {
   tasksPending: number;
@@ -50,6 +50,14 @@ interface BudgetAlert {
   budgetHours: number;
   percentConsumed: number;
   status: 'over' | 'warning';
+  costConsumed?: { cost: number; currency: string }[];
+  budgetAmount?: number | null;
+}
+
+interface ActivePayrollSummary {
+  total: number;
+  currency: string;
+  count: number;
 }
 
 const Dashboard = () => {
@@ -57,6 +65,7 @@ const Dashboard = () => {
   const [userMetrics, setUserMetrics] = useState<PerformanceMetrics | null>(null);
   const [teamMetrics, setTeamMetrics] = useState<UserStats[]>([]);
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
+  const [activePayroll, setActivePayroll] = useState<ActivePayrollSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -110,12 +119,18 @@ const Dashboard = () => {
 
   async function fetchBudgetAlerts() {
     try {
-      const [hoursMap, { data: projects }] = await Promise.all([
+      const [hoursMap, costRows, { data: projects }] = await Promise.all([
         getProjectHoursConsumed(),
-        supabase.from('projects').select('id, name, budget_hours').eq('is_archived', false),
+        getProjectCostConsumed(),
+        supabase.from('projects').select('id, name, budget_hours, budget_amount').eq('is_archived', false),
       ]);
+      const costByProject: Record<string, { cost: number; currency: string }[]> = {};
+      costRows.forEach((r) => {
+        if (!costByProject[r.project_id]) costByProject[r.project_id] = [];
+        costByProject[r.project_id].push({ cost: r.cost_consumed, currency: r.currency });
+      });
       const alerts: BudgetAlert[] = [];
-      (projects || []).forEach((p: { id: string; name: string; budget_hours?: number | null }) => {
+      (projects || []).forEach((p: { id: string; name: string; budget_hours?: number | null; budget_amount?: number | null }) => {
         if (p.budget_hours == null || p.budget_hours <= 0) return;
         const consumed = hoursMap[p.id] ?? 0;
         const percent = Math.round((consumed / p.budget_hours) * 100);
@@ -127,6 +142,8 @@ const Dashboard = () => {
             budgetHours: p.budget_hours,
             percentConsumed: percent,
             status: percent >= 100 ? 'over' : 'warning',
+            costConsumed: costByProject[p.id],
+            budgetAmount: p.budget_amount,
           });
         }
       });
@@ -137,10 +154,45 @@ const Dashboard = () => {
     }
   }
 
+  async function fetchActivePayroll() {
+    try {
+      const { data: users, error } = await supabase
+        .from('users')
+        .select('id, monthly_salary, hourly_rate, currency');
+      if (error) throw error;
+      const byCurrency: Record<string, { total: number; count: number }> = {};
+      const HOURS_PER_MONTH = 160;
+      (users || []).forEach((u: { monthly_salary?: number | null; hourly_rate?: number | null; currency?: string }) => {
+        const hasSalary = u.monthly_salary != null && u.monthly_salary > 0;
+        const hasHourly = u.hourly_rate != null && u.hourly_rate > 0;
+        const amount = hasSalary && u.monthly_salary
+          ? u.monthly_salary
+          : hasHourly && u.hourly_rate
+            ? u.hourly_rate * HOURS_PER_MONTH
+            : 0;
+        if (amount <= 0) return;
+        const cur = u.currency || 'COP';
+        if (!byCurrency[cur]) byCurrency[cur] = { total: 0, count: 0 };
+        byCurrency[cur].total += amount;
+        byCurrency[cur].count += 1;
+      });
+      setActivePayroll(
+        Object.entries(byCurrency).map(([currency, v]) => ({
+          total: v.total,
+          currency,
+          count: v.count,
+        }))
+      );
+    } catch (e) {
+      console.error('Error fetching active payroll:', e);
+      setActivePayroll([]);
+    }
+  }
+
   async function fetchTeamMetrics() {
     setLoading(true);
     try {
-      await fetchBudgetAlerts();
+      await Promise.all([fetchBudgetAlerts(), fetchActivePayroll()]);
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
       const activeProjectIds = (activeProjects || []).map((p) => p.id);
       if (activeProjectIds.length === 0) {
@@ -587,6 +639,30 @@ const Dashboard = () => {
         </>
       )}
 
+      {isAdmin && activePayroll.length > 0 && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center">
+            <DollarSign className="w-6 h-6 mr-2 text-emerald-600" />
+            Nómina Activa Total del Equipo
+          </h2>
+          <div className="flex flex-wrap gap-4">
+            {activePayroll.map((p) => (
+              <div
+                key={p.currency}
+                className="inline-flex items-baseline gap-2 rounded-lg bg-emerald-50 px-4 py-2 border border-emerald-200"
+              >
+                <span className="text-2xl font-bold text-emerald-700">
+                  {p.total.toLocaleString('es-CO')} {p.currency}
+                </span>
+                <span className="text-sm text-emerald-600">
+                  / mes ({p.count} {p.count === 1 ? 'persona' : 'personas'})
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {isAdmin && budgetAlerts.length > 0 && (
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4 flex items-center">
@@ -597,16 +673,32 @@ const Dashboard = () => {
             {budgetAlerts.map((a) => (
               <div
                 key={a.projectId}
-                className={`flex items-center justify-between p-3 rounded-lg border ${
+                className={`flex flex-col gap-1 p-3 rounded-lg border ${
                   a.status === 'over' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
                 }`}
               >
-                <span className="font-medium text-gray-900">{a.projectName}</span>
-                <span className={`text-sm font-semibold ${
-                  a.status === 'over' ? 'text-red-700' : 'text-amber-700'
-                }`}>
-                  {a.hoursConsumed.toFixed(1)}h / {a.budgetHours}h ({a.percentConsumed}%)
-                </span>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-gray-900">{a.projectName}</span>
+                  <span className={`text-sm font-semibold ${
+                    a.status === 'over' ? 'text-red-700' : 'text-amber-700'
+                  }`}>
+                    {a.hoursConsumed.toFixed(1)}h / {a.budgetHours}h ({a.percentConsumed}%)
+                  </span>
+                </div>
+                {((a.costConsumed?.length ?? 0) > 0 || (a.budgetAmount != null && a.budgetAmount > 0)) && (
+                  <div className="text-xs text-gray-600 flex gap-2">
+                    {a.costConsumed?.length ? (
+                      <span>
+                        Coste: {a.costConsumed.map((c, i) => (
+                          <span key={c.currency}>{i > 0 && ' · '}{c.cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {c.currency}</span>
+                        ))}
+                      </span>
+                    ) : null}
+                    {a.budgetAmount != null && a.budgetAmount > 0 && (
+                      <span>Presupuesto: €{a.budgetAmount.toLocaleString()}</span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

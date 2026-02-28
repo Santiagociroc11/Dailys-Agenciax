@@ -9,7 +9,7 @@ import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import PhaseBadge from '../components/PhaseBadge';
-import { getProjectHoursConsumed } from '../lib/metrics';
+import { getProjectHoursConsumed, getProjectCostConsumed } from '../lib/metrics';
 import { apiUrl } from '../lib/apiBase';
 
 interface Project {
@@ -84,6 +84,7 @@ function Projects() {
     budget_amount: null as number | null,
   });
   const [hoursConsumedByProject, setHoursConsumedByProject] = useState<Record<string, number>>({});
+  const [costConsumedByProject, setCostConsumedByProject] = useState<Record<string, { cost: number; currency: string }[]>>({});
   const [templates, setTemplates] = useState<{ id: string; name: string; description: string | null; tasks: unknown[]; phases?: { name: string; order: number }[] }[]>([]);
   const [useTemplateMode, setUseTemplateMode] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -175,8 +176,17 @@ function Projects() {
         subtasksPromise,
       ]);
 
-      const hoursMap = await getProjectHoursConsumed();
+      const [hoursMap, costRows] = await Promise.all([
+        getProjectHoursConsumed(),
+        getProjectCostConsumed(),
+      ]);
       setHoursConsumedByProject(hoursMap);
+      const costMap: Record<string, { cost: number; currency: string }[]> = {};
+      costRows.forEach((r) => {
+        if (!costMap[r.project_id]) costMap[r.project_id] = [];
+        costMap[r.project_id].push({ cost: r.cost_consumed, currency: r.currency });
+      });
+      setCostConsumedByProject(costMap);
 
       if (projectsError) throw projectsError;
       setProjects(projectsData || []);
@@ -930,6 +940,21 @@ function Projects() {
                     </div>
                   );
                 })()}
+                {(() => {
+                  const costs = costConsumedByProject[project.id];
+                  if (!costs || costs.length === 0) return null;
+                  return (
+                    <div className="mb-3 flex items-center text-sm text-gray-600">
+                      <span className="font-medium text-indigo-600 mr-1">Coste real:</span>
+                      {costs.map((c, i) => (
+                        <span key={c.currency}>
+                          {i > 0 && ' · '}
+                          {c.cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {c.currency}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <div className="mb-4">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-sm font-medium text-gray-700">Progreso (Aprobado)</span>
@@ -1412,6 +1437,21 @@ function Projects() {
                     )}
                   </div>
                 </div>
+                {(costConsumedByProject[selectedProject.id]?.length ?? 0) > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Coste real consumido
+                    </label>
+                    <p className="p-2 bg-indigo-50 rounded-md font-semibold text-indigo-700">
+                      {costConsumedByProject[selectedProject.id].map((c, i) => (
+                        <span key={c.currency}>
+                          {i > 0 && ' · '}
+                          {c.cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {c.currency}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

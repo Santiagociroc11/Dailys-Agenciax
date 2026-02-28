@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { executeQuery } from '../lib/db/queryExecutor.js';
 import type { QueryRequest } from '../lib/db/types.js';
-import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, Phase, ProjectTemplate, TaskTemplate, Task, Subtask, StatusHistory } from '../models/index.js';
+import { Area, AreaUserAssignment, User, TaskWorkAssignment, Project, Phase, ProjectTemplate, TaskTemplate, Task, Subtask, StatusHistory, Client } from '../models/index.js';
 
 export async function handleDbQuery(req: Request, res: Response): Promise<void> {
   try {
@@ -186,6 +186,114 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         project_id: r._id,
         hours_consumed: Math.round((r.total_minutes / 60) * 100) / 100,
       }));
+    } else if (fn === 'get_project_cost_consumed') {
+      const pipeline = [
+        {
+          $match: {
+            project_id: { $ne: null } as Record<string, unknown>,
+            actual_duration: { $exists: true, $gt: 0 } as Record<string, unknown>,
+          },
+        },
+        { $group: { _id: { project_id: '$project_id', user_id: '$user_id' }, total_minutes: { $sum: '$actual_duration' } } },
+      ];
+      const results = await TaskWorkAssignment.aggregate(pipeline).exec();
+      const userIds = [...new Set((results as { _id: { project_id: string; user_id: string } }[]).map((r) => r._id.user_id))];
+      const users = await User.find({ id: { $in: userIds } }).select('id hourly_rate monthly_salary currency').lean().exec();
+      const userMap = new Map(
+        users.map((u: { id: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string }) => [
+          u.id,
+          {
+            rate: (u.hourly_rate != null && u.hourly_rate > 0)
+              ? u.hourly_rate
+              : (u.monthly_salary != null && u.monthly_salary > 0)
+                ? u.monthly_salary / 160
+                : 0,
+            currency: u.currency || 'COP',
+          },
+        ])
+      );
+      const projectCosts: Record<string, Record<string, number>> = {};
+      for (const r of results as { _id: { project_id: string; user_id: string }; total_minutes: number }[]) {
+        const uid = r._id.user_id;
+        const pid = r._id.project_id;
+        const u = userMap.get(uid);
+        if (!u || u.rate <= 0) continue;
+        const hours = r.total_minutes / 60;
+        const cost = hours * u.rate;
+        const cur = u.currency;
+        if (!projectCosts[pid]) projectCosts[pid] = {};
+        projectCosts[pid][cur] = (projectCosts[pid][cur] || 0) + cost;
+      }
+      data = Object.entries(projectCosts).flatMap(([project_id, byCur]) =>
+        Object.entries(byCur).map(([currency, cost]) => ({
+          project_id,
+          cost_consumed: Math.round(cost * 100) / 100,
+          currency,
+        }))
+      );
+    } else if (fn === 'get_cost_by_client') {
+      const startDate = params.start_date as string;
+      const endDate = params.end_date as string;
+      if (!startDate || !endDate) {
+        res.status(400).json({ data: null, error: { message: 'Faltan start_date y end_date' } });
+        return;
+      }
+      const pipeline = [
+        {
+          $match: {
+            project_id: { $ne: null } as Record<string, unknown>,
+            date: { $gte: startDate, $lte: endDate },
+            actual_duration: { $exists: true, $gt: 0 } as Record<string, unknown>,
+          },
+        },
+        { $group: { _id: { project_id: '$project_id', user_id: '$user_id' }, total_minutes: { $sum: '$actual_duration' } } },
+      ];
+      const results = await TaskWorkAssignment.aggregate(pipeline).exec();
+      const userIds = [...new Set((results as { _id: { project_id: string; user_id: string } }[]).map((r) => r._id.user_id))];
+      const projectIds = [...new Set((results as { _id: { project_id: string; user_id: string } }[]).map((r) => r._id.project_id))];
+      const [users, projects] = await Promise.all([
+        User.find({ id: { $in: userIds } }).select('id hourly_rate monthly_salary currency').lean().exec(),
+        Project.find({ id: { $in: projectIds } }).select('id client_id').lean().exec(),
+      ]);
+      const userMap = new Map(
+        users.map((u: { id: string; hourly_rate?: number | null; monthly_salary?: number | null; currency?: string }) => [
+          u.id,
+          {
+            rate: (u.hourly_rate != null && u.hourly_rate > 0)
+              ? u.hourly_rate
+              : (u.monthly_salary != null && u.monthly_salary > 0)
+                ? (u.monthly_salary as number) / 160
+                : 0,
+            currency: u.currency || 'COP',
+          },
+        ])
+      );
+      const projectToClient = new Map((projects as { id: string; client_id?: string | null }[]).map((p) => [p.id, p.client_id]));
+      const clientCosts: Record<string, Record<string, number>> = {};
+      for (const r of results as { _id: { project_id: string; user_id: string }; total_minutes: number }[]) {
+        const cid = projectToClient.get(r._id.project_id);
+        if (!cid) continue;
+        const u = userMap.get(r._id.user_id);
+        if (!u || u.rate <= 0) continue;
+        const hours = r.total_minutes / 60;
+        const cost = hours * u.rate;
+        const cur = u.currency;
+        if (!clientCosts[cid]) clientCosts[cid] = {};
+        clientCosts[cid][cur] = (clientCosts[cid][cur] || 0) + cost;
+      }
+      const clientIds = Object.keys(clientCosts);
+      const clientNames = clientIds.length > 0
+        ? await Client.find({ id: { $in: clientIds } }).select('id name').lean().exec()
+        : [];
+      const clientNameMap = new Map((clientNames as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+      data = Object.entries(clientCosts).flatMap(([client_id, byCur]) =>
+        Object.entries(byCur).map(([currency, cost]) => ({
+          client_id,
+          client_name: clientNameMap.get(client_id) || 'Sin nombre',
+          cost_consumed: Math.round(cost * 100) / 100,
+          currency,
+        }))
+      );
     } else if (fn === 'get_all_users_metrics') {
       const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
       const activeTaskIds = await Task.find({ project_id: { $in: activeProjectIds } }).select('id').lean().exec().then((r) => r.map((t: { id: string }) => t.id));

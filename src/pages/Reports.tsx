@@ -31,6 +31,7 @@ import {
   getHoursForBilling,
   getCostByUser,
   getCostByArea,
+  getCostByClient,
   getCapacityByUser,
   getDateRangeForPeriod,
   type UserMetrics,
@@ -40,7 +41,8 @@ import {
   type PeriodType,
   type HoursForBillingRow,
   type CostByUserRow,
-  type CostByAreaRow
+  type CostByAreaRow,
+  type CostByClientRow
 } from '../lib/metrics';
 
 interface DetailedMetrics {
@@ -98,6 +100,7 @@ export default function Reports() {
   const [areaCosts, setAreaCosts] = useState<CostByAreaRow[]>([]);
   const [utilizationMetrics, setUtilizationMetrics] = useState<UtilizationMetrics[]>([]);
   const [costMetrics, setCostMetrics] = useState<CostByUserRow[]>([]);
+  const [costByClient, setCostByClient] = useState<CostByClientRow[]>([]);
   const [capacityData, setCapacityData] = useState<Awaited<ReturnType<typeof getCapacityByUser>>>([]);
   const [billingHours, setBillingHours] = useState<HoursForBillingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,16 +126,18 @@ export default function Reports() {
     try {
       switch (activeTab) {
         case 'overview':
-          const [projects, capacity, hours, cost] = await Promise.all([
+          const [projects, capacity, hours, cost, costClient] = await Promise.all([
             getProjectMetrics(),
             getCapacityByUser(8, 5),
             getHoursForBilling(dateRange.startDate, dateRange.endDate),
             getCostByUser(dateRange.startDate, dateRange.endDate),
+            getCostByClient(dateRange.startDate, dateRange.endDate),
           ]);
           setProjectMetrics(projects);
           setCapacityData(capacity);
           setBillingHours(hours);
           setCostMetrics(cost);
+          setCostByClient(costClient);
           break;
         case 'users':
           const users = await getAllUsersMetrics();
@@ -155,8 +160,12 @@ export default function Reports() {
           setUtilizationMetrics(utilization);
           break;
         case 'cost':
-          const costData = await getCostByUser(dateRange.startDate, dateRange.endDate);
+          const [costData, costClientData] = await Promise.all([
+            getCostByUser(dateRange.startDate, dateRange.endDate),
+            getCostByClient(dateRange.startDate, dateRange.endDate),
+          ]);
           setCostMetrics(costData);
+          setCostByClient(costClientData);
           break;
       }
     } catch (error) {
@@ -449,6 +458,7 @@ export default function Reports() {
           capacity={capacityData}
           billingHours={billingHours}
           cost={costMetrics}
+          costByClient={costByClient}
           dateRange={dateRange}
           onNavigateProjects={() => setActiveTab('projects')}
           onNavigateCapacity={() => navigate('/capacity')}
@@ -459,7 +469,7 @@ export default function Reports() {
       {activeTab === 'projects' && <ProjectsMetrics metrics={projectMetrics} />}
       {activeTab === 'areas' && <AreasMetrics metrics={areaMetrics} costs={areaCosts} />}
       {activeTab === 'utilization' && <UtilizationReport metrics={utilizationMetrics} />}
-      {activeTab === 'cost' && <CostReport metrics={costMetrics} />}
+      {activeTab === 'cost' && <CostReport metrics={costMetrics} costByClient={costByClient} />}
     </div>
   );
 }
@@ -469,6 +479,7 @@ function OverviewSummary({
   capacity,
   billingHours,
   cost,
+  costByClient,
   dateRange,
   onNavigateProjects,
   onNavigateCapacity,
@@ -478,6 +489,7 @@ function OverviewSummary({
   capacity: Awaited<ReturnType<typeof getCapacityByUser>>;
   billingHours: HoursForBillingRow[];
   cost: CostByUserRow[];
+  costByClient: CostByClientRow[];
   dateRange: { startDate: string; endDate: string };
   onNavigateProjects: () => void;
   onNavigateCapacity: () => void;
@@ -614,7 +626,41 @@ function OverviewSummary({
         </div>
       )}
 
-      {projectsAtRisk.length === 0 && overloaded.length === 0 && (
+      {/* Coste por cliente */}
+      {costByClient.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="px-6 py-4 border-b bg-indigo-50 flex justify-between items-center">
+            <h3 className="font-medium text-indigo-900">Coste por cliente (período)</h3>
+            <button
+              onClick={onNavigateCost}
+              className="text-sm text-indigo-700 hover:text-indigo-800 font-medium"
+            >
+              Ver facturación →
+            </button>
+          </div>
+          <div className="divide-y max-h-48 overflow-y-auto">
+            {(() => {
+              const byClient = costByClient.reduce((acc, r) => {
+                if (!acc[r.client_id]) acc[r.client_id] = { name: r.client_name, byCur: {} as Record<string, number> };
+                acc[r.client_id].byCur[r.currency] = (acc[r.client_id].byCur[r.currency] || 0) + r.cost_consumed;
+                return acc;
+              }, {} as Record<string, { name: string; byCur: Record<string, number> }>);
+              return Object.entries(byClient).map(([cid, v]) => (
+                <div key={cid} className="px-6 py-3 hover:bg-gray-50 flex justify-between items-center">
+                  <span className="font-medium text-gray-900">{v.name}</span>
+                  <span className="text-sm font-semibold text-indigo-600">
+                    {Object.entries(v.byCur).map(([cur, tot], i) => (
+                      <span key={cur}>{i > 0 && ' · '}{tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}</span>
+                    ))}
+                  </span>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      {projectsAtRisk.length === 0 && overloaded.length === 0 && costByClient.length === 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
           <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
           <p className="font-medium text-emerald-800">Todo bajo control</p>
@@ -627,7 +673,7 @@ function OverviewSummary({
   );
 }
 
-function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
+function CostReport({ metrics, costByClient = [] }: { metrics: CostByUserRow[]; costByClient?: CostByClientRow[] }) {
   const totalHours = metrics.reduce((acc, m) => acc + m.total_hours, 0);
   const totalCost = metrics.reduce((acc, m) => acc + (m.total_cost ?? 0), 0);
   const withRate = metrics.filter(m => m.total_cost != null && m.total_cost > 0).length;
@@ -660,7 +706,42 @@ function CostReport({ metrics }: { metrics: CostByUserRow[] }) {
           <p className="text-2xl font-bold text-amber-900">{withRate} / {metrics.length}</p>
         </div>
       </div>
+
+      {costByClient.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <h3 className="px-6 py-3 bg-indigo-50 font-medium text-indigo-900">Coste por cliente</h3>
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Coste</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {(() => {
+                const byClient = costByClient.reduce((acc, r) => {
+                  if (!acc[r.client_id]) acc[r.client_id] = { name: r.client_name, byCur: {} as Record<string, number> };
+                  acc[r.client_id].byCur[r.currency] = (acc[r.client_id].byCur[r.currency] || 0) + r.cost_consumed;
+                  return acc;
+                }, {} as Record<string, { name: string; byCur: Record<string, number> }>);
+                return Object.entries(byClient).map(([cid, v]) => (
+                  <tr key={cid} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 font-medium text-gray-900">{v.name}</td>
+                    <td className="px-6 py-4 text-right font-semibold text-indigo-600">
+                      {Object.entries(v.byCur).map(([cur, tot], i) => (
+                        <span key={cur}>{i > 0 && ' · '}{tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}</span>
+                      ))}
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow overflow-hidden">
+        <h3 className="px-6 py-3 bg-gray-50 font-medium text-gray-900">Coste por usuario</h3>
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>

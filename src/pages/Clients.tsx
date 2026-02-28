@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
-import { Plus, Edit, Trash2, X, Building2, Mail, User, DollarSign } from 'lucide-react';
+import { getProjectCostConsumed } from '../lib/metrics';
+import { Plus, Edit, Trash2, X, Building2, Mail, User, DollarSign, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Client {
@@ -13,9 +14,16 @@ interface Client {
   hourly_rate: number | null;
 }
 
+interface ProjectForClient {
+  id: string;
+  name: string;
+}
+
 export default function Clients() {
   const { isAdmin, user: currentUser } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
+  const [projectsByClient, setProjectsByClient] = useState<Record<string, ProjectForClient[]>>({});
+  const [costByClient, setCostByClient] = useState<Record<string, { cost: number; currency: string }[]>>({});
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -35,13 +43,42 @@ export default function Clients() {
   async function fetchClients() {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .order('name');
+      const [{ data: clientsData, error: clientsError }, { data: projectsData }, costRows] = await Promise.all([
+        supabase.from('clients').select('*').order('name'),
+        supabase.from('projects').select('id, name, client_id').eq('is_archived', false),
+        getProjectCostConsumed(),
+      ]);
 
-      if (error) throw error;
-      setClients(data || []);
+      if (clientsError) throw clientsError;
+      setClients(clientsData || []);
+
+      const projects = (projectsData || []) as { id: string; name: string; client_id: string | null }[];
+      const byClient: Record<string, ProjectForClient[]> = {};
+      projects.forEach((p) => {
+        if (!p.client_id) return;
+        if (!byClient[p.client_id]) byClient[p.client_id] = [];
+        byClient[p.client_id].push({ id: p.id, name: p.name });
+      });
+      setProjectsByClient(byClient);
+
+      const costByProject: Record<string, { cost: number; currency: string }[]> = {};
+      costRows.forEach((r) => {
+        if (!costByProject[r.project_id]) costByProject[r.project_id] = [];
+        costByProject[r.project_id].push({ cost: r.cost_consumed, currency: r.currency });
+      });
+
+      const costByClientMap: Record<string, { cost: number; currency: string }[]> = {};
+      projects.forEach((p) => {
+        if (!p.client_id) return;
+        const costs = costByProject[p.id] || [];
+        costs.forEach((c) => {
+          if (!costByClientMap[p.client_id!]) costByClientMap[p.client_id!] = [];
+          const existing = costByClientMap[p.client_id!].find((x) => x.currency === c.currency);
+          if (existing) existing.cost += c.cost;
+          else costByClientMap[p.client_id!].push({ ...c });
+        });
+      });
+      setCostByClient(costByClientMap);
     } catch (err) {
       console.error('Error fetching clients:', err);
       toast.error('Error al cargar clientes');
@@ -251,7 +288,32 @@ export default function Clients() {
                     <span>{client.hourly_rate} €/h</span>
                   </div>
                 )}
-                {!client.contact && !client.email && client.hourly_rate == null && (
+                {(projectsByClient[client.id]?.length ?? 0) > 0 && (
+                  <div className="pt-2 mt-2 border-t border-gray-100">
+                    <div className="flex items-center text-sm font-medium text-gray-700 mb-1">
+                      <FolderOpen className="w-4 h-4 mr-1.5 text-indigo-500" />
+                      Proyectos ({projectsByClient[client.id].length})
+                    </div>
+                    <ul className="text-xs text-gray-600 space-y-0.5 max-h-20 overflow-y-auto">
+                      {projectsByClient[client.id].map((p) => (
+                        <li key={p.id} className="truncate">• {p.name}</li>
+                      ))}
+                    </ul>
+                    {(costByClient[client.id]?.length ?? 0) > 0 && (
+                      <div className="mt-2 flex items-center gap-1 text-sm font-semibold text-indigo-600">
+                        <DollarSign className="w-4 h-4" />
+                        Coste total:{' '}
+                        {costByClient[client.id].map((c, i) => (
+                          <span key={c.currency}>
+                            {i > 0 && ' · '}
+                            {c.cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {c.currency}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!client.contact && !client.email && client.hourly_rate == null && (projectsByClient[client.id]?.length ?? 0) === 0 && (
                   <p className="text-gray-400 text-sm">Sin datos adicionales</p>
                 )}
               </div>

@@ -3,10 +3,16 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
 import { getPayrollBeneficiaries, type PayrollBeneficiaryRow } from '../lib/metrics';
-import { DollarSign, Plus, Edit, Trash2, X, Calendar, CreditCard, Copy } from 'lucide-react';
+import { DollarSign, Plus, Edit, Trash2, X, Calendar, CreditCard, Copy, Download, Calculator, Users, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+
+interface ActivePayrollSummary {
+  total: number;
+  currency: string;
+  count: number;
+}
 
 /** Fecha de pago por defecto: 1 del mes siguiente al fin del período */
 function getDefaultPaidAt(periodEnd: string): string {
@@ -26,12 +32,19 @@ interface PayrollRecord {
   notes: string | null;
 }
 
+const HOURS_PER_MONTH = 160;
+const CURRENT_YEAR = new Date().getFullYear();
+
 export default function Payroll() {
   const { isAdmin, user: currentUser } = useAuth();
   const [records, setRecords] = useState<PayrollRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [activePayroll, setActivePayroll] = useState<ActivePayrollSummary[]>([]);
+  const [yearFilter, setYearFilter] = useState<number>(CURRENT_YEAR);
+  const [suggestedAmount, setSuggestedAmount] = useState<{ total: number; currency: string } | null>(null);
+  const [loadingSuggested, setLoadingSuggested] = useState(false);
   const [current, setCurrent] = useState<PayrollRecord>({
     id: '',
     period_start: '',
@@ -47,8 +60,76 @@ export default function Payroll() {
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchRecords();
-  }, []);
+    fetchActivePayroll();
+  }, [isAdmin]);
+
+  async function fetchActivePayroll() {
+    try {
+      const { data: users, error } = await supabase
+        .from('users')
+        .select('id, monthly_salary, hourly_rate, currency');
+      if (error) throw error;
+      const byCurrency: Record<string, { total: number; count: number }> = {};
+      (users || []).forEach((u: { monthly_salary?: number | null; hourly_rate?: number | null; currency?: string }) => {
+        const hasSalary = u.monthly_salary != null && u.monthly_salary > 0;
+        const hasHourly = u.hourly_rate != null && u.hourly_rate > 0;
+        const amount = hasSalary && u.monthly_salary
+          ? u.monthly_salary
+          : hasHourly && u.hourly_rate
+            ? u.hourly_rate * HOURS_PER_MONTH
+            : 0;
+        if (amount <= 0) return;
+        const cur = u.currency || 'COP';
+        if (!byCurrency[cur]) byCurrency[cur] = { total: 0, count: 0 };
+        byCurrency[cur].total += amount;
+        byCurrency[cur].count += 1;
+      });
+      setActivePayroll(
+        Object.entries(byCurrency).map(([currency, v]) => ({ total: v.total, currency, count: v.count }))
+      );
+    } catch (e) {
+      console.error('Error fetching active payroll:', e);
+      setActivePayroll([]);
+    }
+  }
+
+  async function calculateSuggestedAmount() {
+    if (!current.period_start || !current.period_end) {
+      toast.error('Selecciona inicio y fin del período');
+      return;
+    }
+    setLoadingSuggested(true);
+    try {
+      const data = await getPayrollBeneficiaries(current.period_start, current.period_end);
+      const byCurrency: Record<string, number> = {};
+      data.forEach((b) => {
+        if (b.amount == null) return;
+        const cur = b.currency || 'COP';
+        byCurrency[cur] = (byCurrency[cur] || 0) + b.amount;
+      });
+      const entries = Object.entries(byCurrency);
+      if (entries.length === 0) {
+        setSuggestedAmount(null);
+        toast.info('No hay beneficiarios con monto para este período');
+      } else {
+        const main = entries[0];
+        setSuggestedAmount({ total: main[1], currency: main[0] });
+        if (entries.length > 1) {
+          setCurrent({ ...current, total_amount: main[1], currency: main[0] });
+        } else {
+          setCurrent({ ...current, total_amount: main[1] });
+        }
+        toast.success(`Calculado: ${main[1].toLocaleString('es-CO')} ${main[0]}`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al calcular');
+    } finally {
+      setLoadingSuggested(false);
+    }
+  }
 
   async function openDetail(rec: PayrollRecord) {
     setDetailRecord(rec);
@@ -67,6 +148,29 @@ export default function Payroll() {
   function copyAccount(text: string) {
     navigator.clipboard.writeText(text);
     toast.success('Cuenta copiada');
+  }
+
+  function exportBeneficiariesCsv() {
+    if (!detailRecord || beneficiaries.length === 0) return;
+    const headers = ['Usuario', 'Email', 'Monto', 'Moneda', 'Fuente', 'Horas trabajadas', 'Cuenta de pago'];
+    const rows = beneficiaries.map((b) => [
+      b.user_name,
+      b.user_email,
+      b.amount ?? '',
+      b.currency,
+      b.source === 'salary' ? 'Salario' : b.source === 'hourly' ? 'Por hora' : '',
+      b.hours_worked ?? '',
+      b.payment_account ?? '',
+    ]);
+    const csv = [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nomina_${detailRecord.period_start}_${detailRecord.period_end}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Exportado');
   }
 
   async function fetchRecords() {
@@ -190,12 +294,18 @@ export default function Payroll() {
     }
   }
 
-  const totalYear = records
-    .filter((r) => {
-      const y = new Date(r.period_start).getFullYear();
-      return y === new Date().getFullYear();
-    })
-    .reduce((acc, r) => acc + r.total_amount, 0);
+  const filteredRecords = records.filter((r) => new Date(r.period_start).getFullYear() === yearFilter);
+  const totalByYearByCurrency = filteredRecords.reduce(
+    (acc, r) => {
+      const cur = r.currency || 'COP';
+      acc[cur] = (acc[cur] || 0) + r.total_amount;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+  const availableYears = records.length > 0
+    ? [...new Set(records.map((r) => new Date(r.period_start).getFullYear()))].sort((a, b) => b - a)
+    : [CURRENT_YEAR];
 
   if (!isAdmin) {
     return (
@@ -222,6 +332,7 @@ export default function Payroll() {
           onClick={() => {
             const defaultPaid = getDefaultPaidAt(new Date().toISOString().split('T')[0]);
             setCurrent({ id: '', period_start: '', period_end: '', total_amount: 0, currency: 'COP', paid_at: defaultPaid, notes: null });
+            setSuggestedAmount(null);
             setModalMode('create');
             setShowModal(true);
           }}
@@ -232,12 +343,63 @@ export default function Payroll() {
         </button>
       </div>
 
+      {/* KPIs: Nómina activa y total pagado */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {activePayroll.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100">
+            <h3 className="text-sm font-medium text-gray-600 flex items-center gap-2 mb-2">
+              <Users className="w-4 h-4 text-emerald-600" />
+              Nómina activa total del equipo
+            </h3>
+            <div className="flex flex-wrap gap-3">
+              {activePayroll.map((p) => (
+                <span key={p.currency} className="text-xl font-bold text-emerald-700">
+                  {p.total.toLocaleString('es-CO')} {p.currency}
+                  <span className="text-sm font-normal text-gray-500 ml-1">/ mes ({p.count} personas)</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {(Object.keys(totalByYearByCurrency).length > 0 || records.length > 0) && (
+          <div className="bg-white rounded-lg shadow p-5 border border-gray-100">
+            <h3 className="text-sm font-medium text-gray-600 flex items-center gap-2 mb-2">
+              <DollarSign className="w-4 h-4 text-indigo-600" />
+              Total pagado {yearFilter}
+            </h3>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(totalByYearByCurrency).map(([cur, tot]) => (
+                <span key={cur} className="text-xl font-bold text-indigo-700">
+                  {tot.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {cur}
+                </span>
+              ))}
+              {Object.keys(totalByYearByCurrency).length === 0 && (
+                <span className="text-gray-500">Sin pagos este año</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {records.length > 0 && (
-        <div className="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
-          <p className="text-sm text-indigo-700 font-medium">Total pagado este año</p>
-          <p className="text-2xl font-bold text-indigo-900">
-            {totalYear.toLocaleString('es-CO', { maximumFractionDigits: 0 })} COP
-          </p>
+        <div className="flex items-center gap-4 mb-4">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Filter className="w-4 h-4" />
+            Filtrar por año
+          </label>
+          <select
+            value={yearFilter}
+            onChange={(e) => setYearFilter(Number(e.target.value))}
+            className="px-3 py-2 border rounded-lg text-sm"
+          >
+            {availableYears.length > 0 ? (
+              availableYears.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))
+            ) : (
+              <option value={CURRENT_YEAR}>{CURRENT_YEAR}</option>
+            )}
+          </select>
         </div>
       )}
 
@@ -247,10 +409,14 @@ export default function Payroll() {
             <div key={i} className="h-16 bg-gray-200 rounded" />
           ))}
         </div>
-      ) : records.length === 0 ? (
+      ) : filteredRecords.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">No hay registros de nómina. Añade el primer pago.</p>
+          <p className="text-gray-500">
+            {records.length === 0
+              ? 'No hay registros de nómina. Añade el primer pago.'
+              : `No hay pagos en ${yearFilter}. Cambia el filtro o añade un pago.`}
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -265,7 +431,7 @@ export default function Payroll() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {records.map((r) => (
+              {filteredRecords.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     {format(new Date(r.period_start), 'd MMM yyyy', { locale: es })} — {format(new Date(r.period_end), 'd MMM yyyy', { locale: es })}
@@ -280,10 +446,11 @@ export default function Payroll() {
                   <td className="px-6 py-4 text-right">
                     <button
                       onClick={() => openDetail(r)}
-                      className="text-gray-500 hover:text-indigo-600 mr-2"
-                      title="Ver cuentas de pago"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 mr-2"
+                      title="Ver beneficiarios y cuentas"
                     >
-                      <CreditCard className="w-4 h-4 inline" />
+                      <CreditCard className="w-4 h-4" />
+                      Ver beneficiarios
                     </button>
                     <button
                       onClick={() => {
@@ -330,7 +497,10 @@ export default function Payroll() {
                 <input
                   type="date"
                   value={current.period_start}
-                  onChange={(e) => setCurrent({ ...current, period_start: e.target.value })}
+                  onChange={(e) => {
+                    setCurrent({ ...current, period_start: e.target.value });
+                    setSuggestedAmount(null);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg"
                   required
                 />
@@ -347,11 +517,30 @@ export default function Payroll() {
                       next.paid_at = getDefaultPaidAt(periodEnd);
                     }
                     setCurrent(next);
+                    setSuggestedAmount(null);
                   }}
                   className="w-full px-3 py-2 border rounded-lg"
                   required
                 />
               </div>
+              {modalMode === 'create' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={calculateSuggestedAmount}
+                    disabled={!current.period_start || !current.period_end || loadingSuggested}
+                    className="flex items-center gap-2 px-3 py-2 bg-emerald-100 text-emerald-800 rounded-lg hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                  >
+                    <Calculator className="w-4 h-4" />
+                    {loadingSuggested ? 'Calculando…' : 'Calcular monto desde beneficiarios'}
+                  </button>
+                  {suggestedAmount && (
+                    <span className="text-sm text-emerald-600 font-medium">
+                      Sugerido: {suggestedAmount.total.toLocaleString('es-CO')} {suggestedAmount.currency}
+                    </span>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Monto *</label>
                 <input
@@ -414,14 +603,25 @@ export default function Payroll() {
           <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center p-4 border-b">
               <div>
-                <h3 className="text-lg font-semibold">Cuentas de pago — {detailRecord.period_start.split('T')[0]} a {detailRecord.period_end.split('T')[0]}</h3>
+                <h3 className="text-lg font-semibold">Beneficiarios — {detailRecord.period_start.split('T')[0]} a {detailRecord.period_end.split('T')[0]}</h3>
                 <p className="text-sm text-gray-500 mt-1">
                   Fecha de pago: {detailRecord.paid_at ? format(new Date(detailRecord.paid_at), "d 'de' MMMM yyyy", { locale: es }) : '—'}
                 </p>
               </div>
-              <button onClick={() => setDetailRecord(null)} className="text-gray-500 hover:text-gray-700">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {beneficiaries.length > 0 && (
+                  <button
+                    onClick={exportBeneficiariesCsv}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                  >
+                    <Download className="w-4 h-4" />
+                    Exportar CSV
+                  </button>
+                )}
+                <button onClick={() => setDetailRecord(null)} className="text-gray-500 hover:text-gray-700">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="p-4 overflow-auto flex-1">
               {loadingDetail ? (
@@ -433,51 +633,89 @@ export default function Payroll() {
               ) : beneficiaries.length === 0 ? (
                 <p className="text-gray-500 text-center py-8">No hay usuarios con sueldo o tarifa configurada. Configúralos en Usuarios.</p>
               ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Usuario</th>
-                      <th className="px-4 py-2 text-right font-medium text-gray-700">Monto</th>
-                      <th className="px-4 py-2 text-left font-medium text-gray-700">Cuenta de pago</th>
-                      <th className="px-4 py-2 w-10"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {beneficiaries.map((b) => (
-                      <tr key={b.user_id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900">{b.user_name}</p>
-                          <p className="text-xs text-gray-500">{b.user_email}</p>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {b.amount != null ? (
-                            <span>{b.amount.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {b.currency}</span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {b.payment_account ? (
-                            <span className="font-mono text-xs">{b.payment_account}</span>
-                          ) : (
-                            <span className="text-amber-600 text-xs">Sin cuenta configurada</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {b.payment_account && (
-                            <button
-                              onClick={() => copyAccount(b.payment_account!)}
-                              className="text-gray-400 hover:text-indigo-600"
-                              title="Copiar cuenta"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                          )}
-                        </td>
+                <div className="space-y-3">
+                  {beneficiaries.some((b) => !b.payment_account) && (
+                    <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                      <span className="font-medium">Atención:</span>
+                      {beneficiaries.filter((b) => !b.payment_account).length} usuario(s) sin cuenta de pago configurada. Configúrala en Usuarios.
+                    </div>
+                  )}
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium text-gray-700">Usuario</th>
+                        <th className="px-4 py-2 text-right font-medium text-gray-700">Monto</th>
+                        <th className="px-4 py-2 text-center font-medium text-gray-700">Fuente</th>
+                        <th className="px-4 py-2 text-right font-medium text-gray-700">Horas</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-700">Cuenta de pago</th>
+                        <th className="px-4 py-2 w-10"></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {beneficiaries.map((b) => (
+                        <tr key={b.user_id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-gray-900">{b.user_name}</p>
+                            <p className="text-xs text-gray-500">{b.user_email}</p>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {b.amount != null ? (
+                              <span>{b.amount.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {b.currency}</span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {b.source === 'salary' ? (
+                              <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Salario</span>
+                            ) : b.source === 'hourly' ? (
+                              <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Por hora</span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-600">
+                            {b.hours_worked != null ? `${b.hours_worked.toFixed(1)} h` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {b.payment_account ? (
+                              <span className="font-mono text-xs">{b.payment_account}</span>
+                            ) : (
+                              <span className="text-amber-600 text-xs font-medium">Sin cuenta</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {b.payment_account && (
+                              <button
+                                onClick={() => copyAccount(b.payment_account!)}
+                                className="text-gray-400 hover:text-indigo-600"
+                                title="Copiar cuenta"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {beneficiaries.length > 0 && (
+                    <div className="pt-2 border-t text-sm text-gray-600">
+                      <strong>Total:</strong>{' '}
+                      {Object.entries(
+                        beneficiaries.reduce(
+                          (acc, b) => {
+                            if (b.amount == null) return acc;
+                            const c = b.currency || 'COP';
+                            acc[c] = (acc[c] || 0) + b.amount;
+                            return acc;
+                          },
+                          {} as Record<string, number>
+                        )
+                      ).map(([cur, tot]) => `${tot.toLocaleString('es-CO')} ${cur}`).join(' · ')}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
