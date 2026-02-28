@@ -595,7 +595,7 @@ router.delete('/payment-accounts/:id', async (req: Request, res: Response) => {
 // --- Transactions ---
 router.get('/transactions', async (req: Request, res: Response) => {
   try {
-    const { start, end, entity_id, category_id, payment_account_id } = req.query;
+    const { start, end, entity_id, category_id, payment_account_id, client_id } = req.query;
     const filter: Record<string, unknown> = {};
     if (start && end) {
       filter.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
@@ -613,6 +613,13 @@ router.get('/transactions', async (req: Request, res: Response) => {
     }
     if (category_id) filter.category_id = category_id;
     if (payment_account_id) filter.payment_account_id = payment_account_id;
+    if (client_id && typeof client_id === 'string' && (entity_id === undefined || entity_id === null || entity_id === '')) {
+      const entityIds = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+      if (entityIds.length === 0) {
+        return res.json([]);
+      }
+      filter.entity_id = { $in: entityIds };
+    }
 
     const list = await AcctTransaction.find(filter)
       .sort({ date: -1 })

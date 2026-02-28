@@ -602,6 +602,7 @@ export default function Contabilidad() {
   const [pygSortOrder, setPygSortOrder] = useState<'asc' | 'desc'>('desc');
   const [pygClientSortBy, setPygClientSortBy] = useState<'client' | 'ing_usd' | 'gastos_usd' | 'resultado_usd' | 'ing_cop' | 'gastos_cop' | 'resultado_cop'>('resultado_usd');
   const [pygClientSortOrder, setPygClientSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [pygClientHideNoClient, setPygClientHideNoClient] = useState(false);
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
   const [pygFilterClient, setPygFilterClient] = useState('');
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
@@ -825,11 +826,38 @@ export default function Contabilidad() {
     }
   }
 
+  async function fetchPygDetailByClient(clientId: string | null) {
+    if (!clientId) return;
+    setPygDetailLoading(true);
+    try {
+      const params: { start?: string; end?: string; client_id?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      params.client_id = clientId;
+      const data = await contabilidadApi.getTransactions(params);
+      setPygDetailTransactions(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar detalle');
+      setPygDetailTransactions([]);
+    } finally {
+      setPygDetailLoading(false);
+    }
+  }
+
   const [pygDetailModalEntity, setPygDetailModalEntity] = useState<PygRow | null>(null);
+  const [pygDetailModalClient, setPygDetailModalClient] = useState<PygRowByClient | null>(null);
 
   function openPygDetailModal(row: PygRow) {
+    setPygDetailModalClient(null);
     setPygDetailModalEntity(row);
     fetchPygDetail(row.entity_id ?? null);
+  }
+
+  function openPygClientDetailModal(row: PygRowByClient) {
+    setPygDetailModalEntity(null);
+    setPygDetailModalClient(row);
+    fetchPygDetailByClient(row.client_id ?? null);
   }
 
   async function fetchConfigDetail(type: 'entity' | 'category', id: string) {
@@ -1585,7 +1613,7 @@ export default function Contabilidad() {
                 onPreset={(id) => applyPeriodPreset(id, 'balance')}
               />
             )}
-            {(balanceView === 'pyg' || balanceView === 'pyg_client') && balanceView === 'pyg' && (
+            {balanceView === 'pyg' && (
               <>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Cliente</label>
@@ -1610,6 +1638,17 @@ export default function Contabilidad() {
                   Solo proyectos (excluir Hotmart, Fondo libre, etc.)
                 </label>
               </>
+            )}
+            {balanceView === 'pyg_client' && (
+              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pygClientHideNoClient}
+                  onChange={(e) => setPygClientHideNoClient(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                Ocultar "Sin cliente"
+              </label>
             )}
             {balanceView === 'accounts' && (
               <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
@@ -1786,7 +1825,10 @@ export default function Contabilidad() {
             (() => {
               const hasCopPygClient = pygByClientData.total_cop.ingresos !== 0 || pygByClientData.total_cop.gastos !== 0 || pygByClientData.total_cop.resultado !== 0 ||
                 pygByClientData.rows.some((r) => r.cop.ingresos !== 0 || r.cop.gastos !== 0 || r.cop.resultado !== 0);
-              const sortedPygClientRows = [...pygByClientData.rows].sort((a, b) => {
+              const baseRows = pygClientHideNoClient
+                ? pygByClientData.rows.filter((r) => r.client_id != null)
+                : pygByClientData.rows;
+              const sortedPygClientRows = [...baseRows].sort((a, b) => {
                 let cmp = 0;
                 if (pygClientSortBy === 'client') {
                   cmp = (a.client_name ?? '').localeCompare(b.client_name ?? '', 'es');
@@ -1798,6 +1840,15 @@ export default function Contabilidad() {
                 else cmp = a.cop.resultado - b.cop.resultado;
                 return pygClientSortOrder === 'asc' ? cmp : -cmp;
               });
+              const displayTotals = pygClientHideNoClient
+                ? sortedPygClientRows.reduce(
+                    (acc, r) => ({
+                      usd: { ingresos: acc.usd.ingresos + r.usd.ingresos, gastos: acc.usd.gastos + r.usd.gastos, resultado: acc.usd.resultado + r.usd.resultado },
+                      cop: { ingresos: acc.cop.ingresos + r.cop.ingresos, gastos: acc.cop.gastos + r.cop.gastos, resultado: acc.cop.resultado + r.cop.resultado },
+                    }),
+                    { usd: { ingresos: 0, gastos: 0, resultado: 0 }, cop: { ingresos: 0, gastos: 0, resultado: 0 } }
+                  )
+                : { usd: pygByClientData.total_usd, cop: pygByClientData.total_cop };
               const handlePygClientSort = (col: typeof pygClientSortBy) => {
                 const isSame = pygClientSortBy === col;
                 const newOrder = isSame ? (pygClientSortOrder === 'asc' ? 'desc' : 'asc') : (col === 'client' ? 'asc' : 'desc');
@@ -1841,9 +1892,19 @@ export default function Contabilidad() {
                 <tbody>
                   {sortedPygClientRows.map((r) => {
                     const rowKey = r.client_id ?? 'sin-cliente';
+                    const isClickable = !!r.client_id;
                     return (
-                      <tr key={rowKey} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-6 py-3 font-medium">{r.client_name}</td>
+                      <tr
+                        key={rowKey}
+                        onClick={() => isClickable && openPygClientDetailModal(r)}
+                        className={`border-t border-gray-100 hover:bg-gray-50 ${isClickable ? 'cursor-pointer select-none' : ''}`}
+                      >
+                        <td className="px-6 py-3 font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            {isClickable && <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />}
+                            {r.client_name}
+                          </span>
+                        </td>
                         <td className="px-2 py-3 text-right text-emerald-600">{r.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                         <td className="px-2 py-3 text-right text-red-600">{r.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                         <td className={`px-2 py-3 text-right font-medium ${r.usd.resultado >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -1865,24 +1926,24 @@ export default function Contabilidad() {
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
                     <td className="px-6 py-3">Total</td>
-                    <td className="px-2 py-3 text-right text-emerald-700">{pygByClientData.total_usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-2 py-3 text-right text-red-700">{pygByClientData.total_usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className={`px-2 py-3 text-right ${pygByClientData.total_usd.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {pygByClientData.total_usd.resultado >= 0 ? '+' : ''}{pygByClientData.total_usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    <td className="px-2 py-3 text-right text-emerald-700">{displayTotals.usd.ingresos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-2 py-3 text-right text-red-700">{displayTotals.usd.gastos.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className={`px-2 py-3 text-right ${displayTotals.usd.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {displayTotals.usd.resultado >= 0 ? '+' : ''}{displayTotals.usd.resultado.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
                     {hasCopPygClient && (
                       <>
-                        <td className="px-2 py-3 text-right text-emerald-700 border-l">{pygByClientData.total_cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                        <td className="px-2 py-3 text-right text-red-700">{pygByClientData.total_cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
-                        <td className={`px-2 py-3 text-right ${pygByClientData.total_cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                          {pygByClientData.total_cop.resultado >= 0 ? '+' : ''}{pygByClientData.total_cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
+                        <td className="px-2 py-3 text-right text-emerald-700 border-l">{displayTotals.cop.ingresos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className="px-2 py-3 text-right text-red-700">{displayTotals.cop.gastos.toLocaleString('es-CO', { minimumFractionDigits: 0 })}</td>
+                        <td className={`px-2 py-3 text-right ${displayTotals.cop.resultado >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {displayTotals.cop.resultado >= 0 ? '+' : ''}{displayTotals.cop.resultado.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                         </td>
                       </>
                     )}
                   </tr>
                 </tfoot>
               </table>
-              {pygByClientData.rows.length === 0 && (
+              {sortedPygClientRows.length === 0 && (
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado. Asigna clientes a las entidades para ver el P&G por cliente.</div>
               )}
             </div>
@@ -2291,6 +2352,29 @@ export default function Contabilidad() {
             <div className="flex justify-between items-center p-4 border-b shrink-0">
               <h3 className="font-semibold text-lg">P&G — {pygDetailModalEntity.entity_name}</h3>
               <button onClick={() => setPygDetailModalEntity(null)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              {pygDetailLoading ? (
+                <div className="text-sm text-gray-500 py-8">Cargando detalle…</div>
+              ) : pygDetailTransactions.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">No hay transacciones en este período.</div>
+              ) : (
+                <PygDetailPanel
+                  transactions={pygDetailTransactions}
+                  onEditTransaction={(t) => { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pygDetailModalClient && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPygDetailModalClient(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b shrink-0">
+              <h3 className="font-semibold text-lg">P&G — {pygDetailModalClient.client_name}</h3>
+              <button onClick={() => setPygDetailModalClient(null)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-4 overflow-x-auto overflow-y-auto flex-1 min-h-0">
               {pygDetailLoading ? (

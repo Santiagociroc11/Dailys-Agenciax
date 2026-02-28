@@ -214,7 +214,7 @@ export const contabilidadApi = {
     });
   },
 
-  async getTransactions(params?: { start?: string; end?: string; entity_id?: string | null; category_id?: string; payment_account_id?: string }): Promise<AcctTransaction[]> {
+  async getTransactions(params?: { start?: string; end?: string; entity_id?: string | null; category_id?: string; payment_account_id?: string; client_id?: string }): Promise<AcctTransaction[]> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
@@ -223,6 +223,7 @@ export const contabilidadApi = {
     }
     if (params?.category_id) search.category_id = params.category_id;
     if (params?.payment_account_id) search.payment_account_id = params.payment_account_id;
+    if (params?.client_id) search.client_id = params.client_id;
     return fetchJson<AcctTransaction[]>(url('/transactions', Object.keys(search).length > 0 ? search : undefined));
   },
   async createTransaction(data: {
