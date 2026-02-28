@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
+import { apiUrl } from '../lib/apiBase';
 
 const ADMIN_TELEGRAM_ID_KEY = 'admin_telegram_chat_id';
 
@@ -42,7 +43,7 @@ const Settings = () => {
       console.error('Error saving admin Telegram ID:', error);
     } else {
       toast.success('¡Configuración guardada correctamente!');
-      await fetch('/api/settings/invalidate-cache', { method: 'POST' }).catch(() => {});
+      await fetch(apiUrl('/api/settings/invalidate-cache'), { method: 'POST' }).catch(() => {});
     }
     setIsLoading(false);
   };
@@ -53,7 +54,7 @@ const Settings = () => {
         return;
     }
     try {
-        const response = await fetch('/api/telegram/test', {
+        const response = await fetch(apiUrl('/api/telegram/test'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -79,7 +80,7 @@ const Settings = () => {
         return;
     }
     try {
-        const response = await fetch('/api/telegram/test-admin', {
+        const response = await fetch(apiUrl('/api/telegram/test-admin'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({}),

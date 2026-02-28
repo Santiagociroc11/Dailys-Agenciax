@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { apiUrl } from '../lib/apiBase';
 
 const UserSettings = () => {
   const [telegramId, setTelegramId] = useState('');
@@ -56,7 +57,7 @@ const UserSettings = () => {
         return;
     }
     try {
-        const response = await fetch('/api/telegram/test', {
+        const response = await fetch(apiUrl('/api/telegram/test'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

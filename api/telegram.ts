@@ -1,4 +1,19 @@
+import {
+  logTelegramSend,
+  logTelegramAttempt,
+  type TelegramLogType,
+} from '../lib/telegramLog.js';
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+export function isTelegramConfigured(): boolean {
+  return !!TELEGRAM_BOT_TOKEN;
+}
+
+export interface TelegramSendContext {
+  type: TelegramLogType;
+  recipientLabel?: string;
+}
 
 interface TelegramMessage {
   chat_id: string;
@@ -211,31 +226,35 @@ export async function getTimeInfo(itemId: string, isSubtask: boolean, currentSta
   }
 }
 
-export async function sendTelegramMessage(chatId: string, message: string): Promise<boolean> {
+export async function sendTelegramMessage(
+  chatId: string,
+  message: string,
+  ctx?: TelegramSendContext
+): Promise<boolean> {
+  const type = ctx?.type ?? 'test';
+  const label = ctx?.recipientLabel ?? chatId;
+
   if (!TELEGRAM_BOT_TOKEN) {
-    console.error('Error: El token del bot de Telegram no está configurado.');
+    await logTelegramSend(type, chatId, 'failed', {
+      recipientLabel: label,
+      error: 'TELEGRAM_BOT_TOKEN no configurado',
+    });
     return false;
   }
 
   // Validate message content before sending
   if (!message || message.trim().length === 0) {
-    console.error('❌ [TELEGRAM] Error: El mensaje está vacío');
+    await logTelegramSend(type, chatId, 'failed', {
+      recipientLabel: label,
+      error: 'Mensaje vacío',
+    });
     return false;
   }
 
-  // Check for potential HTML issues
-  const htmlTagRegex = /<[^>]*>/g;
-  const matches = message.match(htmlTagRegex);
-  if (matches) {
-    console.log(`[TELEGRAM] HTML tags encontrados en el mensaje:`, matches);
-    
-    // Check for empty tags that might cause parsing errors
-    const emptyTagRegex = /<[^>]*><\/[^>]*>|<[^>]*\/>/g;
-    const emptyMatches = message.match(emptyTagRegex);
-    if (emptyMatches) {
-      console.warn(`⚠️ [TELEGRAM] Tags HTML vacíos detectados que podrían causar errores:`, emptyMatches);
-    }
-  }
+  logTelegramAttempt(type, chatId, {
+    recipientLabel: label,
+    details: `longitud: ${message.length} caracteres`,
+  });
 
   const telegramMessage: TelegramMessage = {
     chat_id: chatId,
@@ -244,8 +263,6 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
   };
 
   try {
-    console.log(`[TELEGRAM] Enviando mensaje a ${chatId}, longitud: ${message.length} caracteres`);
-    
     const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {
@@ -256,28 +273,24 @@ export async function sendTelegramMessage(chatId: string, message: string): Prom
 
     if (!response.ok) {
       const error = await response.json();
+      const errMsg = (error as { description?: string }).description ?? JSON.stringify(error);
+      await logTelegramSend(type, chatId, 'failed', {
+        recipientLabel: label,
+        error: errMsg,
+      });
       console.error('❌ [TELEGRAM] Error en la API de Telegram:', error);
-      console.error('❌ [TELEGRAM] Mensaje que causó el error:', message.substring(0, 500) + '...');
-      
-      // Log the problematic area around byte offset if available
-      if (error.description && error.description.includes('byte offset')) {
-        const offsetMatch = error.description.match(/byte offset (\d+)/);
-        if (offsetMatch) {
-          const offset = parseInt(offsetMatch[1]);
-          const start = Math.max(0, offset - 50);
-          const end = Math.min(message.length, offset + 50);
-          console.error('❌ [TELEGRAM] Área problemática del mensaje:', 
-            `"${message.substring(start, end)}" (offset ${offset})`);
-        }
-      }
-      
       return false;
     }
-    
-    console.log(`✅ [TELEGRAM] Mensaje enviado exitosamente a ${chatId}`);
+
+    await logTelegramSend(type, chatId, 'success', { recipientLabel: label });
     return true;
 
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    await logTelegramSend(type, chatId, 'failed', {
+      recipientLabel: label,
+      error: errMsg,
+    });
     console.error('❌ [TELEGRAM] Error de red al enviar mensaje:', error);
     return false;
   }
@@ -325,13 +338,23 @@ export async function sendAdminNotification(message: string): Promise<boolean> {
     const adminChatId = await getAdminTelegramId();
     
     if (!adminChatId) {
-      console.warn('No hay ID de chat de admin configurado. Saltando notificación.');
+      await logTelegramSend('admin-notification', 'admin', 'skipped', {
+        recipientLabel: 'admin',
+        details: 'No hay ID de chat de admin configurado',
+      });
       return false;
     }
 
-    return await sendTelegramMessage(adminChatId, message);
+    return await sendTelegramMessage(adminChatId, message, {
+      type: 'admin-notification',
+      recipientLabel: 'admin',
+    });
   } catch (error) {
     console.error('Error al enviar notificación a admin:', error);
+    await logTelegramSend('admin-notification', 'admin', 'failed', {
+      recipientLabel: 'admin',
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
 }
@@ -706,13 +729,11 @@ export async function notifyUsersTaskInReview(
     // Enviar a cada usuario
     for (const user of users) {
       if (user.telegram_chat_id) {
-        const success = await sendTelegramMessage(user.telegram_chat_id, message);
-        if (success) {
-          console.log(`✅ Notificación de revisión enviada a ${user.name || user.email}`);
-          successCount++;
-        } else {
-          console.error(`❌ Error enviando notificación de revisión a ${user.name || user.email}`);
-        }
+        const success = await sendTelegramMessage(user.telegram_chat_id, message, {
+          type: 'user-task-in-review',
+          recipientLabel: user.name || user.email || user.id,
+        });
+        if (success) successCount++;
       }
     }
 
@@ -748,19 +769,19 @@ export async function notifyTaskAvailable(
 
     const userData = userDataRaw as { telegram_chat_id?: string | null; name?: string; email?: string };
     if (!userData.telegram_chat_id) {
-      console.log(`Usuario ${userData.name || userData.email} no tiene telegram_chat_id configurado. Saltando notificación.`);
+      await logTelegramSend('task-available', userId, 'skipped', {
+        recipientLabel: userData.name || userData.email || userId,
+        details: 'Usuario sin telegram_chat_id configurado',
+      });
       return false;
     }
 
     // Crear y enviar mensaje
     const message = createTaskAvailableMessage(taskTitle, projectName, reason, isSubtask, parentTaskTitle);
-    const success = await sendTelegramMessage(userData.telegram_chat_id, message);
-
-    if (success) {
-      console.log(`✅ Notificación de tarea disponible enviada a ${userData.name || userData.email}`);
-    } else {
-      console.error(`❌ Error enviando notificación de tarea disponible a ${userData.name || userData.email}`);
-    }
+    const success = await sendTelegramMessage(userData.telegram_chat_id, message, {
+      type: 'task-available',
+      recipientLabel: userData.name || userData.email || userId,
+    });
 
     return success;
   } catch (error) {
@@ -965,7 +986,10 @@ export async function handleTestNotification(req: any, res: any) {
     }
   
     try {
-      const success = await sendTelegramMessage(chatId, message);
+      const success = await sendTelegramMessage(chatId, message, {
+        type: 'test',
+        recipientLabel: `chat:${chatId}`,
+      });
   
       if (success) {
         return res.status(200).json({ success: true, message: 'Mensaje de prueba enviado correctamente.' });

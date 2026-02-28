@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import PhaseBadge from '../components/PhaseBadge';
 import { getProjectHoursConsumed } from '../lib/metrics';
+import { apiUrl } from '../lib/apiBase';
 
 interface Project {
   id: string;
@@ -524,7 +525,7 @@ function Projects() {
                   const projectName = projectData?.name || "Proyecto sin nombre";
                   
                   for (const taskInfo of tasksToNotify) {
-                    fetch('/api/telegram/task-available', {
+                    fetch(apiUrl('/api/telegram/task-available'), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({

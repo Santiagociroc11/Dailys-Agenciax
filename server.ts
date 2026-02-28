@@ -19,8 +19,15 @@ import {
     createTaskReassignedMessage,
   getTimeInfo,
   notifyMultipleUsersTaskAvailable,
-  notifyUsersTaskInReview
+  notifyUsersTaskInReview,
+  isTelegramConfigured
 } from './api/telegram.js';
+import {
+  getTelegramLogEntries,
+  getTelegramLogStats,
+  type TelegramLogType,
+  type TelegramLogStatus,
+} from './lib/telegramLog.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -47,11 +54,23 @@ app.post('/api/settings/invalidate-cache', async (_req, res) => {
   }
 });
 
+// Middleware: verificar que Telegram esté configurado antes de procesar notificaciones
+const telegramCheck = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!isTelegramConfigured()) {
+    console.warn('[TELEGRAM] Petición rechazada: TELEGRAM_BOT_TOKEN no configurado');
+    return res.status(503).json({
+      success: false,
+      error: 'Telegram no configurado. Configura TELEGRAM_BOT_TOKEN en las variables de entorno.',
+    });
+  }
+  next();
+};
+
 // Endpoint para notificaciones de prueba
-app.post('/api/telegram/test', handleTestNotification);
+app.post('/api/telegram/test', telegramCheck, handleTestNotification);
 
 // Endpoint para probar notificaciones de administrador
-app.post('/api/telegram/test-admin', async (req, res) => {
+app.post('/api/telegram/test-admin', telegramCheck, async (req, res) => {
   try {
     // Simular información de tiempo para la prueba
     const timeInfo = {
@@ -95,7 +114,7 @@ app.post('/api/telegram/test-admin', async (req, res) => {
 });
 
 // Endpoint para notificaciones de administrador cuando las tareas son completadas/bloqueadas
-app.post('/api/telegram/admin-notification', async (req, res) => {
+app.post('/api/telegram/admin-notification', telegramCheck, async (req, res) => {
   try {
     const { 
       taskTitle, 
@@ -227,7 +246,7 @@ app.post('/api/telegram/admin-notification', async (req, res) => {
 });
 
 // Endpoint para notificaciones de usuarios cuando sus tareas van a revisión
-app.post('/api/telegram/user-task-in-review', async (req, res) => {
+app.post('/api/telegram/user-task-in-review', telegramCheck, async (req, res) => {
   try {
     const { 
       userIds, 
@@ -284,7 +303,7 @@ app.post('/api/telegram/user-task-in-review', async (req, res) => {
 });
 
 // Endpoint para recordatorios de vencimiento (para cron)
-app.post('/api/telegram/deadline-reminders', async (req, res) => {
+app.post('/api/telegram/deadline-reminders', telegramCheck, async (req, res) => {
   try {
     const { Task, Subtask, Project, User } = await import('./models/index.js');
     const days = (req.body?.days as number) ?? 1;
@@ -327,9 +346,12 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
       const deadlineStr = new Date(t.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
       const msg = createDeadlineReminderMessage(t.title, projectName, deadlineStr, days, false);
       for (const uid of userIds) {
-        const u = await User.findOne({ id: uid, telegram_chat_id: { $ne: null } }).select('telegram_chat_id').lean().exec();
+        const u = await User.findOne({ id: uid, telegram_chat_id: { $ne: null } }).select('telegram_chat_id name email').lean().exec();
         if (u?.telegram_chat_id) {
-          const ok = await sendTelegramMessage(u.telegram_chat_id, msg);
+          const ok = await sendTelegramMessage(u.telegram_chat_id, msg, {
+            type: 'deadline-reminder',
+            recipientLabel: (u as { name?: string; email?: string }).name || (u as { name?: string; email?: string }).email || uid,
+          });
           if (ok) sentCount++;
         }
       }
@@ -341,9 +363,12 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
       const projectName = parentTask?.project_id ? projectMap.get(parentTask.project_id) || 'Sin proyecto' : 'Sin proyecto';
       const deadlineStr = new Date(s.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
       const msg = createDeadlineReminderMessage(s.title, projectName, deadlineStr, days, true, parentTask?.title);
-      const u = await User.findOne({ id: userId, telegram_chat_id: { $ne: null } }).select('telegram_chat_id').lean().exec();
+      const u = await User.findOne({ id: userId, telegram_chat_id: { $ne: null } }).select('telegram_chat_id name email').lean().exec();
       if (u?.telegram_chat_id) {
-        const ok = await sendTelegramMessage(u.telegram_chat_id, msg);
+        const ok = await sendTelegramMessage(u.telegram_chat_id, msg, {
+          type: 'deadline-reminder',
+          recipientLabel: (u as { name?: string; email?: string }).name || (u as { name?: string; email?: string }).email || userId,
+        });
         if (ok) sentCount++;
       }
     }
@@ -361,7 +386,7 @@ app.post('/api/telegram/deadline-reminders', async (req, res) => {
 });
 
 // Endpoint para resumen diario (tareas que vencen hoy) - para cron
-app.post('/api/telegram/daily-summary', async (req, res) => {
+app.post('/api/telegram/daily-summary', telegramCheck, async (req, res) => {
   try {
     const { Task, Subtask, Project, User } = await import('./models/index.js');
     const today = new Date().toISOString().split('T')[0];
@@ -413,7 +438,10 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
       const total = taskList.length;
       const msg = createDailySummaryMessage(user.name || user.email || 'Usuario', total, taskList.slice(0, 10));
       if (user.telegram_chat_id) {
-        const ok = await sendTelegramMessage(user.telegram_chat_id, msg);
+        const ok = await sendTelegramMessage(user.telegram_chat_id, msg, {
+          type: 'daily-summary',
+          recipientLabel: user.name || user.email || user.id,
+        });
         if (ok) sentCount++;
       }
     }
@@ -431,7 +459,7 @@ app.post('/api/telegram/daily-summary', async (req, res) => {
 });
 
 // Endpoint para verificar presupuestos y enviar alertas por Telegram (para cron)
-app.post('/api/telegram/budget-check', async (req, res) => {
+app.post('/api/telegram/budget-check', telegramCheck, async (req, res) => {
   try {
     const { Project, TaskWorkAssignment } = await import('./models/index.js');
     const threshold = (req.body?.threshold as number) ?? 80; // % a partir del cual alertar (default 80)
@@ -480,7 +508,7 @@ app.post('/api/telegram/budget-check', async (req, res) => {
 });
 
 // Endpoint para notificaciones de tareas disponibles
-app.post('/api/telegram/task-available', async (req, res) => {
+app.post('/api/telegram/task-available', telegramCheck, async (req, res) => {
   try {
     const { 
       userIds, 
@@ -543,6 +571,39 @@ app.post('/api/telegram/task-available', async (req, res) => {
   }
 });
 
+// Endpoint para consultar el log de envíos de Telegram (persistente en MongoDB)
+app.get('/api/telegram/log', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 500);
+    const type = req.query.type as string | undefined;
+    const status = req.query.status as string | undefined;
+    const since = req.query.since ? new Date(String(req.query.since)) : undefined;
+
+    const validTypes: TelegramLogType[] = ['test', 'admin-notification', 'task-available', 'user-task-in-review', 'deadline-reminder', 'daily-summary', 'budget-alert'];
+    const validStatuses: TelegramLogStatus[] = ['success', 'failed', 'skipped'];
+
+    const filters: { type?: TelegramLogType; status?: TelegramLogStatus } = {};
+    if (type && validTypes.includes(type as TelegramLogType)) filters.type = type as TelegramLogType;
+    if (status && validStatuses.includes(status as TelegramLogStatus)) filters.status = status as TelegramLogStatus;
+
+    const hasFilters = Object.keys(filters).length > 0;
+
+    const [entries, stats] = await Promise.all([
+      getTelegramLogEntries(limit, hasFilters ? filters : undefined),
+      getTelegramLogStats(since ? { since } : undefined),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      entries,
+      stats,
+    });
+  } catch (error) {
+    console.error('Error en telegram/log endpoint:', error);
+    return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  }
+});
+
 // Servir la aplicación de React
 const clientBuildPath = path.join(__dirname, '..');
 app.use(express.static(clientBuildPath));
@@ -554,6 +615,11 @@ app.get('*', (req, res) => {
 
 connectDB()
   .then(() => {
+    if (!process.env.TELEGRAM_BOT_TOKEN) {
+      console.warn('⚠️ TELEGRAM_BOT_TOKEN no configurado. Las notificaciones a Telegram no se enviarán.');
+    } else {
+      console.log('✅ Telegram: token configurado');
+    }
     app.listen(port, () => {
       console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
     });

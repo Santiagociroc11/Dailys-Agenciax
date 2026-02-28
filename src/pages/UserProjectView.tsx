@@ -11,6 +11,7 @@ import RichTextDisplay from "../components/RichTextDisplay";
 import RichTextSummary from "../components/RichTextSummary";
 import { ActivityChecklist } from "../components/ActivityChecklist";
 import { TaskComments } from "../components/TaskComments";
+import { apiUrl } from "../lib/apiBase";
 
 interface ChecklistItem {
    id: string;
@@ -2635,7 +2636,7 @@ export default function UserProjectView() {
                };
 
                // Enviar notificación asíncrona (no bloquear el flujo del usuario)
-               fetch('/api/telegram/admin-notification', {
+               fetch(apiUrl('/api/telegram/admin-notification'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(notificationData)

@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
+import { apiUrl } from '../lib/apiBase';
 import { Plus, X, Users, Clock, ChevronUp, ChevronDown, FolderOpen, Search, CalendarDays, Sparkles } from 'lucide-react';
 import { format, addDays, eachDayOfInterval, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -898,7 +899,7 @@ function Tasks() {
               // Notificar a cada usuario de subtareas disponibles
               for (const subtask of availableSubtasks) {
                 if (subtask.assigned_to) {
-                  fetch('/api/telegram/task-available', {
+                  fetch(apiUrl('/api/telegram/task-available'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -924,7 +925,7 @@ function Tasks() {
           } else {
             // Para tareas sin subtareas, notificar usuarios asignados
             if (finalAssignedUsers && finalAssignedUsers.length > 0) {
-              fetch('/api/telegram/task-available', {
+              fetch(apiUrl('/api/telegram/task-available'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1130,7 +1131,7 @@ function Tasks() {
 
           if (!subtasksData || subtasksData.length === 0) {
             // Tarea sin subtareas - notificar directamente
-            fetch('/api/telegram/task-available', {
+            fetch(apiUrl('/api/telegram/task-available'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1162,7 +1163,7 @@ function Tasks() {
           if (pendingSubtasks && pendingSubtasks.length > 0) {
             for (const subtask of pendingSubtasks) {
               if (subtask.assigned_to) {
-                fetch('/api/telegram/task-available', {
+                fetch(apiUrl('/api/telegram/task-available'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -1297,7 +1298,7 @@ function Tasks() {
           }
 
           if (isAvailable) {
-            fetch('/api/telegram/task-available', {
+            fetch(apiUrl('/api/telegram/task-available'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1322,7 +1323,7 @@ function Tasks() {
         if (sequenceOrderChanged && isTaskSequential && selectedSubtask.status === 'pending') {
           // Si se movió a un nivel anterior y está disponible, notificar
           if (newSequenceOrder && previousSequenceOrder && newSequenceOrder < previousSequenceOrder) {
-            fetch('/api/telegram/task-available', {
+            fetch(apiUrl('/api/telegram/task-available'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1822,7 +1823,7 @@ function Tasks() {
             // Enviar notificaciones a usuarios de subtareas disponibles
             for (const subtask of availableSubtasks) {
               if (subtask.assigned_to) {
-                fetch('/api/telegram/task-available', {
+                fetch(apiUrl('/api/telegram/task-available'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({

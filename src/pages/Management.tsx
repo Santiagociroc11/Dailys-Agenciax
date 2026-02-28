@@ -11,6 +11,7 @@ import RichTextDisplay from '../components/RichTextDisplay';
 import { ActivityChecklist } from '../components/ActivityChecklist';
 import { TaskComments } from '../components/TaskComments';
 import { Area, AreaUserAssignment } from '../types/Area';
+import { apiUrl } from '../lib/apiBase';
 
 interface TaskFeedback {
   feedback?: string;
@@ -952,7 +953,7 @@ function Management() {
           };
 
           // Enviar notificación asíncrona a admin (no bloquear el flujo del usuario)
-          fetch('/api/telegram/admin-notification', {
+          fetch(apiUrl('/api/telegram/admin-notification'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(notificationData)
@@ -997,7 +998,7 @@ function Management() {
 
               // Enviar notificaciones a usuarios afectados
               if (usersToNotifyReview.length > 0) {
-                fetch('/api/telegram/user-task-in-review', {
+                fetch(apiUrl('/api/telegram/user-task-in-review'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -1300,7 +1301,7 @@ function Management() {
 
       // 🔔 Enviar notificación al nuevo usuario asignado
       try {
-        fetch('/api/telegram/task-available', {
+        fetch(apiUrl('/api/telegram/task-available'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1329,7 +1330,7 @@ function Management() {
       try {
         const adminName = user?.name || user?.email || 'Administrador';
         
-        fetch('/api/telegram/admin-notification', {
+        fetch(apiUrl('/api/telegram/admin-notification'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1758,7 +1759,7 @@ function Management() {
       // Notificar a usuarios de subtareas que ahora están disponibles
       for (const subtask of pendingSubtasks) {
         if (subtask.assigned_to) {
-          fetch('/api/telegram/task-available', {
+          fetch(apiUrl('/api/telegram/task-available'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1898,7 +1899,7 @@ function Management() {
           
           // Enviar notificaciones de tarea disponible
           if (usersToNotify.length > 0) {
-            fetch('/api/telegram/task-available', {
+            fetch(apiUrl('/api/telegram/task-available'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
