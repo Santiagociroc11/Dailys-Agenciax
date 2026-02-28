@@ -602,6 +602,8 @@ export default function Contabilidad() {
   const [configCategoryExpanded, setConfigCategoryExpanded] = useState<string | null>(null);
   const [categorySortBy, setCategorySortBy] = useState<'name' | 'transactions'>('transactions');
   const [categorySortOrder, setCategorySortOrder] = useState<'asc' | 'desc'>('desc');
+  const [entitySortBy, setEntitySortBy] = useState<'name' | 'type'>('name');
+  const [entitySortOrder, setEntitySortOrder] = useState<'asc' | 'desc'>('asc');
   const [configDetailTransactions, setConfigDetailTransactions] = useState<AcctTransaction[]>([]);
   const [configDetailLoading, setConfigDetailLoading] = useState(false);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -1723,13 +1725,48 @@ export default function Contabilidad() {
                 <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isSame = entitySortBy === 'name';
+                            setEntitySortBy('name');
+                            setEntitySortOrder(isSame ? (entitySortOrder === 'asc' ? 'desc' : 'asc') : 'asc');
+                          }}
+                          className="flex items-center gap-1 hover:text-indigo-600"
+                        >
+                          Nombre
+                          {entitySortBy === 'name' && (entitySortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                        </button>
+                      </th>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isSame = entitySortBy === 'type';
+                            setEntitySortBy('type');
+                            setEntitySortOrder(isSame ? (entitySortOrder === 'asc' ? 'desc' : 'asc') : 'asc');
+                          }}
+                          className="flex items-center gap-1 hover:text-indigo-600"
+                        >
+                          Tipo
+                          {entitySortBy === 'type' && (entitySortOrder === 'asc' ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />)}
+                        </button>
+                      </th>
                       <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {entities.map((e) => (
+                    {[...entities]
+                      .sort((a, b) => {
+                        if (entitySortBy === 'name') {
+                          const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
+                          return entitySortOrder === 'asc' ? cmp : -cmp;
+                        }
+                        const cmp = (a.type ?? '').localeCompare(b.type ?? '', 'es');
+                        return entitySortOrder === 'asc' ? cmp : -cmp;
+                      })
+                      .map((e) => (
                       <React.Fragment key={e.id}>
                         <tr
                           onClick={() => toggleConfigEntityExpand(e)}
