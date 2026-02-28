@@ -447,6 +447,46 @@ export default function Contabilidad() {
     { id: 'accounts' as ConfigTab, label: 'Cuentas de pago', icon: CreditCard },
   ];
 
+  const now = new Date();
+  const year = now.getFullYear();
+  const applyPeriodPreset = (preset: string, target: 'libro' | 'balance') => {
+    const setStart = target === 'libro' ? setFilterStart : setBalanceStart;
+    const setEnd = target === 'libro' ? setFilterEnd : setBalanceEnd;
+    switch (preset) {
+      case 'all':
+        setStart('');
+        setEnd('');
+        break;
+      case 'this-year':
+        setStart(`${year}-01-01`);
+        setEnd(now.toISOString().split('T')[0]);
+        break;
+      case 'last-year':
+        setStart(`${year - 1}-01-01`);
+        setEnd(`${year - 1}-12-31`);
+        break;
+      case 'this-month':
+        setStart(new Date(year, now.getMonth(), 1).toISOString().split('T')[0]);
+        setEnd(now.toISOString().split('T')[0]);
+        break;
+      case 'last-month':
+        const lastMonth = now.getMonth() - 1;
+        const lastMonthYear = lastMonth < 0 ? year - 1 : year;
+        const lastMonthNum = lastMonth < 0 ? 11 : lastMonth;
+        setStart(new Date(lastMonthYear, lastMonthNum, 1).toISOString().split('T')[0]);
+        setEnd(new Date(lastMonthYear, lastMonthNum + 1, 0).toISOString().split('T')[0]);
+        break;
+    }
+  };
+
+  const periodPresets = [
+    { id: 'all', label: 'Todo el tiempo' },
+    { id: 'this-year', label: 'Este año' },
+    { id: 'last-year', label: 'Año pasado' },
+    { id: 'this-month', label: 'Este mes' },
+    { id: 'last-month', label: 'Mes pasado' },
+  ];
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -494,6 +534,17 @@ export default function Contabilidad() {
                 onChange={(e) => setFilterEnd(e.target.value)}
                 className="px-3 py-2 border rounded-lg text-sm"
               />
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {periodPresets.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => applyPeriodPreset(p.id, 'libro')}
+                  className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
             <div>
               <label className="block text-sm text-gray-600 mb-1">Entidad</label>
@@ -643,9 +694,17 @@ export default function Contabilidad() {
               <label className="block text-sm text-gray-600 mb-1">Hasta</label>
               <input type="date" value={balanceEnd} onChange={(e) => setBalanceEnd(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
             </div>
-            <button onClick={() => { setBalanceStart(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]); setBalanceEnd(new Date().toISOString().split('T')[0]); }} className="text-indigo-600 text-sm hover:underline">
-              Mes actual
-            </button>
+            <div className="flex gap-1 flex-wrap">
+              {periodPresets.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => applyPeriodPreset(p.id, 'balance')}
+                  className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {loading ? (
