@@ -218,10 +218,7 @@ export default function Contabilidad() {
   async function fetchAccountBalances() {
     setLoading(true);
     try {
-      const params: { start?: string; end?: string } = {};
-      if (balanceStart) params.start = balanceStart;
-      if (balanceEnd) params.end = balanceEnd;
-      const data = await contabilidadApi.getAccountBalances(params);
+      const data = await contabilidadApi.getAccountBalances();
       setAccountBalancesData(data);
     } catch (e) {
       console.error(e);
@@ -738,25 +735,32 @@ export default function Contabilidad() {
                 Balance de cuentas
               </button>
             </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Desde</label>
-              <input type="date" value={balanceStart} onChange={(e) => setBalanceStart(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Hasta</label>
-              <input type="date" value={balanceEnd} onChange={(e) => setBalanceEnd(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
-            </div>
-            <div className="flex gap-1 flex-wrap">
-              {periodPresets.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => applyPeriodPreset(p.id, 'balance')}
-                  className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            {balanceView !== 'accounts' && (
+              <>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Desde</label>
+                  <input type="date" value={balanceStart} onChange={(e) => setBalanceStart(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Hasta</label>
+                  <input type="date" value={balanceEnd} onChange={(e) => setBalanceEnd(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="flex gap-1 flex-wrap">
+                  {periodPresets.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => applyPeriodPreset(p.id, 'balance')}
+                      className="px-2 py-1.5 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {balanceView === 'accounts' && (
+              <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
+            )}
           </div>
 
           {loading ? (
@@ -797,7 +801,7 @@ export default function Contabilidad() {
                 </tfoot>
               </table>
               {accountBalancesData.rows.length === 0 && (
-                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
+                <div className="p-12 text-center text-gray-500">No hay movimientos en las cuentas.</div>
               )}
             </div>
           ) : balanceView === 'pyg' && pygData ? (

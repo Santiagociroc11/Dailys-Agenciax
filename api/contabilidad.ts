@@ -625,6 +625,9 @@ router.get('/balance', async (req: Request, res: Response) => {
 });
 
 // --- P&G (Pérdidas y Ganancias) por proyecto ---
+// Excluye traslados de utilidades para que el resultado operativo de cada proyecto sea visible
+const TRASLADO_UTILIDADES_REGEX = /traslado.*utilidad|utilidad.*traslado|traslado\s+utilidades|^utilidades\s|utilidades\s+[a-z0-9]/i;
+
 router.get('/pyg', async (req: Request, res: Response) => {
   try {
     const { start, end } = req.query;
@@ -637,10 +640,26 @@ router.get('/pyg', async (req: Request, res: Response) => {
       matchStage.date = { $lte: new Date(end as string) };
     }
 
+    const excludedCategoryIds = (await AcctCategory.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((c) => (c as { id: string }).id);
+
+    const excludeTrasladoUtilidades: Record<string, unknown> = {
+      $and: [
+        { category_id: { $nin: excludedCategoryIds } },
+        {
+          $or: [
+            { description: { $in: [null, ''] } },
+            { description: { $not: { $regex: 'traslado.*utilidad|utilidad.*traslado|traslado\\s+utilidades', $options: 'i' } } },
+          ],
+        },
+      ],
+    };
+
     const pipeline: Record<string, unknown>[] = [];
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
-    }
+    const fullMatch = Object.keys(matchStage).length > 0
+      ? { $and: [matchStage, excludeTrasladoUtilidades] }
+      : excludeTrasladoUtilidades;
+    pipeline.push({ $match: fullMatch });
     pipeline.push({
       $group: {
         _id: { entity_id: '$entity_id', currency: '$currency' },
