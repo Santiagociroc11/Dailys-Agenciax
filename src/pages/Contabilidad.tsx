@@ -583,12 +583,13 @@ export default function Contabilidad() {
         );
         toast.success('Entidad creada');
       } else {
-        await contabilidadApi.updateEntity(
+        const res = await contabilidadApi.updateEntity(
           currentEntity.id!,
           { name: currentEntity.name, type: currentEntity.type, sort_order: currentEntity.sort_order },
           currentUser?.id
         );
-        toast.success('Entidad actualizada');
+        const merged = (res as { _merged?: boolean; merged_count?: number })._merged;
+        toast.success(merged ? `Entidad fusionada (${(res as { merged_count?: number }).merged_count ?? 0} transacciones reasignadas)` : 'Entidad actualizada');
       }
       setShowModal(false);
       setCurrentEntity({ name: '', type: 'project', sort_order: 0 });

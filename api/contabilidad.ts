@@ -75,9 +75,31 @@ router.put('/entities/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, type, sort_order } = req.body;
     const created_by = req.body.created_by as string | undefined;
+    const existing = await AcctEntity.findOne({ id }).select('id name').lean().exec();
+    if (!existing) {
+      res.status(404).json({ error: 'Entidad no encontrada' });
+      return;
+    }
+    const otraConMismoNombre = await AcctEntity.findOne({ name: (name || '').trim(), id: { $ne: id } }).select('id name').lean().exec();
+    if (otraConMismoNombre) {
+      const targetId = (otraConMismoNombre as { id: string }).id;
+      const result = await AcctTransaction.updateMany({ entity_id: id }, { $set: { entity_id: targetId } }).exec();
+      await AcctEntity.deleteOne({ id }).exec();
+      if (created_by) {
+        await AuditLog.create({
+          user_id: created_by,
+          entity_type: 'acct_entity',
+          entity_id: targetId,
+          action: 'merge',
+          summary: `Entidad "${(existing as { name: string }).name}" renombrada y fusionada en "${name}" (${result.modifiedCount} transacciones)`,
+        });
+      }
+      const merged = await AcctEntity.findOne({ id: targetId }).lean().exec();
+      return res.json({ ...merged, _merged: true, merged_count: result.modifiedCount });
+    }
     const doc = await AcctEntity.findOneAndUpdate(
       { id },
-      { $set: { name, type, sort_order } },
+      { $set: { name: name ?? existing.name, type: type ?? (existing as { type?: string }).type, sort_order: sort_order ?? (existing as { sort_order?: number }).sort_order } },
       { new: true }
     )
       .lean()
