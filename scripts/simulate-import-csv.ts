@@ -78,8 +78,9 @@ for (const name of accountHeaders) {
   totals[name] = 0;
 }
 
-// Track entidades y descripciones
+// Track entidades, categorías y descripciones (misma lógica que api/contabilidad.ts)
 const entities = new Set<string>();
+const categoryCount: Record<string, number> = {};
 const descripcionesProblema: { linea: number; proyecto: string; desc: string; motivo: string }[] = [];
 const entityType = (n: string) =>
   /AGENCIA\s*X/i.test(n) ? 'agency' : /UTILIDADES|HOTMART|EQUIPO|NA/i.test(n) ? 'internal' : 'project';
@@ -92,6 +93,11 @@ for (let i = headerRow + 1; i < records.length; i++) {
   const fechaStr = (row[idxFecha] || '').trim();
   let proyectoStr = (row[idxProyecto] || '').trim();
   const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
+  const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+  const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+  const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
+  const categoryName = subcategoria || categoriaDetalle || 'Importación';
+
   if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
   if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
 
@@ -101,11 +107,9 @@ for (let i = headerRow + 1; i < records.length; i++) {
     continue;
   }
 
-  const descRaw = ((row[idxCategoria] ?? '') || (row[idxDescripcion] ?? '')).trim() || 'Sin descripción';
-  if (descRaw === 'Sin descripción') {
-    const subcat = (row[idxSubcategoria] ?? '').trim();
-    const motivo = subcat ? `DESCRIPCION y CATEGORIA vacíos (SUBCATEGORIA="${subcat}" no se usa)` : 'DESCRIPCION y CATEGORIA vacíos';
-    descripcionesProblema.push({ linea: i + 1, proyecto: proyectoStr, desc: subcat, motivo });
+  if (descripcion === 'Sin descripción') {
+    const motivo = subcategoria ? `DESCRIPCION y CATEGORIA/DETALLE vacíos (SUBCATEGORIA="${subcategoria}")` : 'DESCRIPCION y CATEGORIA/DETALLE vacíos';
+    descripcionesProblema.push({ linea: i + 1, proyecto: proyectoStr, desc: subcategoria, motivo });
   }
 
   if (proyectoStr && proyectoStr !== 'NA') {
@@ -124,6 +128,7 @@ for (let i = headerRow + 1; i < records.length; i++) {
     if (!accountName) continue;
 
     totals[accountName] = (totals[accountName] ?? 0) + Math.round(amount * 100) / 100;
+    categoryCount[categoryName] = (categoryCount[categoryName] ?? 0) + 1;
     created++;
     rowCreated++;
   }
@@ -135,6 +140,7 @@ for (let i = headerRow + 1; i < records.length; i++) {
     if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
       const firstAccount = isMovContable ? 'Mov. Contable' : accountHeaders[0];
       totals[firstAccount] = (totals[firstAccount] ?? 0) + Math.round(amount * 100) / 100;
+      categoryCount[categoryName] = (categoryCount[categoryName] ?? 0) + 1;
       created++;
     }
   }
@@ -152,6 +158,19 @@ entityList.forEach((e) => {
   console.log(`  ${e} (${t})${flag}`);
 });
 console.log(`  Total: ${entityList.length} entidades únicas`);
+
+console.log('\n--- CATEGORÍAS QUE SE CREARÍAN (subcategoria || categoria/detalle || Importación) ---');
+const categoryList = Object.entries(categoryCount).sort((a, b) => b[1] - a[1]);
+categoryList.forEach(([name, count]) => {
+  const flag = name === 'Importación' ? ' (fallback cuando ambas vacías)' : '';
+  console.log(`  ${name}: ${count} transacciones${flag}`);
+});
+console.log(`  Total: ${categoryList.length} categorías únicas`);
+const importacionCount = categoryCount['Importación'] ?? 0;
+if (importacionCount > 0) {
+  const pct = ((importacionCount / created) * 100).toFixed(1);
+  console.log(`  → "Importación" solo: ${importacionCount} (${pct}%) - el resto usa SUBCATEGORIA o CATEGORIA/DETALLE`);
+}
 
 if (descripcionesProblema.length > 0) {
   console.log('\n--- DESCRIPCIONES PROBLEMÁTICAS (quedarían "Sin descripción") ---');

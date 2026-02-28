@@ -920,11 +920,13 @@ router.post('/import', async (req: Request, res: Response) => {
         const accountId = await getOrCreateAccount(accountName);
         const categoryId = await getOrCreateCategory(categoryName, amount < 0);
         const type = amount >= 0 ? 'income' : 'expense';
+        const amt = Math.round(amount * 100) / 100;
+        const currency = Math.abs(amt) > 100000 ? 'COP' : default_currency;
 
         await AcctTransaction.create({
           date,
-          amount: Math.round(amount * 100) / 100,
-          currency: default_currency,
+          amount: amt,
+          currency,
           type,
           entity_id: entityId,
           category_id: categoryId,
@@ -946,10 +948,12 @@ router.post('/import', async (req: Request, res: Response) => {
           const accountId = await getOrCreateAccount(accountName);
           const categoryId = await getOrCreateCategory(categoryName, amount < 0);
           const type = amount >= 0 ? 'income' : 'expense';
+          const amt = Math.round(amount * 100) / 100;
+          const currency = Math.abs(amt) > 100000 ? 'COP' : default_currency;
           await AcctTransaction.create({
             date,
-            amount: Math.round(amount * 100) / 100,
-            currency: default_currency,
+            amount: amt,
+            currency,
             type,
             entity_id: entityId,
             category_id: categoryId,

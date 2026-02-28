@@ -259,7 +259,6 @@ export default function Contabilidad() {
   const [error, setError] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [importCsvText, setImportCsvText] = useState('');
-  const [importCurrency, setImportCurrency] = useState('USD');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; entities: number; categories: number; accounts: number } | null>(null);
   const [mergeSourceEntity, setMergeSourceEntity] = useState<AcctEntity | null>(null);
@@ -752,7 +751,7 @@ export default function Contabilidad() {
     setImporting(true);
     setImportResult(null);
     try {
-      const result = await contabilidadApi.importCsv(importCsvText, { default_currency: importCurrency }, currentUser?.id);
+      const result = await contabilidadApi.importCsv(importCsvText, { default_currency: 'USD' }, currentUser?.id);
       setImportResult(result);
       toast.success(`Importadas ${result.created} transacciones`);
       fetchEntities();
@@ -1781,13 +1780,7 @@ export default function Contabilidad() {
                   className="text-sm"
                 />
               </div>
-              <div className="mb-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Moneda por defecto</label>
-                <select value={importCurrency} onChange={(e) => setImportCurrency(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                  <option value="USD">USD</option>
-                  <option value="COP">COP</option>
-                </select>
-              </div>
+              <p className="text-xs text-gray-500 mb-2">Montos &gt; 100.000 se importan en COP; el resto en USD.</p>
               <textarea
                 value={importCsvText}
                 onChange={(e) => setImportCsvText(e.target.value)}
