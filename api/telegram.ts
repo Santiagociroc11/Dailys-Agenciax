@@ -711,7 +711,7 @@ export async function notifyUsersTaskInReview(
       return 0;
     }
 
-    type UserRecord = { telegram_chat_id?: string | null; name?: string; email?: string };
+    type UserRecord = { id?: string; telegram_chat_id?: string | null; name?: string; email?: string };
     const users: UserRecord[] = Array.isArray(usersRaw) ? (usersRaw as UserRecord[]) : (usersRaw ? [usersRaw as UserRecord] : []);
 
     // Crear mensaje

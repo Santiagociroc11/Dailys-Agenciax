@@ -39,6 +39,12 @@ telegramNotificationLogSchema.index({ type: 1, createdAt: -1 });
 telegramNotificationLogSchema.index({ status: 1, createdAt: -1 });
 telegramNotificationLogSchema.index({ recipient: 1, createdAt: -1 });
 
+// TTL: eliminar documentos con más de 30 días
+telegramNotificationLogSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: 30 * 24 * 60 * 60 }
+);
+
 export type TelegramNotificationLogDoc = InferSchemaType<typeof telegramNotificationLogSchema> & {
   id: string;
   createdAt?: Date;

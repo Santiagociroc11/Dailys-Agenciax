@@ -144,7 +144,9 @@ export async function getTelegramLogStats(filters?: {
     }
   );
 
-  const byTypeResult = await TelegramNotificationLog.aggregate(pipeline).exec();
+  const byTypeResult = await TelegramNotificationLog.aggregate(
+    pipeline as unknown as import('mongoose').PipelineStage[]
+  ).exec();
 
   const byType: Record<string, { success: number; failed: number; skipped: number }> = {};
   let success = 0,
