@@ -89,6 +89,12 @@ export const contabilidadApi = {
       method: 'DELETE',
     });
   },
+  async mergeEntity(id: string, targetEntityId: string, createdBy?: string): Promise<{ merged: number; deleted_entity_id: string }> {
+    return fetchJson<{ merged: number; deleted_entity_id: string }>(url(`/entities/${id}/merge`), {
+      method: 'POST',
+      body: JSON.stringify({ target_entity_id: targetEntityId, created_by: createdBy }),
+    });
+  },
 
   async getCategories(): Promise<AcctCategory[]> {
     return fetchJson<AcctCategory[]>(url('/categories'));
@@ -108,6 +114,12 @@ export const contabilidadApi = {
   async deleteCategory(id: string, createdBy?: string): Promise<{ id: string }> {
     return fetchJson<{ id: string }>(url(`/categories/${id}`, createdBy ? { created_by: createdBy } : undefined), {
       method: 'DELETE',
+    });
+  },
+  async mergeCategory(id: string, targetCategoryId: string, createdBy?: string): Promise<{ merged: number; deleted_category_id: string }> {
+    return fetchJson<{ merged: number; deleted_category_id: string }>(url(`/categories/${id}/merge`), {
+      method: 'POST',
+      body: JSON.stringify({ target_category_id: targetCategoryId, created_by: createdBy }),
     });
   },
 

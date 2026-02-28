@@ -14,6 +14,7 @@ import {
   Tag,
   CreditCard,
   Upload,
+  Merge,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -71,6 +72,10 @@ export default function Contabilidad() {
   const [importCurrency, setImportCurrency] = useState('USD');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; entities: number; categories: number; accounts: number } | null>(null);
+  const [mergeSourceEntity, setMergeSourceEntity] = useState<AcctEntity | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [mergeSourceCategory, setMergeSourceCategory] = useState<AcctCategory | null>(null);
+  const [mergeCategoryTargetId, setMergeCategoryTargetId] = useState('');
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -287,7 +292,25 @@ export default function Contabilidad() {
       toast.success('Entidad eliminada');
       fetchEntities();
     } catch (e) {
-      toast.error('Error al eliminar');
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar');
+    }
+  }
+
+  async function handleMergeEntity() {
+    if (!mergeSourceEntity || !mergeTargetId || mergeTargetId === mergeSourceEntity.id) {
+      toast.error('Selecciona una entidad destino diferente');
+      return;
+    }
+    try {
+      const result = await contabilidadApi.mergeEntity(mergeSourceEntity.id, mergeTargetId, currentUser?.id);
+      toast.success(`${result.merged} transacciones reasignadas. Entidad "${mergeSourceEntity.name}" fusionada.`);
+      setMergeSourceEntity(null);
+      setMergeTargetId('');
+      fetchEntities();
+      fetchTransactions();
+      if (activeTab === 'balance') fetchBalance();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al fusionar');
     }
   }
   async function handleDeleteCategory(id: string) {
@@ -297,7 +320,24 @@ export default function Contabilidad() {
       toast.success('Categoría eliminada');
       fetchCategories();
     } catch (e) {
-      toast.error('Error al eliminar');
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar');
+    }
+  }
+
+  async function handleMergeCategory() {
+    if (!mergeSourceCategory || !mergeCategoryTargetId || mergeCategoryTargetId === mergeSourceCategory.id) {
+      toast.error('Selecciona una categoría destino diferente');
+      return;
+    }
+    try {
+      const result = await contabilidadApi.mergeCategory(mergeSourceCategory.id, mergeCategoryTargetId, currentUser?.id);
+      toast.success(`${result.merged} transacciones reasignadas. Categoría "${mergeSourceCategory.name}" fusionada.`);
+      setMergeSourceCategory(null);
+      setMergeCategoryTargetId('');
+      fetchCategories();
+      fetchTransactions();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al fusionar');
     }
   }
   async function handleDeleteAccount(id: string) {
@@ -634,7 +674,8 @@ export default function Contabilidad() {
                         <td className="px-6 py-3">{e.name}</td>
                         <td className="px-6 py-3 capitalize">{e.type}</td>
                         <td className="px-6 py-3 text-right">
-                          <button onClick={() => { setCurrentEntity(e); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
+                          <button onClick={() => { setMergeSourceEntity(e); setMergeTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra entidad"><Merge className="w-4 h-4 inline" /></button>
+                          <button onClick={() => { setCurrentEntity(e); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
                           <button onClick={() => handleDeleteEntity(e.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
                         </td>
                       </tr>
@@ -669,7 +710,8 @@ export default function Contabilidad() {
                         <td className="px-6 py-3">{c.name}</td>
                         <td className="px-6 py-3 capitalize">{c.type}</td>
                         <td className="px-6 py-3 text-right">
-                          <button onClick={() => { setCurrentCategory(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
+                          <button onClick={() => { setMergeSourceCategory(c); setMergeCategoryTargetId(''); }} className="text-amber-600 hover:text-amber-800 p-1" title="Fusionar en otra categoría"><Merge className="w-4 h-4 inline" /></button>
+                          <button onClick={() => { setCurrentCategory(c); setModalMode('edit'); setShowModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1 ml-1"><Edit className="w-4 h-4 inline" /></button>
                           <button onClick={() => handleDeleteCategory(c.id)} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
                         </td>
                       </tr>
@@ -853,6 +895,72 @@ export default function Contabilidad() {
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {mergeSourceCategory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">Fusionar categoría</h3>
+              <button onClick={() => { setMergeSourceCategory(null); setMergeCategoryTargetId(''); }} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4">
+              <p className="text-sm text-gray-600 mb-3">
+                Todas las transacciones de <strong>{mergeSourceCategory.name}</strong> se reasignarán a la categoría que elijas. La categoría actual se eliminará.
+              </p>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fusionar en</label>
+              <select
+                value={mergeCategoryTargetId}
+                onChange={(e) => setMergeCategoryTargetId(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="">— Selecciona categoría destino —</option>
+                {categories.filter((x) => x.id !== mergeSourceCategory.id).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button onClick={() => { setMergeSourceCategory(null); setMergeCategoryTargetId(''); }} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
+              <button onClick={handleMergeCategory} disabled={!mergeCategoryTargetId} className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                Fusionar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mergeSourceEntity && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">Fusionar entidad</h3>
+              <button onClick={() => { setMergeSourceEntity(null); setMergeTargetId(''); }} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4">
+              <p className="text-sm text-gray-600 mb-3">
+                Todas las transacciones de <strong>{mergeSourceEntity.name}</strong> se reasignarán a la entidad que elijas. La entidad actual se eliminará.
+              </p>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fusionar en</label>
+              <select
+                value={mergeTargetId}
+                onChange={(e) => setMergeTargetId(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="">— Selecciona entidad destino —</option>
+                {entities.filter((x) => x.id !== mergeSourceEntity.id).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button onClick={() => { setMergeSourceEntity(null); setMergeTargetId(''); }} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
+              <button onClick={handleMergeEntity} disabled={!mergeTargetId} className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                Fusionar
+              </button>
+            </div>
           </div>
         </div>
       )}

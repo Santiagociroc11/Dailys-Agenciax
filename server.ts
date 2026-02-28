@@ -33,8 +33,8 @@ import {
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware para parsear JSON
-app.use(express.json());
+// Middleware para parsear JSON (límite 10MB para importación CSV de contabilidad)
+app.use(express.json({ limit: '10mb' }));
 
 // Obtener __dirname en módulos ES
 const __filename = fileURLToPath(import.meta.url);

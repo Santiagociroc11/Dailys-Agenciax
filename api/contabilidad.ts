@@ -106,6 +106,11 @@ router.delete('/entities/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const created_by = req.query.created_by as string | undefined;
+    const count = await AcctTransaction.countDocuments({ entity_id: id }).exec();
+    if (count > 0) {
+      res.status(400).json({ error: `Hay ${count} transacciones con esta entidad. Usa "Fusionar" para reasignarlas a otra entidad antes de eliminar.` });
+      return;
+    }
     const doc = await AcctEntity.findOneAndDelete({ id }).lean().exec();
     if (!doc) {
       res.status(404).json({ error: 'Entidad no encontrada' });
@@ -121,6 +126,48 @@ router.delete('/entities/:id', async (req: Request, res: Response) => {
       });
     }
     res.json({ id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/entities/:id/merge', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { target_entity_id } = req.body as { target_entity_id?: string };
+    const created_by = req.body.created_by as string | undefined;
+    if (!target_entity_id || target_entity_id === id) {
+      res.status(400).json({ error: 'Selecciona una entidad destino diferente' });
+      return;
+    }
+    const [source, target] = await Promise.all([
+      AcctEntity.findOne({ id }).select('id name').lean().exec(),
+      AcctEntity.findOne({ id: target_entity_id }).select('id name').lean().exec(),
+    ]);
+    if (!source) {
+      res.status(404).json({ error: 'Entidad origen no encontrada' });
+      return;
+    }
+    if (!target) {
+      res.status(404).json({ error: 'Entidad destino no encontrada' });
+      return;
+    }
+    const result = await AcctTransaction.updateMany(
+      { entity_id: id },
+      { $set: { entity_id: target_entity_id } }
+    ).exec();
+    await AcctEntity.findOneAndDelete({ id }).exec();
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_entity',
+        entity_id: id,
+        action: 'merge',
+        summary: `Entidad "${(source as { name: string }).name}" fusionada en "${(target as { name: string }).name}" (${result.modifiedCount} transacciones)`,
+      });
+    }
+    res.json({ merged: result.modifiedCount, deleted_entity_id: id });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
@@ -199,6 +246,11 @@ router.delete('/categories/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const created_by = req.query.created_by as string | undefined;
+    const count = await AcctTransaction.countDocuments({ category_id: id }).exec();
+    if (count > 0) {
+      res.status(400).json({ error: `Hay ${count} transacciones con esta categoría. Usa "Fusionar" para reasignarlas antes de eliminar.` });
+      return;
+    }
     const doc = await AcctCategory.findOneAndDelete({ id }).lean().exec();
     if (!doc) {
       res.status(404).json({ error: 'Categoría no encontrada' });
@@ -214,6 +266,48 @@ router.delete('/categories/:id', async (req: Request, res: Response) => {
       });
     }
     res.json({ id });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/categories/:id/merge', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { target_category_id } = req.body as { target_category_id?: string };
+    const created_by = req.body.created_by as string | undefined;
+    if (!target_category_id || target_category_id === id) {
+      res.status(400).json({ error: 'Selecciona una categoría destino diferente' });
+      return;
+    }
+    const [source, target] = await Promise.all([
+      AcctCategory.findOne({ id }).select('id name').lean().exec(),
+      AcctCategory.findOne({ id: target_category_id }).select('id name').lean().exec(),
+    ]);
+    if (!source) {
+      res.status(404).json({ error: 'Categoría origen no encontrada' });
+      return;
+    }
+    if (!target) {
+      res.status(404).json({ error: 'Categoría destino no encontrada' });
+      return;
+    }
+    const result = await AcctTransaction.updateMany(
+      { category_id: id },
+      { $set: { category_id: target_category_id } }
+    ).exec();
+    await AcctCategory.findOneAndDelete({ id }).exec();
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_category',
+        entity_id: id,
+        action: 'merge',
+        summary: `Categoría "${(source as { name: string }).name}" fusionada en "${(target as { name: string }).name}" (${result.modifiedCount} transacciones)`,
+      });
+    }
+    res.json({ merged: result.modifiedCount, deleted_category_id: id });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
