@@ -439,7 +439,37 @@ export const contabilidadApi = {
       }),
     });
   },
+
+  async importPreview(csvText: string, options?: { default_currency?: string }): Promise<ImportPreviewResponse> {
+    return fetchJson<ImportPreviewResponse>(url('/import/preview'), {
+      method: 'POST',
+      body: JSON.stringify({
+        csv_text: csvText,
+        default_currency: options?.default_currency ?? 'USD',
+      }),
+    });
+  },
 };
+
+export interface ImportPreviewItem {
+  rowIndex: number;
+  fecha: string;
+  tipo: 'ingreso' | 'gasto' | 'traslado_bancos' | 'traslado_utilidades' | 'reparto';
+  proyecto: string;
+  descripcion: string;
+  concepto?: string;
+  cuenta?: string;
+  monto: number;
+  currency: string;
+  explicacion: string;
+}
+
+export interface ImportPreviewResponse {
+  preview: ImportPreviewItem[];
+  summary: { total: number; [key: string]: number };
+  skipped: number;
+  accountHeaders: string[];
+}
 
 export interface ImportResult {
   created: number;

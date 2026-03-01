@@ -1169,6 +1169,268 @@ router.get('/account-balances', async (req: Request, res: Response) => {
   }
 });
 
+// --- Import CSV Preview (sin crear registros) ---
+interface ImportPreviewItem {
+  rowIndex: number;
+  fecha: string;
+  tipo: 'ingreso' | 'gasto' | 'traslado_bancos' | 'traslado_utilidades' | 'reparto';
+  proyecto: string;
+  descripcion: string;
+  concepto?: string;
+  cuenta?: string;
+  monto: number;
+  currency: string;
+  explicacion: string;
+}
+
+router.post('/import/preview', async (req: Request, res: Response) => {
+  try {
+    const { csv_text, default_currency = 'USD' } = req.body as { csv_text?: string; default_currency?: string };
+    if (!csv_text || typeof csv_text !== 'string') {
+      res.status(400).json({ error: 'Falta csv_text' });
+      return;
+    }
+
+    const records = parse(csv_text, { relax_column_count: true, trim: true, skip_empty_lines: true }) as string[][];
+    if (records.length < 2) {
+      res.status(400).json({ error: 'CSV vacío o sin datos' });
+      return;
+    }
+
+    let headerRow = 0;
+    for (let i = 0; i < Math.min(10, records.length); i++) {
+      const row = records[i];
+      const first = (row[0] || '').toUpperCase();
+      const hasProyecto = row.some((c) => (c || '').toUpperCase().includes('PROYECTO'));
+      if (first.includes('FECHA') || hasProyecto) {
+        headerRow = i;
+        break;
+      }
+    }
+
+    const headers = records[headerRow].map((h) => (h || '').trim());
+    const idxFecha = headers.findIndex((h) => /FECHA/i.test(h));
+    const idxProyecto = headers.findIndex((h) => /PROYECTO/i.test(h));
+    const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
+    let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
+    if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
+    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
+    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
+    const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
+    const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
+
+    if (idxFecha < 0 || idxProyecto < 0) {
+      res.status(400).json({ error: 'CSV debe tener columnas FECHA y PROYECTO' });
+      return;
+    }
+
+    const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
+    const accountHeaders = headers.slice(accountColStart).filter((h) => h && !/^\s*$/.test(h));
+
+    const preview: ImportPreviewItem[] = [];
+    let skipped = 0;
+    let skipNext = false;
+
+    for (let i = headerRow + 1; i < records.length; i++) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      const row = records[i];
+      const fechaStr = (row[idxFecha] || '').trim();
+      let proyectoStr = (row[idxProyecto] || '').trim();
+      const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
+      const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+      const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
+      const categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
+        ? `${subcategoria} (${categoriaDetalle})`
+        : (subcategoria || categoriaDetalle || 'Importación');
+
+      if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
+      if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
+
+      const date = parseSpanishDate(fechaStr);
+      if (!date) {
+        skipped++;
+        continue;
+      }
+
+      const accountAmounts: { accountName: string; amount: number }[] = [];
+      for (let c = 0; c < accountHeaders.length; c++) {
+        const cell = (row[accountColStart + c] || '').trim();
+        const amount = parseAmount(cell);
+        if (amount == null || amount === 0) continue;
+        const accountName = accountHeaders[c];
+        if (!accountName) continue;
+        accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
+      }
+
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoriaDetalle) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+      const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
+
+      if (isTrasladoBancos) {
+        const currency = accountAmounts.some((a) => Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
+        const cuentas = accountAmounts.map((a) => `${a.accountName}: ${a.amount > 0 ? '+' : ''}${a.amount}`).join(' ↔ ');
+        preview.push({
+          rowIndex: i + 1,
+          fecha: fechaStr,
+          tipo: 'traslado_bancos',
+          proyecto: proyectoStr,
+          descripcion,
+          monto: 0,
+          currency,
+          explicacion: `Traslado entre cuentas de banco (no es ingreso ni gasto): ${cuentas}`,
+        });
+      } else if (accountAmounts.length === 1) {
+        const { accountName, amount } = accountAmounts[0];
+        const amt = Math.abs(amount);
+        const currency = amt > 100000 ? 'COP' : default_currency;
+        if (isReparto) {
+          preview.push({
+            rowIndex: i + 1,
+            fecha: fechaStr,
+            tipo: 'reparto',
+            proyecto: proyectoStr,
+            descripcion,
+            cuenta: accountName,
+            concepto: categoryName,
+            monto: amt,
+            currency,
+            explicacion: `Pago a socio/colaborador desde utilidades (no es gasto operativo)`,
+          });
+        } else {
+          const tipo = amount > 0 ? 'ingreso' : 'gasto';
+          preview.push({
+            rowIndex: i + 1,
+            fecha: fechaStr,
+            tipo,
+            proyecto: proyectoStr,
+            descripcion,
+            cuenta: accountName,
+            concepto: categoryName,
+            monto: amt,
+            currency,
+            explicacion: amount > 0
+              ? `Ingreso: entra dinero a ${accountName} por ${categoryName}`
+              : `Gasto: sale dinero de ${accountName} por ${categoryName}`,
+          });
+        }
+      } else if (accountAmounts.length > 1 && !isTrasladoBancos) {
+        for (const { accountName, amount } of accountAmounts) {
+          const amt = Math.abs(amount);
+          const currency = amt > 100000 ? 'COP' : default_currency;
+          if (isReparto) {
+            preview.push({
+              rowIndex: i + 1,
+              fecha: fechaStr,
+              tipo: 'reparto',
+              proyecto: proyectoStr,
+              descripcion,
+              cuenta: accountName,
+              concepto: categoryName,
+              monto: amt,
+              currency,
+              explicacion: `Pago a socio desde utilidades`,
+            });
+          } else {
+            const tipo = amount > 0 ? 'ingreso' : 'gasto';
+            preview.push({
+              rowIndex: i + 1,
+              fecha: fechaStr,
+              tipo,
+              proyecto: proyectoStr,
+              descripcion,
+              cuenta: accountName,
+              concepto: categoryName,
+              monto: amt,
+              currency,
+              explicacion: amount > 0 ? `Ingreso en ${accountName}` : `Gasto desde ${accountName}`,
+            });
+          }
+        }
+      }
+
+      if (accountAmounts.length === 0) {
+        const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
+        const amount = parseAmount(importeCell);
+        const isSalida = /SALIDA\s*CONTABLE/i.test(tipoStr);
+        const isIngreso = /INGRESO\s*CONTABLE/i.test(tipoStr);
+        const isMovContable = isSalida || isIngreso;
+
+        if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
+          const amt = Math.round(Math.abs(amount) * 100) / 100;
+          const currency = amt > 100000 ? 'COP' : default_currency;
+
+          if (isMovContable) {
+            let entityOrigen = proyectoStr;
+            let entityDestino = 'AGENCIA X';
+            if (isSalida && i + 1 < records.length) {
+              const nextRow = records[i + 1];
+              const nextTipo = (idxTipo >= 0 ? (nextRow[idxTipo] || '') : '').trim();
+              const nextProyecto = (nextRow[idxProyecto] || '').trim();
+              const nextImporte = parseAmount((idxImporteContable >= 0 ? (nextRow[idxImporteContable] || '') : '').trim());
+              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null && Math.abs(Math.abs(nextImporte) - amt) < 0.02) {
+                entityDestino = nextProyecto || entityDestino;
+                skipNext = true;
+              }
+            } else if (isIngreso) {
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoriaDetalle.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
+              entityDestino = proyectoStr;
+            }
+            preview.push({
+              rowIndex: i + 1,
+              fecha: fechaStr,
+              tipo: 'traslado_utilidades',
+              proyecto: proyectoStr,
+              descripcion,
+              concepto: categoryName,
+              monto: amt,
+              currency,
+              explicacion: `Traslado de utilidades: de ${entityOrigen} → ${entityDestino} (corte de balance del proyecto)`,
+            });
+          } else {
+            const accountName = accountHeaders[0] || 'Cuenta';
+            const tipo = amount > 0 ? 'ingreso' : 'gasto';
+            preview.push({
+              rowIndex: i + 1,
+              fecha: fechaStr,
+              tipo,
+              proyecto: proyectoStr,
+              descripcion,
+              cuenta: accountName,
+              concepto: categoryName,
+              monto: amt,
+              currency,
+              explicacion: amount > 0 ? `Ingreso en ${accountName}` : `Gasto desde ${accountName}`,
+            });
+          }
+        }
+      }
+    }
+
+    const byTipo = preview.reduce((acc, p) => {
+      acc[p.tipo] = (acc[p.tipo] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    res.json({
+      preview,
+      summary: {
+        total: preview.length,
+        ...byTipo,
+      },
+      skipped,
+      accountHeaders,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // --- Import CSV ---
 router.post('/import', async (req: Request, res: Response) => {
   try {
@@ -1454,7 +1716,9 @@ router.post('/import', async (req: Request, res: Response) => {
           const amt = Math.abs(amount);
           const currency = amt > 100000 ? 'COP' : default_currency;
           const bankChartId = await getOrCreateChartAccountForBank(accountName);
-          const categoryChartId = isReparto ? await getOrCreateChartAccountForEquity(proyectoStr) : await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+          const categoryChartId = isReparto
+            ? await getOrCreateChartAccountForEquity(proyectoStr)
+            : await getOrCreateChartAccountForCategory(categoryName, amount < 0);
           const entry = await AcctJournalEntry.create({
             date,
             description: descripcion.slice(0, 500),

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -23,6 +23,9 @@ import {
   Search,
   Users,
   FileText,
+  Eye,
+  CheckCircle2,
+  Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -39,6 +42,33 @@ const PERIOD_PRESETS = [
   { id: 'this-month', label: 'Este mes' },
   { id: 'last-month', label: 'Mes pasado' },
 ] as const;
+
+const TIPO_LABELS: Record<string, { label: string; color: string }> = {
+  ingreso: { label: 'Ingreso', color: 'bg-emerald-100 text-emerald-800' },
+  gasto: { label: 'Gasto', color: 'bg-rose-100 text-rose-800' },
+  traslado_bancos: { label: 'Traslado bancos', color: 'bg-blue-100 text-blue-800' },
+  traslado_utilidades: { label: 'Traslado utilidades', color: 'bg-violet-100 text-violet-800' },
+  reparto: { label: 'Pago socio', color: 'bg-amber-100 text-amber-800' },
+};
+
+function ImportPreviewRow({ item }: { item: ImportPreviewItem }) {
+  const t = TIPO_LABELS[item.tipo] || { label: item.tipo, color: 'bg-gray-100 text-gray-800' };
+  const montoStr = item.monto > 0 ? `+${item.monto.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : item.monto.toLocaleString(undefined, { minimumFractionDigits: 2 });
+  return (
+    <tr className="border-t border-slate-100 hover:bg-slate-50">
+      <td className="px-3 py-2 text-gray-500">{item.rowIndex}</td>
+      <td className="px-3 py-2">{item.fecha}</td>
+      <td className="px-3 py-2">{item.cuenta || '-'}</td>
+      <td className="px-3 py-2">
+        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${t.color}`}>{t.label}</span>
+      </td>
+      <td className="px-3 py-2">{item.proyecto}</td>
+      <td className="px-3 py-2">{item.descripcion.slice(0, 40)}{item.descripcion.length > 40 ? '…' : ''}</td>
+      <td className="px-3 py-2 text-right font-mono">{item.monto !== 0 ? `${montoStr} ${item.currency}` : '-'}</td>
+      <td className="px-3 py-2 text-xs text-gray-600 max-w-[200px]">{item.explicacion}</td>
+    </tr>
+  );
+}
 
 function DateRangePicker({
   start,
@@ -664,6 +694,10 @@ export default function Contabilidad() {
   const [error, setError] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [importCsvText, setImportCsvText] = useState('');
+  const [importStep, setImportStep] = useState<'upload' | 'preview' | 'done'>('upload');
+  const [importPreviewData, setImportPreviewData] = useState<ImportPreviewResponse | null>(null);
+  const [importPreviewLoading, setImportPreviewLoading] = useState(false);
+  const [importPreviewFilter, setImportPreviewFilter] = useState<string>('all');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; entities: number; categories: number; accounts: number } | null>(null);
   const [mergeSourceEntity, setMergeSourceEntity] = useState<AcctEntity | null>(null);
@@ -1401,6 +1435,24 @@ export default function Contabilidad() {
     }
   }
 
+  async function handleImportPreview() {
+    if (!importCsvText.trim()) {
+      toast.error('Pega el contenido del CSV');
+      return;
+    }
+    setImportPreviewLoading(true);
+    setImportPreviewData(null);
+    try {
+      const data = await contabilidadApi.importPreview(importCsvText, { default_currency: 'USD' });
+      setImportPreviewData(data);
+      setImportStep('preview');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al analizar el CSV');
+    } finally {
+      setImportPreviewLoading(false);
+    }
+  }
+
   async function handleImportCsv() {
     if (!importCsvText.trim()) {
       toast.error('Pega el contenido del CSV');
@@ -1411,6 +1463,7 @@ export default function Contabilidad() {
     try {
       const result = await contabilidadApi.importCsv(importCsvText, { default_currency: 'USD' }, currentUser?.id);
       setImportResult(result);
+      setImportStep('done');
       toast.success(`Importados ${result.created} asientos`);
       fetchEntities();
       fetchCategories();
@@ -1422,6 +1475,15 @@ export default function Contabilidad() {
     } finally {
       setImporting(false);
     }
+  }
+
+  function closeImportModal() {
+    setShowImportModal(false);
+    setImportCsvText('');
+    setImportResult(null);
+    setImportPreviewData(null);
+    setImportStep('upload');
+    setImportPreviewFilter('all');
   }
 
   if (!isAdmin) {
@@ -3202,52 +3264,170 @@ export default function Contabilidad() {
 
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="font-semibold text-lg">Importar CSV desde Excel</h3>
-              <button onClick={() => { setShowImportModal(false); setImportCsvText(''); setImportResult(null); }} className="p-1 hover:bg-gray-100 rounded">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-lg">Importar CSV</h3>
+                {importStep === 'upload' && <span className="text-xs text-gray-500">Paso 1: Subir archivo</span>}
+                {importStep === 'preview' && <span className="text-xs text-indigo-600 font-medium">Paso 2: Revisar antes de importar</span>}
+                {importStep === 'done' && <span className="text-xs text-emerald-600 font-medium">Completado</span>}
+              </div>
+              <button onClick={closeImportModal} className="p-1 hover:bg-gray-100 rounded">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
-              <p className="text-sm text-gray-600 mb-2">
-                Pega el contenido del CSV exportado desde Excel o selecciona un archivo. Debe tener columnas FECHA, PROYECTO y columnas de cuentas (BANCOLOMBIA, PAYO JSD, etc.).
-              </p>
-              <div className="mb-2">
-                <input
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      const r = new FileReader();
-                      r.onload = () => setImportCsvText(String(r.result ?? ''));
-                      r.readAsText(f, 'UTF-8');
-                    }
-                    e.target.value = '';
-                  }}
-                  className="text-sm"
-                />
-              </div>
-              <p className="text-xs text-gray-500 mb-2">Montos &gt; 100.000 se importan en COP; el resto en USD.</p>
-              <textarea
-                value={importCsvText}
-                onChange={(e) => setImportCsvText(e.target.value)}
-                placeholder="Pega aquí el CSV..."
-                className="w-full h-48 px-3 py-2 border rounded-lg font-mono text-sm"
-                disabled={importing}
-              />
-              {importResult && (
-                <div className="mt-3 p-3 bg-emerald-50 rounded-lg text-sm text-emerald-800">
-                  <strong>Importación completada:</strong> {importResult.created} transacciones, {importResult.entities} entidades, {importResult.accounts} cuentas, {importResult.categories} categorías. {importResult.skipped > 0 && `${importResult.skipped} filas omitidas.`}
+              {importStep === 'upload' && (
+                <>
+                  <div className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
+                      <Info className="w-4 h-4" />
+                      ¿Qué vas a importar?
+                    </h4>
+                    <p className="text-sm text-slate-600 mb-2">
+                      El CSV debe tener columnas <strong>FECHA</strong>, <strong>PROYECTO</strong> y columnas de cuentas (Bancolombia, Payo Santiago, etc.).
+                      Antes de importar podrás ver exactamente qué se creará: ingresos, gastos, traslados entre bancos, pagos a socios, etc.
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Montos &gt; 100.000 se importan en COP; el resto en USD.
+                    </p>
+                  </div>
+                  <div className="mb-2">
+                    <input
+                      type="file"
+                      accept=".csv,.txt"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) {
+                          const r = new FileReader();
+                          r.onload = () => setImportCsvText(String(r.result ?? ''));
+                          r.readAsText(f, 'UTF-8');
+                        }
+                        e.target.value = '';
+                      }}
+                      className="text-sm"
+                    />
+                  </div>
+                  <textarea
+                    value={importCsvText}
+                    onChange={(e) => setImportCsvText(e.target.value)}
+                    placeholder="O pega aquí el contenido del CSV..."
+                    className="w-full h-40 px-3 py-2 border rounded-lg font-mono text-sm"
+                    disabled={importPreviewLoading}
+                  />
+                </>
+              )}
+
+              {importStep === 'preview' && importPreviewData && (
+                <>
+                  <div className="mb-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                    <h4 className="font-medium text-amber-900 mb-2 flex items-center gap-2">
+                      <Eye className="w-4 h-4" />
+                      Vista previa de lo que se importará
+                    </h4>
+                    <p className="text-sm text-amber-800 mb-2">
+                      Revisa que todo se vea correcto. Cada fila muestra cómo se clasificará el movimiento (ingreso, gasto, traslado, etc.).
+                    </p>
+                    <div className="flex flex-wrap gap-2 text-sm">
+                      <span className="font-medium">Total: {importPreviewData.summary.total} movimientos</span>
+                      {importPreviewData.summary.ingreso ? <span className="text-emerald-600">• {importPreviewData.summary.ingreso} ingresos</span> : null}
+                      {importPreviewData.summary.gasto ? <span className="text-rose-600">• {importPreviewData.summary.gasto} gastos</span> : null}
+                      {importPreviewData.summary.traslado_bancos ? <span className="text-blue-600">• {importPreviewData.summary.traslado_bancos} traslados entre bancos</span> : null}
+                      {importPreviewData.summary.traslado_utilidades ? <span className="text-violet-600">• {importPreviewData.summary.traslado_utilidades} traslados de utilidades</span> : null}
+                      {importPreviewData.summary.reparto ? <span className="text-amber-600">• {importPreviewData.summary.reparto} pagos a socios</span> : null}
+                      {importPreviewData.skipped > 0 && <span className="text-gray-500">• {importPreviewData.skipped} filas omitidas (fecha inválida)</span>}
+                    </div>
+                  </div>
+                  <div className="mb-2 flex gap-2">
+                    <select
+                      value={importPreviewFilter}
+                      onChange={(e) => setImportPreviewFilter(e.target.value)}
+                      className="text-sm border rounded-lg px-3 py-1.5"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="ingreso">Ingresos</option>
+                      <option value="gasto">Gastos</option>
+                      <option value="traslado_bancos">Traslados entre bancos</option>
+                      <option value="traslado_utilidades">Traslados de utilidades</option>
+                      <option value="reparto">Pagos a socios</option>
+                    </select>
+                  </div>
+                  <div className="border rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-100 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Fila</th>
+                          <th className="text-left px-3 py-2 font-medium">Fecha</th>
+                          <th className="text-left px-3 py-2 font-medium">Cuenta</th>
+                          <th className="text-left px-3 py-2 font-medium">Tipo</th>
+                          <th className="text-left px-3 py-2 font-medium">Proyecto</th>
+                          <th className="text-left px-3 py-2 font-medium">Descripción</th>
+                          <th className="text-right px-3 py-2 font-medium">Monto</th>
+                          <th className="text-left px-3 py-2 font-medium">Explicación</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreviewData.preview
+                          .filter((p) => importPreviewFilter === 'all' || p.tipo === importPreviewFilter)
+                          .slice(0, 100)
+                          .map((p, idx) => (
+                            <ImportPreviewRow key={`preview-${idx}-${p.rowIndex}`} item={p} />
+                          ))}
+                      </tbody>
+                    </table>
+                    {importPreviewData.preview.filter((p) => importPreviewFilter === 'all' || p.tipo === importPreviewFilter).length > 100 && (
+                      <div className="p-2 text-xs text-gray-500 text-center bg-slate-50">
+                        Mostrando 100 de {importPreviewData.preview.filter((p) => importPreviewFilter === 'all' || p.tipo === importPreviewFilter).length} movimientos
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {importStep === 'done' && importResult && (
+                <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <h4 className="font-medium text-emerald-900 mb-2 flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5" />
+                    Importación completada
+                  </h4>
+                  <p className="text-sm text-emerald-800">
+                    {importResult.created} asientos creados. {importResult.entities} entidades, {importResult.accounts} cuentas, {importResult.categories} categorías.
+                    {importResult.skipped > 0 && ` ${importResult.skipped} filas omitidas.`}
+                  </p>
                 </div>
               )}
             </div>
-            <div className="p-4 border-t flex justify-end gap-2">
-              <button onClick={() => { setShowImportModal(false); setImportCsvText(''); setImportResult(null); }} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cerrar</button>
-              <button onClick={handleImportCsv} disabled={importing || !importCsvText.trim()} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-                {importing ? 'Importando...' : 'Importar'}
-              </button>
+            <div className="p-4 border-t flex justify-between items-center gap-2">
+              <div>
+                {importStep === 'preview' && (
+                  <button onClick={() => setImportStep('upload')} className="text-sm text-gray-600 hover:text-gray-800">
+                    ← Volver a editar CSV
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {importStep === 'upload' && (
+                  <>
+                    <button onClick={closeImportModal} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cerrar</button>
+                    <button onClick={handleImportPreview} disabled={importPreviewLoading || !importCsvText.trim()} className="bg-slate-600 text-white px-4 py-2 rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                      {importPreviewLoading ? 'Analizando...' : 'Ver qué se importará'}
+                    </button>
+                  </>
+                )}
+                {importStep === 'preview' && (
+                  <>
+                    <button onClick={() => setImportStep('upload')} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Atrás</button>
+                    <button onClick={handleImportCsv} disabled={importing} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                      {importing ? 'Importando...' : 'Confirmar e importar'}
+                    </button>
+                  </>
+                )}
+                {importStep === 'done' && (
+                  <button onClick={closeImportModal} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                    Cerrar
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
