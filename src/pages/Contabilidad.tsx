@@ -51,6 +51,190 @@ const TIPO_LABELS: Record<string, { label: string; color: string }> = {
   reparto: { label: 'Pago socio', color: 'bg-amber-100 text-amber-800' },
 };
 
+const CLASE_LABELS: Record<string, string> = {
+  '1': 'Activos',
+  '2': 'Pasivos',
+  '3': 'Patrimonio',
+  '4': 'Ingresos',
+  '5': 'Gastos',
+};
+
+const GRUPO_LABELS: Record<string, string> = {
+  '11': 'Disponibles',
+  '12': 'Inversiones',
+  '13': 'Deudores',
+  '21': 'Obligaciones financieras',
+  '22': 'Proveedores',
+  '31': 'Capital',
+  '36': 'Reservas y utilidades',
+  '41': 'Ingresos operacionales',
+  '51': 'Gastos administrativos',
+  '52': 'Gastos de ventas',
+  '53': 'Gastos financieros',
+};
+
+type ChartTreeNode = {
+  key: string;
+  code: string;
+  label: string;
+  account: AcctChartAccount | null;
+  children: ChartTreeNode[];
+  depth: number;
+};
+
+function buildChartTree(accounts: AcctChartAccount[]): ChartTreeNode[] {
+  const byCode = new Map<string, AcctChartAccount>();
+  for (const a of accounts) byCode.set(a.code, a);
+
+  const roots = new Map<string, ChartTreeNode>();
+
+  const getOrCreate = (prefix: string, depth: number): ChartTreeNode => {
+    const acc = byCode.get(prefix) ?? null;
+    const isClase = prefix.length === 1;
+    const isGrupo = prefix.length === 2;
+    let label = acc?.name ?? '';
+    if (!label && isClase) label = CLASE_LABELS[prefix] ?? `Clase ${prefix}`;
+    if (!label && isGrupo) label = GRUPO_LABELS[prefix] ?? `Grupo ${prefix}`;
+    if (!label) label = prefix;
+    return {
+      key: prefix,
+      code: prefix,
+      label,
+      account: acc,
+      children: [],
+      depth,
+    };
+  };
+
+  const ensurePath = (segments: string[]): ChartTreeNode => {
+    let node: ChartTreeNode | null = null;
+    for (let i = 0; i < segments.length; i++) {
+      const prefix = segments.slice(0, i + 1).join('');
+      if (i === 0) {
+        if (!roots.has(prefix)) roots.set(prefix, getOrCreate(prefix, 1));
+        node = roots.get(prefix)!;
+      } else {
+        const parent = node!;
+        let child = parent.children.find((c) => c.key === prefix);
+        if (!child) {
+          child = getOrCreate(prefix, i + 1);
+          parent.children.push(child);
+        }
+        node = child;
+      }
+    }
+    return node!;
+  };
+
+  for (const a of accounts.sort((x, y) => x.code.localeCompare(y.code))) {
+    const code = a.code.replace(/\D/g, '');
+    if (!code) continue;
+    const segments: string[] = [];
+    if (code.length >= 1) segments.push(code.slice(0, 1));
+    if (code.length >= 2) segments.push(code.slice(0, 2));
+    if (code.length >= 4) segments.push(code.slice(0, 4));
+    else if (code.length === 3) segments.push(code);
+    if (code.length > 4) segments.push(code);
+    const node = ensurePath(segments);
+    if (node.key === code || node.key === a.code) {
+      node.account = a;
+      node.label = a.name;
+    }
+  }
+
+  return Array.from(roots.values()).sort((a, b) => a.code.localeCompare(b.code));
+}
+
+function ChartAccountsTree({
+  accounts,
+  onEdit,
+  onDelete,
+}: {
+  accounts: AcctChartAccount[];
+  onEdit: (a: AcctChartAccount) => void;
+  onDelete: (a: AcctChartAccount) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['1', '2', '3', '4', '5']));
+  const tree = buildChartTree(accounts);
+
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const renderNode = (node: ChartTreeNode, indent: number) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expanded.has(node.key);
+    const isVirtual = !node.account;
+
+    return (
+      <React.Fragment key={node.key}>
+        <div
+          className={`flex items-center gap-2 py-2 px-4 border-b border-gray-100 hover:bg-gray-50/80 transition-colors ${indent > 0 ? '' : 'bg-gray-50/50'}`}
+          style={{ paddingLeft: `${12 + indent * 24}px` }}
+        >
+          <button
+            type="button"
+            onClick={() => hasChildren && toggle(node.key)}
+            className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 text-gray-500"
+          >
+            {hasChildren ? (
+              isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
+            ) : (
+              <span className="w-4" />
+            )}
+          </button>
+          <span className={`font-mono text-sm ${isVirtual ? 'text-gray-500 font-medium' : 'text-gray-800'}`}>
+            {node.code}
+          </span>
+          <span className={`flex-1 ${isVirtual ? 'text-gray-600' : 'text-gray-900'}`}>{node.label}</span>
+          {node.account && (
+            <>
+              <span className="text-xs px-2 py-0.5 rounded text-gray-500 bg-gray-100">
+                {({ asset: 'Activo', liability: 'Pasivo', equity: 'Patrimonio', income: 'Ingreso', expense: 'Gasto' } as Record<string, string>)[node.account.type] ?? node.account.type}
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onEdit(node.account!)}
+                  className="p-1.5 rounded hover:bg-indigo-100 text-indigo-600"
+                  title="Editar"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onDelete(node.account!)}
+                  className="p-1.5 rounded hover:bg-red-100 text-red-600"
+                  title="Eliminar"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        {hasChildren && isExpanded && node.children.map((child) => renderNode(child, indent + 1))}
+      </React.Fragment>
+    );
+  };
+
+  return (
+    <div className="divide-y divide-gray-100">
+      <div className="flex items-center gap-2 py-3 px-4 bg-gray-50 border-b border-gray-200 font-medium text-sm text-gray-600">
+        <span className="w-6" />
+        <span className="w-16">Código</span>
+        <span className="flex-1">Nombre</span>
+        <span className="w-20" />
+        <span className="w-16 text-right">Acciones</span>
+      </div>
+      {tree.map((node) => renderNode(node, 0))}
+    </div>
+  );
+}
+
 function ImportPreviewRow({ item }: { item: ImportPreviewItem }) {
   const t = TIPO_LABELS[item.tipo] || { label: item.tipo, color: 'bg-gray-100 text-gray-800' };
   const montoStr = item.monto > 0 ? `+${item.monto.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : item.monto.toLocaleString(undefined, { minimumFractionDigits: 2 });
@@ -1791,85 +1975,111 @@ export default function Contabilidad() {
       )}
 
       {activeTab === 'balance' && (
-        <div>
-          <div className="flex flex-wrap gap-4 mb-4 items-end">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setBalanceView('balance')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'balance' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                Balance
-              </button>
-              <button
-                onClick={() => setBalanceView('pyg_matrix')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_matrix' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                P&G por proyecto
-              </button>
-              <button
-                onClick={() => setBalanceView('pyg_matrix_client')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_matrix_client' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                P&G por cliente
-              </button>
-              <button
-                onClick={() => setBalanceView('balance_general')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'balance_general' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                Balance General
-              </button>
-              <button
-                onClick={() => setBalanceView('accounts')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'accounts' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                Balance de cuentas
-              </button>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="inline-flex p-1 bg-gray-100 rounded-xl gap-0.5 overflow-x-auto">
+              {[
+                { id: 'pyg_matrix', label: 'P&G por proyecto', icon: BarChart3 },
+                { id: 'pyg_matrix_client', label: 'P&G por cliente', icon: Users },
+                { id: 'balance_general', label: 'Balance General', icon: Building2 },
+                { id: 'accounts', label: 'Cuentas', icon: CreditCard },
+                { id: 'balance', label: 'Balance', icon: DollarSign },
+              ].map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setBalanceView(id as typeof balanceView)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                    balanceView === id
+                      ? 'bg-white text-indigo-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              ))}
             </div>
-            {balanceView !== 'accounts' && balanceView !== 'balance_general' && (
-              <DateRangePicker
-                start={balanceStart}
-                end={balanceEnd}
-                onStartChange={setBalanceStart}
-                onEndChange={setBalanceEnd}
-                onPreset={(id) => applyPeriodPreset(id, 'balance')}
-              />
-            )}
-            {(balanceView === 'pyg_matrix' || balanceView === 'pyg_matrix_client') && (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600">Moneda:</span>
-                  <button
-                    onClick={() => setPygMatrixCurrency('usd')}
-                    className={`px-2 py-1 rounded text-sm font-medium ${pygMatrixCurrency === 'usd' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}
-                  >
-                    USD
-                  </button>
-                  <button
-                    onClick={() => setPygMatrixCurrency('cop')}
-                    className={`px-2 py-1 rounded text-sm font-medium ${pygMatrixCurrency === 'cop' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}
-                  >
-                    COP
-                  </button>
-                </div>
-                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pygMatrixHideAdmin}
-                    onChange={(e) => setPygMatrixHideAdmin(e.target.checked)}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  Ocultar columna "No asignado"
-                </label>
-              </>
-            )}
-            {balanceView === 'pyg_matrix' && (
-              <>
+            <div className="flex flex-wrap items-center gap-3">
+              {balanceView !== 'accounts' && balanceView !== 'balance_general' && (
+                <DateRangePicker
+                  start={balanceStart}
+                  end={balanceEnd}
+                  onStartChange={setBalanceStart}
+                  onEndChange={setBalanceEnd}
+                  onPreset={(id) => applyPeriodPreset(id, 'balance')}
+                />
+              )}
+              {(balanceView === 'pyg_matrix' || balanceView === 'pyg_matrix_client') && (
+                <>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
+                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Moneda</span>
+                    <div className="flex rounded-md p-0.5 bg-white shadow-sm ring-1 ring-gray-200">
+                      <button
+                        onClick={() => setPygMatrixCurrency('usd')}
+                        className={`px-3 py-1 rounded text-sm font-semibold transition-colors ${
+                          pygMatrixCurrency === 'usd'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        USD
+                      </button>
+                      <button
+                        onClick={() => setPygMatrixCurrency('cop')}
+                        className={`px-3 py-1 rounded text-sm font-semibold transition-colors ${
+                          pygMatrixCurrency === 'cop'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        COP
+                      </button>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={pygMatrixHideAdmin}
+                      onChange={(e) => setPygMatrixHideAdmin(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Ocultar "No asignado"
+                  </label>
+                </>
+              )}
+              {balanceView === 'pyg_matrix' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-0.5">Cliente</label>
+                    <select
+                      value={pygFilterClient}
+                      onChange={(e) => setPygFilterClient(e.target.value)}
+                      className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm min-w-[140px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      <option value="">Todos</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={pygProjectsOnly}
+                      onChange={(e) => setPygProjectsOnly(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Solo proyectos
+                  </label>
+                </>
+              )}
+              {balanceView === 'pyg_matrix_client' && (
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">Filtrar por cliente</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-0.5">Cliente</label>
                   <select
                     value={pygFilterClient}
                     onChange={(e) => setPygFilterClient(e.target.value)}
-                    className="px-3 py-2 border rounded-lg text-sm min-w-[160px]"
+                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm min-w-[140px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     <option value="">Todos</option>
                     {clients.map((c) => (
@@ -1877,86 +2087,67 @@ export default function Contabilidad() {
                     ))}
                   </select>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              )}
+              {balanceView === 'balance_general' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">A la fecha:</label>
                   <input
-                    type="checkbox"
-                    checked={pygProjectsOnly}
-                    onChange={(e) => setPygProjectsOnly(e.target.checked)}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    type="date"
+                    value={balanceEnd}
+                    onChange={(e) => setBalanceEnd(e.target.value)}
+                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  Solo proyectos
-                </label>
-              </>
-            )}
-            {balanceView === 'pyg_matrix_client' && (
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Filtrar cliente</label>
-                <select
-                  value={pygFilterClient}
-                  onChange={(e) => setPygFilterClient(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm min-w-[160px]"
-                >
-                  <option value="">Todos</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {balanceView === 'balance_general' && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">A la fecha:</span>
-                <input
-                  type="date"
-                  value={balanceEnd}
-                  onChange={(e) => setBalanceEnd(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                />
-              </div>
-            )}
-            {balanceView === 'accounts' && (
-              <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
-            )}
+                </div>
+              )}
+              {balanceView === 'accounts' && (
+                <p className="text-sm text-gray-500">Saldo acumulado (sin filtro de fechas)</p>
+              )}
+            </div>
           </div>
 
           {loading ? (
-            <div className="animate-pulse h-48 bg-gray-200 rounded-lg" />
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="animate-pulse p-8 space-y-4">
+                <div className="h-10 bg-gray-200 rounded-lg w-1/3" />
+                <div className="h-64 bg-gray-100 rounded-lg" />
+              </div>
+            </div>
           ) : balanceView === 'accounts' && accountBalancesData ? (
             (() => {
               const hasCopAccounts = accountBalancesData.total_cop !== 0 || accountBalancesData.rows.some((r) => r.cop !== 0);
               return (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Cuenta</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
-                    {hasCopAccounts && <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>}
+                    <th className="px-6 py-4 text-left font-semibold text-gray-800">Cuenta</th>
+                    <th className="px-6 py-4 text-right font-semibold text-gray-800">USD</th>
+                    {hasCopAccounts && <th className="px-6 py-4 text-right font-semibold text-gray-800">COP</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {accountBalancesData.rows.map((r) => (
-                    <tr key={r.payment_account_id} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-6 py-3 font-medium">{r.account_name}</td>
-                      <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <tr key={r.payment_account_id} className="border-t border-gray-100 hover:bg-gray-50/80 transition-colors">
+                      <td className="px-6 py-3 font-medium text-gray-800">{r.account_name}</td>
+                      <td className={`px-6 py-3 text-right tabular-nums font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {r.usd >= 0 ? '+' : ''}{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
                       {hasCopAccounts && (
-                        <td className={`px-6 py-3 text-right font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <td className={`px-6 py-3 text-right tabular-nums font-medium ${r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                         </td>
                       )}
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-gray-100 font-semibold">
+                <tfoot className="bg-gray-100 border-t-2 border-gray-200 font-semibold">
                   <tr>
-                    <td className="px-6 py-3">Total</td>
-                    <td className={`px-6 py-3 text-right ${accountBalancesData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    <td className="px-6 py-4 text-gray-900">Total</td>
+                    <td className={`px-6 py-4 text-right tabular-nums ${accountBalancesData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                       {accountBalancesData.total_usd >= 0 ? '+' : ''}{accountBalancesData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
                     {hasCopAccounts && (
-                      <td className={`px-6 py-3 text-right ${accountBalancesData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      <td className={`px-6 py-4 text-right tabular-nums ${accountBalancesData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                         {accountBalancesData.total_cop >= 0 ? '+' : ''}{accountBalancesData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                       </td>
                     )}
@@ -1964,7 +2155,10 @@ export default function Contabilidad() {
                 </tfoot>
               </table>
               {accountBalancesData.rows.length === 0 && (
-                <div className="p-12 text-center text-gray-500">No hay movimientos en las cuentas.</div>
+                <div className="p-16 text-center">
+                  <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">No hay movimientos en las cuentas.</p>
+                </div>
               )}
             </div>
             );
@@ -1981,37 +2175,63 @@ export default function Contabilidad() {
                 return c ? (pygMatrixCurrency === 'usd' ? c.usd : c.cop) : 0;
               };
               const isPct = (key: string) => key.includes('margen') || key.includes('pct');
+              const isUtilidad = (key: string) => key.includes('utilidad');
+              const isSection = (key: string) => ['ingresos', 'utilidad_bruta', 'utilidad_operativa'].includes(key);
               return (
-                <div className="bg-white rounded-lg shadow overflow-x-auto">
-                  <table className="w-full text-sm min-w-[500px]">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[220px]">Concepto</th>
-                        {cols.map((c) => (
-                          <th key={c.id} className={`px-3 py-3 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pygMatrixData.rows.map((row) => (
-                        <tr key={row.key} className="border-t border-gray-100 hover:bg-gray-50">
-                          <td className={`px-4 py-2 sticky left-0 bg-white ${row.key.includes('utilidad') ? 'font-semibold' : ''}`}>{row.label}</td>
-                          {cols.map((c) => {
-                            const v = getVal(row.cells, c.id);
-                            const pct = isPct(row.key);
-                            const isTotal = c.id === '__total__';
-                            return (
-                              <td key={c.id} className={`px-3 py-2 text-right ${isTotal ? 'font-medium sticky right-0 bg-white' : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${isTotal && (v >= 0 ? 'text-emerald-700' : 'text-red-700')}`}>
-                                {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
-                              </td>
-                            );
-                          })}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[500px]">
+                      <thead className="bg-gray-50/80">
+                        <tr>
+                          <th className="px-5 py-4 text-left font-semibold text-gray-800 sticky left-0 bg-gray-50/95 z-10 min-w-[240px] backdrop-blur-sm">
+                            <span className="flex items-center gap-2">
+                              Concepto
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 text-xs font-medium">{pygMatrixCurrency.toUpperCase()}</span>
+                            </span>
+                          </th>
+                          {cols.map((c) => (
+                            <th key={c.id} className={`px-4 py-4 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50/80 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {pygMatrixData.rows.map((row) => (
+                          <tr
+                            key={row.key}
+                            className={`border-t border-gray-100 hover:bg-gray-50/80 transition-colors group ${
+                              isSection(row.key) ? 'border-t-2 border-gray-200' : ''
+                            } ${isUtilidad(row.key) ? 'bg-gray-50/50' : ''}`}
+                          >
+                            <td className={`px-5 py-3 sticky left-0 z-[1] min-w-[240px] group-hover:bg-gray-50/80 ${
+                              isUtilidad(row.key) ? 'bg-gray-50/50 font-semibold text-gray-900' : 'bg-white text-gray-700'
+                            }`}>
+                              {row.label}
+                            </td>
+                            {cols.map((c) => {
+                              const v = getVal(row.cells, c.id);
+                              const pct = isPct(row.key);
+                              const isTotal = c.id === '__total__';
+                              return (
+                                <td key={c.id} className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
+                                  isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
+                                } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
+                                  isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
+                                }`}>
+                                  {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                   {pygMatrixData.rows.length === 0 && (
-                    <div className="p-12 text-center text-gray-500">No hay movimientos en el período.</div>
+                    <div className="p-16 text-center">
+                      <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500">No hay movimientos en el período.</p>
+                      <p className="text-sm text-gray-400 mt-1">Ajusta el rango de fechas o los filtros.</p>
+                    </div>
                   )}
                 </div>
               );
@@ -2028,101 +2248,169 @@ export default function Contabilidad() {
                 return c ? (pygMatrixCurrency === 'usd' ? c.usd : c.cop) : 0;
               };
               const isPct = (key: string) => key.includes('margen') || key.includes('pct');
+              const isUtilidad = (key: string) => key.includes('utilidad');
+              const isSection = (key: string) => ['ingresos', 'utilidad_bruta', 'utilidad_operativa'].includes(key);
               return (
-                <div className="bg-white rounded-lg shadow overflow-x-auto">
-                  <table className="w-full text-sm min-w-[500px]">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[220px]">Concepto</th>
-                        {cols.map((c) => (
-                          <th key={c.id} className={`px-3 py-3 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pygMatrixClientData.rows.map((row) => (
-                        <tr key={row.key} className="border-t border-gray-100 hover:bg-gray-50">
-                          <td className={`px-4 py-2 sticky left-0 bg-white ${row.key.includes('utilidad') ? 'font-semibold' : ''}`}>{row.label}</td>
-                          {cols.map((c) => {
-                            const v = getVal(row.cells, c.id);
-                            const pct = isPct(row.key);
-                            const isTotal = c.id === '__total__';
-                            return (
-                              <td key={c.id} className={`px-3 py-2 text-right ${isTotal ? 'font-medium sticky right-0 bg-white' : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${isTotal && (v >= 0 ? 'text-emerald-700' : 'text-red-700')}`}>
-                                {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
-                              </td>
-                            );
-                          })}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[500px]">
+                      <thead className="bg-gray-50/80">
+                        <tr>
+                          <th className="px-5 py-4 text-left font-semibold text-gray-800 sticky left-0 bg-gray-50/95 z-10 min-w-[240px] backdrop-blur-sm">
+                            <span className="flex items-center gap-2">
+                              Concepto
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 text-xs font-medium">{pygMatrixCurrency.toUpperCase()}</span>
+                            </span>
+                          </th>
+                          {cols.map((c) => (
+                            <th key={c.id} className={`px-4 py-4 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50/80 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {pygMatrixClientData.rows.map((row) => (
+                          <tr
+                            key={row.key}
+                            className={`border-t border-gray-100 hover:bg-gray-50/80 transition-colors group ${
+                              isSection(row.key) ? 'border-t-2 border-gray-200' : ''
+                            } ${isUtilidad(row.key) ? 'bg-gray-50/50' : ''}`}
+                          >
+                            <td className={`px-5 py-3 sticky left-0 z-[1] min-w-[240px] group-hover:bg-gray-50/80 ${
+                              isUtilidad(row.key) ? 'bg-gray-50/50 font-semibold text-gray-900' : 'bg-white text-gray-700'
+                            }`}>
+                              {row.label}
+                            </td>
+                            {cols.map((c) => {
+                              const v = getVal(row.cells, c.id);
+                              const pct = isPct(row.key);
+                              const isTotal = c.id === '__total__';
+                              return (
+                                <td key={c.id} className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
+                                  isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
+                                } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
+                                  isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
+                                }`}>
+                                  {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                   {pygMatrixClientData.rows.length === 0 && (
-                    <div className="p-12 text-center text-gray-500">No hay movimientos en el período.</div>
+                    <div className="p-16 text-center">
+                      <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500">No hay movimientos en el período.</p>
+                      <p className="text-sm text-gray-400 mt-1">Ajusta el rango de fechas o los filtros.</p>
+                    </div>
                   )}
                 </div>
               );
             })()
           ) : balanceView === 'balance_general' && balanceGeneralData ? (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="p-4 border-b flex justify-between items-center">
-                <h3 className="font-semibold text-gray-800">Balance General</h3>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-3 bg-gray-50/50">
+                <h3 className="font-semibold text-gray-900 text-lg">Balance General</h3>
                 {balanceGeneralData.cuadra ? (
-                  <span className="text-sm text-emerald-600 font-medium">Cuadra</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-medium">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Cuadra
+                  </span>
                 ) : (
-                  <span className="text-sm text-amber-600 font-medium">Revisar</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-sm font-medium">
+                    <Info className="w-4 h-4" />
+                    Revisar
+                  </span>
                 )}
               </div>
-              <div className="p-4 space-y-4">
-                <div>
-                  <h4 className="font-medium text-gray-700 mb-2">ACTIVOS</h4>
+              <div className="p-6 space-y-8">
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-emerald-50/80 border-b border-emerald-100">
+                    <h4 className="font-semibold text-emerald-800">ACTIVOS</h4>
+                  </div>
                   <table className="w-full text-sm">
-                    {balanceGeneralData.activos.map((r) => (
-                      <tr key={r.code} className="border-t">
-                        <td className="py-1">{r.code} {r.name}</td>
-                        <td className="py-1 text-right text-emerald-600">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                        {r.cop !== 0 && <td className="py-1 text-right text-emerald-600">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
                       </tr>
-                    ))}
-                    <tr className="font-semibold border-t-2">
-                      <td className="py-2">Total Activos</td>
-                      <td className="py-2 text-right">{balanceGeneralData.total_activos.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                      <td className="py-2 text-right">{balanceGeneralData.total_activos.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
-                    </tr>
+                    </thead>
+                    <tbody>
+                      {balanceGeneralData.activos.map((r) => (
+                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
+                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-emerald-200 bg-emerald-50/50 font-semibold">
+                        <td className="px-4 py-3 text-gray-900">Total Activos</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{balanceGeneralData.total_activos.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{balanceGeneralData.total_activos.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
+                      </tr>
+                    </tbody>
                   </table>
                 </div>
-                <div>
-                  <h4 className="font-medium text-gray-700 mb-2">PASIVOS</h4>
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100">
+                    <h4 className="font-semibold text-amber-800">PASIVOS</h4>
+                  </div>
                   <table className="w-full text-sm">
-                    {balanceGeneralData.pasivos.map((r) => (
-                      <tr key={r.code} className="border-t">
-                        <td className="py-1">{r.code} {r.name}</td>
-                        <td className="py-1 text-right">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                        {r.cop !== 0 && <td className="py-1 text-right">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
                       </tr>
-                    ))}
+                    </thead>
+                    <tbody>
+                      {balanceGeneralData.pasivos.map((r) => (
+                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
+                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
-                <div>
-                  <h4 className="font-medium text-gray-700 mb-2">PATRIMONIO</h4>
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-indigo-50/80 border-b border-indigo-100">
+                    <h4 className="font-semibold text-indigo-800">PATRIMONIO</h4>
+                  </div>
                   <table className="w-full text-sm">
-                    {balanceGeneralData.patrimonio.map((r) => (
-                      <tr key={r.code} className="border-t">
-                        <td className="py-1">{r.code} {r.name}</td>
-                        <td className="py-1 text-right">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                        {r.cop !== 0 && <td className="py-1 text-right">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
+                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
                       </tr>
-                    ))}
-                    <tr className="font-semibold border-t-2">
-                      <td className="py-2">Total Pasivos + Patrimonio</td>
-                      <td className="py-2 text-right">{balanceGeneralData.total_pasivos_patrimonio.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                      <td className="py-2 text-right">{balanceGeneralData.total_pasivos_patrimonio.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
-                    </tr>
+                    </thead>
+                    <tbody>
+                      {balanceGeneralData.patrimonio.map((r) => (
+                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
+                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-indigo-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-indigo-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-indigo-200 bg-indigo-50/50 font-semibold">
+                        <td className="px-4 py-3 text-gray-900">Total Pasivos + Patrimonio</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-indigo-700">{balanceGeneralData.total_pasivos_patrimonio.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-indigo-700">{balanceGeneralData.total_pasivos_patrimonio.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
+                      </tr>
+                    </tbody>
                   </table>
                 </div>
               </div>
               {balanceGeneralData.activos.length === 0 && balanceGeneralData.pasivos.length === 0 && (
-                <div className="p-12 text-center text-gray-500">No hay datos para el Balance General.</div>
+                <div className="p-16 text-center">
+                  <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">No hay datos para el Balance General.</p>
+                </div>
               )}
             </div>
           ) : balanceView === 'pyg' && pygData ? (
@@ -2858,32 +3146,25 @@ export default function Contabilidad() {
                   </button>
                 )}
               </div>
-              <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Código</th>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Nombre</th>
-                      <th className="px-6 py-3 text-left font-medium text-gray-700">Tipo</th>
-                      <th className="px-6 py-3 text-right font-medium text-gray-700">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chartAccounts.map((a) => (
-                      <tr key={a.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-6 py-3 font-mono">{a.code}</td>
-                        <td className="px-6 py-3">{a.name}</td>
-                        <td className="px-6 py-3 capitalize">{a.type}</td>
-                        <td className="px-6 py-3 text-right">
-                          <button onClick={() => { setCurrentChartAccount(a); setShowChartAccountModal(true); }} className="text-indigo-600 hover:text-indigo-800 p-1"><Edit className="w-4 h-4 inline" /></button>
-                          <button onClick={async () => { if (window.confirm('¿Eliminar esta cuenta?')) { try { await contabilidadApi.deleteChartAccount(a.id, currentUser?.id); toast.success('Cuenta eliminada'); fetchChartAccounts(); } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } } }} className="text-red-600 hover:text-red-800 p-1 ml-1"><Trash2 className="w-4 h-4 inline" /></button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {chartAccounts.length === 0 && (
-                  <div className="p-8 text-center text-gray-500">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                {chartAccounts.length > 0 ? (
+                  <ChartAccountsTree
+                    accounts={chartAccounts}
+                    onEdit={(a) => { setCurrentChartAccount(a); setShowChartAccountModal(true); }}
+                    onDelete={async (a) => {
+                      if (window.confirm('¿Eliminar esta cuenta?')) {
+                        try {
+                          await contabilidadApi.deleteChartAccount(a.id, currentUser?.id);
+                          toast.success('Cuenta eliminada');
+                          fetchChartAccounts();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Error');
+                        }
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="p-12 text-center text-gray-500">
                     No hay cuentas en el plan. Crea cuentas para usar partida doble (activo, pasivo, patrimonio, ingresos, gastos).
                   </div>
                 )}
@@ -3529,17 +3810,26 @@ export default function Contabilidad() {
       )}
 
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-lg">Importar CSV</h3>
-                {importStep === 'upload' && <span className="text-xs text-gray-500">Paso 1: Subir archivo</span>}
-                {importStep === 'preview' && <span className="text-xs text-indigo-600 font-medium">Paso 2: Revisar antes de importar</span>}
-                {importStep === 'done' && <span className="text-xs text-emerald-600 font-medium">Completado</span>}
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col border border-gray-200">
+            <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50/50">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-100">
+                  <Upload className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-lg text-gray-900">Importar CSV</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${importStep === 'upload' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-200 text-gray-600'}`}>1. Subir</span>
+                    <span className="text-gray-300">→</span>
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${importStep === 'preview' ? 'bg-indigo-100 text-indigo-700' : importStep === 'done' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>2. Revisar</span>
+                    <span className="text-gray-300">→</span>
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${importStep === 'done' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>3. Listo</span>
+                  </div>
+                </div>
               </div>
-              <button onClick={closeImportModal} className="p-1 hover:bg-gray-100 rounded">
-                <X className="w-5 h-5" />
+              <button onClick={closeImportModal} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
@@ -3558,7 +3848,9 @@ export default function Contabilidad() {
                       Montos &gt; 100.000 se importan en COP; el resto en USD.
                     </p>
                   </div>
-                  <div className="mb-2">
+                  <label className="flex flex-col items-center justify-center w-full h-28 mb-4 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors">
+                    <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                    <span className="text-sm text-gray-600">Haz clic para seleccionar un archivo CSV</span>
                     <input
                       type="file"
                       accept=".csv,.txt"
@@ -3571,16 +3863,19 @@ export default function Contabilidad() {
                         }
                         e.target.value = '';
                       }}
-                      className="text-sm"
+                      className="hidden"
+                    />
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-xs text-gray-400 font-medium">O pega el contenido aquí</span>
+                    <textarea
+                      value={importCsvText}
+                      onChange={(e) => setImportCsvText(e.target.value)}
+                      placeholder=""
+                      className="w-full h-36 pl-3 pr-3 pt-7 pb-3 border border-gray-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      disabled={importPreviewLoading}
                     />
                   </div>
-                  <textarea
-                    value={importCsvText}
-                    onChange={(e) => setImportCsvText(e.target.value)}
-                    placeholder="O pega aquí el contenido del CSV..."
-                    className="w-full h-40 px-3 py-2 border rounded-lg font-mono text-sm"
-                    disabled={importPreviewLoading}
-                  />
                 </>
               )}
 
@@ -3604,11 +3899,12 @@ export default function Contabilidad() {
                       {importPreviewData.skipped > 0 && <span className="text-gray-500">• {importPreviewData.skipped} filas omitidas (fecha inválida)</span>}
                     </div>
                   </div>
-                  <div className="mb-2 flex gap-2">
+                  <div className="mb-3 flex gap-2">
+                    <label className="text-sm text-gray-600 self-center">Filtrar:</label>
                     <select
                       value={importPreviewFilter}
                       onChange={(e) => setImportPreviewFilter(e.target.value)}
-                      className="text-sm border rounded-lg px-3 py-1.5"
+                      className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     >
                       <option value="all">Todos</option>
                       <option value="ingreso">Ingresos</option>
@@ -3618,9 +3914,9 @@ export default function Contabilidad() {
                       <option value="reparto">Pagos a socios</option>
                     </select>
                   </div>
-                  <div className="border rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                  <div className="border border-gray-200 rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-inner">
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-100 sticky top-0">
+                      <thead className="bg-gray-100 sticky top-0">
                         <tr>
                           <th className="text-left px-3 py-2 font-medium">Fila</th>
                           <th className="text-left px-3 py-2 font-medium">Fecha</th>
