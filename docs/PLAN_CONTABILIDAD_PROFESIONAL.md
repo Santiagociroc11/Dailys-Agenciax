@@ -68,3 +68,10 @@ El Libro mayor muestra **asientos** con sus líneas (débitos/créditos), en lug
 | 5195-01, 5195-02... | (por categoría) | expense |
 
 Los códigos con sufijo (-01, -02) se crean automáticamente durante la importación.
+
+### 6. Importador corregido (contablemente correcto)
+
+- **Traslados entre bancos** (ej. RETIRO HOTMART: -5965 Hotmart, +5965 Bancolombia): un solo asiento Débito banco destino / Crédito banco origen. No genera ingreso ni gasto.
+- **SALIDA CONTABLE + INGRESO CONTABLE** (traslados de utilidades): un asiento de patrimonio (3605-XX) por par. Débito utilidades destino / Crédito utilidades origen. No genera ingreso ni gasto.
+- **REPARTO / REPARTICIÓN** (distribución a socios): usa cuenta 3605 Utilidades, no 5195 gastos.
+- **Categoría y subcategoría**: si ambas están presentes y son distintas, se usa `Subcategoría (Categoría)` para mayor granularidad y evitar colisiones.

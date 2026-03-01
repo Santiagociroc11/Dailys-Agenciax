@@ -1226,9 +1226,27 @@ router.post('/import', async (req: Request, res: Response) => {
     const maxBank = await AcctChartAccount.findOne({ code: /^1110-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
     const maxIncome = await AcctChartAccount.findOne({ code: /^4135-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
     const maxExpense = await AcctChartAccount.findOne({ code: /^5195-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
+    const maxEquity = await AcctChartAccount.findOne({ code: /^3605-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
     let bankCounter = maxBank?.code ? parseInt(maxBank.code.split('-')[1] || '0', 10) : 0;
     let incomeCounter = maxIncome?.code ? parseInt(maxIncome.code.split('-')[1] || '0', 10) : 0;
     let expenseCounter = maxExpense?.code ? parseInt(maxExpense.code.split('-')[1] || '0', 10) : 0;
+    let equityCounter = maxEquity?.code ? parseInt(maxEquity.code.split('-')[1] || '0', 10) : 0;
+    const chartAccountByEquityName = new Map<string, string>();
+
+    async function getOrCreateChartAccountForEquity(entityName: string): Promise<string> {
+      const n = (entityName || '').trim() || 'Sin asignar';
+      if (chartAccountByEquityName.has(n)) return chartAccountByEquityName.get(n)!;
+      equityCounter++;
+      const code = `3605-${String(equityCounter).padStart(2, '0')}`;
+      const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+      if (existing) {
+        chartAccountByEquityName.set(n, (existing as { id: string }).id);
+        return (existing as { id: string }).id;
+      }
+      const doc = await AcctChartAccount.create({ code, name: `Utilidades ${n}`, type: 'equity', is_header: false, sort_order: equityCounter });
+      chartAccountByEquityName.set(n, doc.id);
+      return doc.id;
+    }
 
     async function getOrCreateChartAccountForBank(name: string): Promise<string> {
       const n = (name || '').trim() || 'Sin cuenta';
@@ -1326,8 +1344,13 @@ router.post('/import', async (req: Request, res: Response) => {
 
     let created = 0;
     let skipped = 0;
+    let skipNext = false;
 
     for (let i = headerRow + 1; i < records.length; i++) {
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
       const row = records[i];
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
@@ -1335,7 +1358,9 @@ router.post('/import', async (req: Request, res: Response) => {
       const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
       const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      const categoryName = subcategoria || categoriaDetalle || 'Importación';
+      const categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
+        ? `${subcategoria} (${categoriaDetalle})`
+        : (subcategoria || categoriaDetalle || 'Importación');
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
@@ -1349,69 +1374,163 @@ router.post('/import', async (req: Request, res: Response) => {
       const entityId = await getOrCreateEntity(proyectoStr);
       let rowCreated = 0;
 
-      // Revisar columnas de cuentas — crear asientos (partida doble)
+      // Recolectar montos por cuenta
+      const accountAmounts: { accountName: string; amount: number }[] = [];
       for (let c = 0; c < accountHeaders.length; c++) {
         const cell = (row[accountColStart + c] || '').trim();
         const amount = parseAmount(cell);
         if (amount == null || amount === 0) continue;
-
         const accountName = accountHeaders[c];
         if (!accountName) continue;
+        accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
+      }
 
-        await getOrCreateAccount(accountName);
-        await getOrCreateCategory(categoryName, amount < 0);
-        const amt = Math.round(Math.abs(amount) * 100) / 100;
-        const currency = Math.abs(amt) > 100000 ? 'COP' : default_currency;
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoriaDetalle) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+      const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
 
-        const bankChartId = await getOrCreateChartAccountForBank(accountName);
-        const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
-
+      if (isTrasladoBancos) {
+        // Traslado entre bancos: un solo asiento (débito cuenta origen, crédito cuenta destino)
         const entry = await AcctJournalEntry.create({
           date,
           description: descripcion.slice(0, 500),
-          reference: `Import ${i + 1}`,
+          reference: `Import ${i + 1} (traslado)`,
           created_by: created_by ?? null,
         });
-
-        if (amount > 0) {
-          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
-          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
-        } else {
-          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
-          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+        const currency = accountAmounts.some((a) => Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
+        for (const { accountName, amount } of accountAmounts) {
+          await getOrCreateAccount(accountName);
+          const bankChartId = await getOrCreateChartAccountForBank(accountName);
+          const amt = Math.abs(amount);
+          if (amount > 0) {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+          } else {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          }
         }
         created++;
         rowCreated++;
-      }
+      } else if (accountAmounts.length === 1) {
+        // Un solo monto: ingreso o gasto (o reparto)
+        const { accountName, amount } = accountAmounts[0];
+        await getOrCreateAccount(accountName);
+        await getOrCreateCategory(categoryName, amount < 0 && !isReparto);
+        const amt = Math.abs(amount);
+        const currency = amt > 100000 ? 'COP' : default_currency;
+        const bankChartId = await getOrCreateChartAccountForBank(accountName);
 
-      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE
-      if (rowCreated === 0) {
-        const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
-        const amount = parseAmount(importeCell);
-        const isMovContable = /SALIDA\s*CONTABLE|INGRESO\s*CONTABLE/i.test(tipoStr);
-        if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
-          const accountName = isMovContable ? 'Mov. Contable' : accountHeaders[0];
-          await getOrCreateAccount(accountName);
-          await getOrCreateCategory(categoryName, amount < 0);
-          const amt = Math.round(Math.abs(amount) * 100) / 100;
-          const currency = Math.abs(amount) > 100000 ? 'COP' : default_currency;
-
-          const bankChartId = await getOrCreateChartAccountForBank(accountName);
-          const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
-
+        if (isReparto) {
+          const equityChartId = await getOrCreateChartAccountForEquity(proyectoStr);
           const entry = await AcctJournalEntry.create({
             date,
             description: descripcion.slice(0, 500),
             reference: `Import ${i + 1}`,
             created_by: created_by ?? null,
           });
-
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+        } else {
+          const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+          const entry = await AcctJournalEntry.create({
+            date,
+            description: descripcion.slice(0, 500),
+            reference: `Import ${i + 1}`,
+            created_by: created_by ?? null,
+          });
           if (amount > 0) {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
           } else {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          }
+        }
+        created++;
+        rowCreated++;
+      } else if (accountAmounts.length > 1 && !isTrasladoBancos) {
+        // Varios montos sin compensar: un asiento por cuenta (como antes)
+        for (const { accountName, amount } of accountAmounts) {
+          await getOrCreateAccount(accountName);
+          await getOrCreateCategory(categoryName, amount < 0 && !isReparto);
+          const amt = Math.abs(amount);
+          const currency = amt > 100000 ? 'COP' : default_currency;
+          const bankChartId = await getOrCreateChartAccountForBank(accountName);
+          const categoryChartId = isReparto ? await getOrCreateChartAccountForEquity(proyectoStr) : await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+          const entry = await AcctJournalEntry.create({
+            date,
+            description: descripcion.slice(0, 500),
+            reference: `Import ${i + 1}`,
+            created_by: created_by ?? null,
+          });
+          if (amount > 0) {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          } else {
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          }
+          created++;
+          rowCreated++;
+        }
+      }
+
+      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE (SALIDA/INGRESO CONTABLE)
+      if (rowCreated === 0) {
+        const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
+        const amount = parseAmount(importeCell);
+        const isSalida = /SALIDA\s*CONTABLE/i.test(tipoStr);
+        const isIngreso = /INGRESO\s*CONTABLE/i.test(tipoStr);
+        const isMovContable = isSalida || isIngreso;
+
+        if (amount != null && amount !== 0 && (isMovContable || accountHeaders.length > 0)) {
+          const amt = Math.round(Math.abs(amount) * 100) / 100;
+          const currency = amt > 100000 ? 'COP' : default_currency;
+
+          if (isMovContable) {
+            let entityOrigen = proyectoStr;
+            let entityDestino = 'AGENCIA X';
+            if (isSalida && i + 1 < records.length) {
+              const nextRow = records[i + 1];
+              const nextTipo = (idxTipo >= 0 ? (nextRow[idxTipo] || '') : '').trim();
+              const nextProyecto = (nextRow[idxProyecto] || '').trim();
+              const nextImporte = parseAmount((idxImporteContable >= 0 ? (nextRow[idxImporteContable] || '') : '').trim());
+              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null && Math.abs(Math.abs(nextImporte) - amt) < 0.02) {
+                entityDestino = nextProyecto || entityDestino;
+                skipNext = true;
+              }
+            } else if (isIngreso) {
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoriaDetalle.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
+              entityDestino = proyectoStr;
+            }
+            const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
+            const equityDestinoId = await getOrCreateChartAccountForEquity(entityDestino);
+            const entry = await AcctJournalEntry.create({
+              date,
+              description: descripcion.slice(0, 500),
+              reference: `Import ${i + 1} (traslado utilidades)`,
+              created_by: created_by ?? null,
+            });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: await getOrCreateEntity(entityDestino), debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+            await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: await getOrCreateEntity(entityOrigen), debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+          } else {
+            const accountName = accountHeaders[0];
+            await getOrCreateAccount(accountName);
+            await getOrCreateCategory(categoryName, amount < 0);
+            const bankChartId = await getOrCreateChartAccountForBank(accountName);
+            const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+            const entry = await AcctJournalEntry.create({
+              date,
+              description: descripcion.slice(0, 500),
+              reference: `Import ${i + 1}`,
+              created_by: created_by ?? null,
+            });
+            if (amount > 0) {
+              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+            } else {
+              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
+              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+            }
           }
           created++;
         }
