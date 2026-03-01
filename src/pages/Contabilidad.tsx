@@ -198,7 +198,7 @@ function ChartAccountsTree({
             {node.code}
           </span>
           <span className={`flex-1 min-w-0 truncate ${isVirtual ? 'text-gray-600' : 'text-gray-900'}`}>
-            {node.account?.name ?? node.label || node.code}
+            {node.account?.name ?? (node.label || node.code)}
           </span>
           {node.account && (
             <>
@@ -893,6 +893,7 @@ export default function Contabilidad() {
   const [importPreviewData, setImportPreviewData] = useState<ImportPreviewResponse | null>(null);
   const [importPreviewLoading, setImportPreviewLoading] = useState(false);
   const [importPreviewFilter, setImportPreviewFilter] = useState<string>('all');
+  const [importCategoryMapping, setImportCategoryMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ created: number; skipped: number; entities: number; categories: number; accounts: number } | null>(null);
   const [mergeSourceEntity, setMergeSourceEntity] = useState<AcctEntity | null>(null);
@@ -1701,6 +1702,7 @@ export default function Contabilidad() {
     try {
       const data = await contabilidadApi.importPreview(importCsvText, { default_currency: 'USD' });
       setImportPreviewData(data);
+      setImportCategoryMapping({});
       setImportStep('preview');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al analizar el CSV');
@@ -1717,7 +1719,14 @@ export default function Contabilidad() {
     setImporting(true);
     setImportResult(null);
     try {
-      const result = await contabilidadApi.importCsv(importCsvText, { default_currency: 'USD' }, currentUser?.id);
+      const mapping = Object.fromEntries(
+        Object.entries(importCategoryMapping).filter(([from, to]) => to && to !== from)
+      );
+      const result = await contabilidadApi.importCsv(
+        importCsvText,
+        { default_currency: 'USD', category_mapping: Object.keys(mapping).length > 0 ? mapping : undefined },
+        currentUser?.id
+      );
       setImportResult(result);
       setImportStep('done');
       toast.success(`Importados ${result.created} asientos`);
@@ -1771,6 +1780,7 @@ export default function Contabilidad() {
     setImportPreviewData(null);
     setImportStep('upload');
     setImportPreviewFilter('all');
+    setImportCategoryMapping({});
   }
 
   if (!isAdmin) {
@@ -3962,6 +3972,48 @@ export default function Contabilidad() {
                       <option value="traslado_utilidades">Traslados de utilidades</option>
                       <option value="reparto">Pagos a socios</option>
                     </select>
+                  </div>
+                  <div className="mb-4 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <h4 className="font-medium text-indigo-900 mb-2 flex items-center gap-2">
+                      <Tag className="w-4 h-4" />
+                      Mapeo de categorías
+                    </h4>
+                    <p className="text-sm text-indigo-800 mb-3">
+                      Unifica categorías que se llaman distinto pero son lo mismo. Ej: «Honorarios profesionales» → «Honorarios».
+                    </p>
+                    {importPreviewData.uniqueCategories && importPreviewData.uniqueCategories.length > 0 ? (
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {importPreviewData.uniqueCategories.map((cat) => (
+                          <div key={cat} className="flex items-center gap-2">
+                            <span className="text-sm text-gray-700 min-w-[140px] truncate" title={cat}>{cat}</span>
+                            <span className="text-gray-400">→</span>
+                            <select
+                              value={importCategoryMapping[cat] ?? cat}
+                              onChange={(e) => {
+                                const to = e.target.value;
+                                setImportCategoryMapping((prev) => {
+                                  const next = { ...prev };
+                                  if (to === cat) delete next[cat];
+                                  else next[cat] = to;
+                                  return next;
+                                });
+                              }}
+                              className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            >
+                              <option value={cat}>Usar tal cual</option>
+                              {[...new Set([
+                                ...(importPreviewData.uniqueCategories || []).filter((c) => c !== cat),
+                                ...categories.map((c) => c.name).filter(Boolean),
+                              ])].sort().map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-indigo-600">No hay categorías para mapear en este import.</p>
+                    )}
                   </div>
                   <div className="border border-gray-200 rounded-xl overflow-hidden max-h-64 overflow-y-auto shadow-inner">
                     <table className="w-full text-sm">

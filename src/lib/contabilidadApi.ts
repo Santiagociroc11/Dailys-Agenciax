@@ -468,12 +468,17 @@ export const contabilidadApi = {
     return fetchJson<TrialBalanceResponse>(url('/trial-balance', Object.keys(search).length > 0 ? search : undefined));
   },
 
-  async importCsv(csvText: string, options?: { default_currency?: string }, createdBy?: string): Promise<ImportResult> {
+  async importCsv(
+    csvText: string,
+    options?: { default_currency?: string; category_mapping?: Record<string, string> },
+    createdBy?: string
+  ): Promise<ImportResult> {
     return fetchJson<ImportResult>(url('/import'), {
       method: 'POST',
       body: JSON.stringify({
         csv_text: csvText,
         default_currency: options?.default_currency ?? 'USD',
+        category_mapping: options?.category_mapping,
         created_by: createdBy,
       }),
     });
@@ -516,6 +521,7 @@ export interface ImportPreviewResponse {
   summary: { total: number; [key: string]: number };
   skipped: number;
   accountHeaders: string[];
+  uniqueCategories?: string[];
 }
 
 export interface ImportResult {

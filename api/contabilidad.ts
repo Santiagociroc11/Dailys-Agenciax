@@ -1849,6 +1849,8 @@ router.post('/import/preview', async (req: Request, res: Response) => {
       return acc;
     }, {} as Record<string, number>);
 
+    const uniqueCategories = [...new Set(preview.map((p) => (p.concepto || '').trim()).filter(Boolean))].sort();
+
     res.json({
       preview,
       summary: {
@@ -1857,6 +1859,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
       },
       skipped,
       accountHeaders,
+      uniqueCategories,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
@@ -1867,7 +1870,11 @@ router.post('/import/preview', async (req: Request, res: Response) => {
 // --- Import CSV ---
 router.post('/import', async (req: Request, res: Response) => {
   try {
-    const { csv_text, default_currency = 'USD' } = req.body as { csv_text?: string; default_currency?: string };
+    const { csv_text, default_currency = 'USD', category_mapping } = req.body as {
+      csv_text?: string;
+      default_currency?: string;
+      category_mapping?: Record<string, string>;
+    };
     const created_by = req.body.created_by as string | undefined;
     if (!csv_text || typeof csv_text !== 'string') {
       res.status(400).json({ error: 'Falta csv_text' });
@@ -2056,9 +2063,12 @@ router.post('/import', async (req: Request, res: Response) => {
       const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
       const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      const categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
+      let categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
         ? `${subcategoria} (${categoriaDetalle})`
         : (subcategoria || categoriaDetalle || 'Importación');
+      if (category_mapping && category_mapping[categoryName]) {
+        categoryName = category_mapping[categoryName];
+      }
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
