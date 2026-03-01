@@ -24,3 +24,4 @@ export { AcctTransaction } from './AcctTransaction.js';
 export { AcctChartAccount } from './AcctChartAccount.js';
 export { AcctJournalEntry } from './AcctJournalEntry.js';
 export { AcctJournalEntryLine } from './AcctJournalEntryLine.js';
+export { AcctImportBatch } from './AcctImportBatch.js';

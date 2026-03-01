@@ -488,6 +488,14 @@ export const contabilidadApi = {
       }),
     });
   },
+
+  async getImportBatches(): Promise<ImportBatch[]> {
+    return fetchJson<ImportBatch[]>(url('/import/batches'));
+  },
+
+  async rollbackImport(batchId: string): Promise<{ rolled_back: number }> {
+    return fetchJson<{ rolled_back: number }>(url(`/import/${batchId}/rollback`), { method: 'DELETE' });
+  },
 };
 
 export interface ImportPreviewItem {
@@ -517,4 +525,17 @@ export interface ImportResult {
   categories: number;
   accounts: number;
   chart_accounts?: number;
+  batch_id?: string;
+  batch_ref?: string;
+}
+
+export interface ImportBatch {
+  id: string;
+  batch_ref: string;
+  journal_entry_ids: string[];
+  created_by: string | null;
+  created_count: number;
+  skipped_count: number;
+  created_at?: string;
+  createdAt?: string;
 }

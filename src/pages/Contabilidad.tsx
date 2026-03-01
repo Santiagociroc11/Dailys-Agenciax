@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse, type PygMatrixResponse, type BalanceGeneralResponse } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse, type ImportBatch, type PygMatrixResponse, type BalanceGeneralResponse } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -26,6 +26,8 @@ import {
   Eye,
   CheckCircle2,
   Info,
+  History,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -877,6 +879,9 @@ export default function Contabilidad() {
   });
   const [error, setError] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportHistoryModal, setShowImportHistoryModal] = useState(false);
+  const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
+  const [rollbackLoading, setRollbackLoading] = useState<string | null>(null);
   const [importCsvText, setImportCsvText] = useState('');
   const [importStep, setImportStep] = useState<'upload' | 'preview' | 'done'>('upload');
   const [importPreviewData, setImportPreviewData] = useState<ImportPreviewResponse | null>(null);
@@ -1722,6 +1727,37 @@ export default function Contabilidad() {
     }
   }
 
+  async function fetchImportBatches() {
+    try {
+      const data = await contabilidadApi.getImportBatches();
+      setImportBatches(data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al cargar historial');
+      setImportBatches([]);
+    }
+  }
+
+  async function handleRollback(batchId: string) {
+    if (!window.confirm('¿Revertir esta importación? Se eliminarán todos los asientos creados. Esta acción no se puede deshacer.')) return;
+    setRollbackLoading(batchId);
+    try {
+      const res = await contabilidadApi.rollbackImport(batchId);
+      toast.success(`${res.rolled_back} asientos revertidos`);
+      await fetchImportBatches();
+      if (activeTab === 'libro') fetchLedgerLines();
+      else if (activeTab === 'balance') {
+        if (balanceView === 'pyg_matrix') fetchPygMatrix();
+        else if (balanceView === 'pyg_matrix_client') fetchPygMatrixByClient();
+        else if (balanceView === 'balance_general') fetchBalanceGeneral();
+        else if (balanceView === 'accounts') fetchAccountBalances();
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al revertir');
+    } finally {
+      setRollbackLoading(null);
+    }
+  }
+
   function closeImportModal() {
     setShowImportModal(false);
     setImportCsvText('');
@@ -1890,6 +1926,13 @@ export default function Contabilidad() {
             >
               <Upload className="w-5 h-5" />
               Importar CSV
+            </button>
+            <button
+              onClick={() => { setShowImportHistoryModal(true); fetchImportBatches(); }}
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2"
+            >
+              <History className="w-5 h-5" />
+              Historial de importaciones
             </button>
             <button
               onClick={() => {
@@ -3990,6 +4033,71 @@ export default function Contabilidad() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportHistoryModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-gray-200">
+            <div className="flex justify-between items-center px-6 py-4 border-b bg-gray-50/50">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-100">
+                  <History className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-lg text-gray-900">Historial de importaciones</h3>
+                  <p className="text-sm text-gray-500">Revertir importaciones con datos incorrectos</p>
+                </div>
+              </div>
+              <button onClick={() => setShowImportHistoryModal(false)} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {importBatches.length === 0 ? (
+                <div className="p-12 text-center text-gray-500">
+                  <History className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p>No hay importaciones registradas.</p>
+                  <p className="text-sm mt-1">Las importaciones posteriores a esta funcionalidad quedarán registradas aquí.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {importBatches.map((b) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between gap-4 p-4 rounded-xl border border-gray-200 hover:bg-gray-50/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-mono text-sm text-gray-600">{b.batch_ref}</p>
+                        <p className="text-sm text-gray-800 mt-0.5">
+                          {b.created_count} asientos creados
+                          {b.skipped_count > 0 && ` · ${b.skipped_count} omitidos`}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {(b.created_at ?? b.createdAt) ? format(new Date(b.created_at ?? b.createdAt!), "d MMM yyyy, HH:mm", { locale: es }) : '—'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleRollback(b.id)}
+                        disabled={rollbackLoading !== null}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                        title="Revertir esta importación"
+                      >
+                        {rollbackLoading === b.id ? (
+                          <span className="animate-pulse">Revertiendo...</span>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-4 h-4" />
+                            Revertir
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

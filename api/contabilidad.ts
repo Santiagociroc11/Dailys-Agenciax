@@ -10,6 +10,7 @@ import {
   AcctChartAccount,
   AcctJournalEntry,
   AcctJournalEntryLine,
+  AcctImportBatch,
   AuditLog,
 } from '../models/index.js';
 
@@ -1900,6 +1901,9 @@ router.post('/import', async (req: Request, res: Response) => {
     const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
     const accountHeaders = headers.slice(accountColStart).filter((h) => h && !/^\s*$/.test(h));
 
+    const batchRef = `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const journalEntryIds: string[] = [];
+
     const entityByName = new Map<string, { id: string; type: string }>();
     const categoryByName = new Map<string, string>();
     const accountByName = new Map<string, string>();
@@ -2078,6 +2082,7 @@ router.post('/import', async (req: Request, res: Response) => {
           reference: `Import ${i + 1} (traslado)`,
           created_by: created_by ?? null,
         });
+        journalEntryIds.push(entry.id);
         const currency = accountAmounts.some((a) => Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
         for (const { accountName, amount } of accountAmounts) {
           await getOrCreateAccount(accountName);
@@ -2108,6 +2113,7 @@ router.post('/import', async (req: Request, res: Response) => {
             reference: `Import ${i + 1}`,
             created_by: created_by ?? null,
           });
+          journalEntryIds.push(entry.id);
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
         } else {
@@ -2118,6 +2124,7 @@ router.post('/import', async (req: Request, res: Response) => {
             reference: `Import ${i + 1}`,
             created_by: created_by ?? null,
           });
+          journalEntryIds.push(entry.id);
           if (amount > 0) {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
@@ -2145,6 +2152,7 @@ router.post('/import', async (req: Request, res: Response) => {
             reference: `Import ${i + 1}`,
             created_by: created_by ?? null,
           });
+          journalEntryIds.push(entry.id);
           if (amount > 0) {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
@@ -2194,6 +2202,7 @@ router.post('/import', async (req: Request, res: Response) => {
               reference: `Import ${i + 1} (traslado utilidades)`,
               created_by: created_by ?? null,
             });
+            journalEntryIds.push(entry.id);
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: await getOrCreateEntity(entityDestino), debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: await getOrCreateEntity(entityOrigen), debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
           } else {
@@ -2208,6 +2217,7 @@ router.post('/import', async (req: Request, res: Response) => {
               reference: `Import ${i + 1}`,
               created_by: created_by ?? null,
             });
+            journalEntryIds.push(entry.id);
             if (amount > 0) {
               await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
               await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
@@ -2221,7 +2231,63 @@ router.post('/import', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ created, skipped, entities: entityByName.size, categories: categoryByName.size, accounts: accountByName.size, chart_accounts: chartAccountByBankName.size + chartAccountByCategoryName.size });
+    const batch = await AcctImportBatch.create({
+      batch_ref: batchRef,
+      journal_entry_ids: journalEntryIds,
+      created_by: created_by ?? null,
+      created_count: created,
+      skipped_count: skipped,
+    });
+
+    res.json({
+      created,
+      skipped,
+      entities: entityByName.size,
+      categories: categoryByName.size,
+      accounts: accountByName.size,
+      chart_accounts: chartAccountByBankName.size + chartAccountByCategoryName.size,
+      batch_id: batch.id,
+      batch_ref: batchRef,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Import Batches (historial para rollback) ---
+router.get('/import/batches', async (_req: Request, res: Response) => {
+  try {
+    const list = await AcctImportBatch.find({})
+      .sort({ created_at: -1 })
+      .limit(100)
+      .lean()
+      .exec();
+    res.json(list);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.delete('/import/:batchId/rollback', async (req: Request, res: Response) => {
+  try {
+    const { batchId } = req.params;
+    const batch = await AcctImportBatch.findOne({ id: batchId }).lean().exec();
+    if (!batch) {
+      res.status(404).json({ error: 'Import no encontrado' });
+      return;
+    }
+    const ids = (batch as { journal_entry_ids: string[] }).journal_entry_ids || [];
+    if (ids.length === 0) {
+      await AcctImportBatch.findOneAndDelete({ id: batchId }).exec();
+      res.json({ rolled_back: 0, message: 'Import no tenía asientos' });
+      return;
+    }
+    await AcctJournalEntryLine.deleteMany({ journal_entry_id: { $in: ids } }).exec();
+    const result = await AcctJournalEntry.deleteMany({ id: { $in: ids } }).exec();
+    await AcctImportBatch.findOneAndDelete({ id: batchId }).exec();
+    res.json({ rolled_back: result.deletedCount ?? ids.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
