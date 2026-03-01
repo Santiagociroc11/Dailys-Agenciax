@@ -874,6 +874,314 @@ router.get('/balance', async (req: Request, res: Response) => {
 // Excluye traslados de utilidades para que el resultado operativo de cada proyecto sea visible
 const TRASLADO_UTILIDADES_REGEX = /traslado.*utilidad|utilidad.*traslado|traslado\s+utilidades|^utilidades\s|utilidades\s+[a-z0-9]/i;
 
+// --- P&G Matrix (layout horizontal: columnas = proyectos, filas = conceptos) ---
+// Grupos: A=Ingresos (4xx), B=Costos Directos (5xx/6xx con entity_id), C=Gastos Indirectos (5xx/6xx sin entity_id)
+router.get('/pyg-matrix', async (req: Request, res: Response) => {
+  try {
+    const { start, end, entity_ids, projects_only } = req.query;
+    const entryMatch: Record<string, unknown> = {};
+    if (start && end) {
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      entryMatch.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({
+        columns: [],
+        rows: [],
+        total_column: null,
+      });
+    }
+
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((a) => (a as { id: string }).id);
+
+    let entityFilter: string[] | null = null;
+    if (entity_ids && typeof entity_ids === 'string') {
+      entityFilter = entity_ids.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+
+    const pipeline: Record<string, unknown>[] = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+    ];
+    if (excludedAccountIds.length > 0) {
+      pipeline.push({ $match: { account_id: { $nin: excludedAccountIds } } });
+    }
+    if (entityFilter && entityFilter.length > 0) {
+      pipeline.push({ $match: { $or: [{ entity_id: { $in: entityFilter } }, { entity_id: null }] } });
+    }
+    pipeline.push({
+      $addFields: {
+        codeFirst: { $substr: [{ $ifNull: ['$acc.code', '0'] }, 0, 1] },
+        amount_income: { $cond: [{ $eq: ['$acc.type', 'income'] }, { $subtract: ['$credit', '$debit'] }, 0] },
+        amount_expense: { $cond: [{ $eq: ['$acc.type', 'expense'] }, { $subtract: ['$debit', '$credit'] }, 0] },
+      },
+    });
+    pipeline.push({
+      $addFields: {
+        group: {
+          $cond: [
+            { $eq: ['$acc.type', 'income'] },
+            'A',
+            {
+              $cond: [
+                { $and: [{ $in: ['$codeFirst', ['5', '6']] }, { $ne: ['$entity_id', null] }] },
+                'B',
+                { $cond: [{ $in: ['$codeFirst', ['5', '6']] }, 'C', 'B'] },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    pipeline.push({
+      $group: {
+        _id: { entity_id: '$entity_id', currency: '$currency', group: '$group' },
+        amount: { $sum: { $add: ['$amount_income', '$amount_expense'] } },
+      },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
+
+    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
+    const entities = entityIds.length > 0
+      ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
+      : [];
+    const entityMap = new Map(
+      (entities as { id: string; name: string; type: string }[]).map((e) => [e.id, { name: e.name, type: e.type }])
+    );
+
+    const projectsOnlyFilter = projects_only === 'true';
+    const columns: { id: string; name: string; type: string | null }[] = [];
+    const entityIdsOrdered = entityIds.filter((eid) => {
+      const ent = entityMap.get(eid);
+      if (projectsOnlyFilter && ent?.type !== 'project') return false;
+      return true;
+    });
+    for (const eid of entityIdsOrdered) {
+      const ent = entityMap.get(eid);
+      columns.push({ id: eid, name: ent?.name ?? 'Sin nombre', type: ent?.type ?? null });
+    }
+    columns.push({ id: '__null__', name: 'No asignado', type: null });
+    columns.push({ id: '__total__', name: 'TOTAL', type: null });
+
+    const colKeys = [...entityIdsOrdered, '__null__', '__total__'];
+    const dataMap = new Map<string, Record<string, { usd: number; cop: number }>>();
+    for (const col of colKeys) {
+      dataMap.set(col, { A: { usd: 0, cop: 0 }, B: { usd: 0, cop: 0 }, C: { usd: 0, cop: 0 } });
+    }
+
+    for (const r of results as { _id: { entity_id: string | null; currency: string; group: string }; amount: number }[]) {
+      const eid = r._id.entity_id;
+      const col = eid ?? '__null__';
+      if (!colKeys.includes(col)) continue;
+      const cur = normCurrency(r._id.currency || 'USD');
+      const amt = Math.round(r.amount * 100) / 100;
+      const row = dataMap.get(col)!;
+      const g = (r._id.group || 'B') as 'A' | 'B' | 'C';
+      if (cur === 'COP') row[g].cop += amt;
+      else row[g].usd += amt;
+
+      const totalRow = dataMap.get('__total__')!;
+      if (cur === 'COP') totalRow[g].cop += amt;
+      else totalRow[g].usd += amt;
+    }
+
+    const conceptRows = [
+      { key: 'ingresos', label: '(+) Ingresos Operacionales', group: 'A' as const },
+      { key: 'costos_directos', label: '(-) Costos Directos', group: 'B' as const },
+      { key: 'utilidad_bruta', label: '(=) UTILIDAD BRUTA', computed: (col: string) => {
+        const d = dataMap.get(col)!;
+        return { usd: d.A.usd - d.B.usd, cop: d.A.cop - d.B.cop };
+      }},
+      { key: 'margen_bruto_pct', label: 'Margen Bruto (%)', computed: (col: string) => {
+        const d = dataMap.get(col)!;
+        const ingUsd = d.A.usd;
+        const ubUsd = d.A.usd - d.B.usd;
+        const ingCop = d.A.cop;
+        const ubCop = d.A.cop - d.B.cop;
+        const pctUsd = ingUsd !== 0 ? Math.round((ubUsd / ingUsd) * 10000) / 100 : 0;
+        const pctCop = ingCop !== 0 ? Math.round((ubCop / ingCop) * 10000) / 100 : 0;
+        return { usd: pctUsd, cop: pctCop };
+      }},
+      { key: 'gastos_indirectos', label: '(-) Gastos Operativos', group: 'C' as const },
+      { key: 'utilidad_operativa', label: '(=) UTILIDAD OPERATIVA', computed: (col: string) => {
+        const d = dataMap.get(col)!;
+        return { usd: d.A.usd - d.B.usd - d.C.usd, cop: d.A.cop - d.B.cop - d.C.cop };
+      }},
+      { key: 'margen_operativo_pct', label: 'Margen Operativo (%)', computed: (col: string) => {
+        const d = dataMap.get(col)!;
+        const ingUsd = d.A.usd;
+        const uoUsd = d.A.usd - d.B.usd - d.C.usd;
+        const ingCop = d.A.cop;
+        const uoCop = d.A.cop - d.B.cop - d.C.cop;
+        const pctUsd = ingUsd !== 0 ? Math.round((uoUsd / ingUsd) * 10000) / 100 : 0;
+        const pctCop = ingCop !== 0 ? Math.round((uoCop / ingCop) * 10000) / 100 : 0;
+        return { usd: pctUsd, cop: pctCop };
+      }},
+    ];
+
+    const rows = conceptRows.map((cr) => {
+      const cells: Record<string, { usd: number; cop: number }> = {};
+      for (const col of colKeys) {
+        if ('group' in cr && cr.group) {
+          cells[col] = { ...dataMap.get(col)![cr.group] };
+        } else if ('computed' in cr && cr.computed) {
+          cells[col] = cr.computed(col);
+        } else {
+          cells[col] = { usd: 0, cop: 0 };
+        }
+      }
+      return { key: cr.key, label: cr.label, cells };
+    });
+
+    res.json({
+      columns,
+      rows,
+      col_keys: colKeys,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- P&G Matrix por Cliente (misma estructura, columnas = clientes) ---
+router.get('/pyg-matrix-by-client', async (req: Request, res: Response) => {
+  try {
+    const { start, end, client_ids } = req.query;
+    const entryMatch: Record<string, unknown> = {};
+    if (start && end) {
+      entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
+    } else if (start) {
+      entryMatch.date = { $gte: new Date(start as string) };
+    } else if (end) {
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({ columns: [], rows: [], col_keys: [] });
+    }
+
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
+      .map((a) => (a as { id: string }).id);
+
+    const pipeline: Record<string, unknown>[] = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+      { $lookup: { from: 'acct_entities', localField: 'entity_id', foreignField: 'id', as: 'entity' } },
+      { $addFields: { client_id: { $ifNull: [{ $arrayElemAt: ['$entity.client_id', 0] }, '__null__'] } } },
+    ];
+    if (excludedAccountIds.length > 0) {
+      pipeline.push({ $match: { account_id: { $nin: excludedAccountIds } } });
+    }
+    let clientFilter: string[] | null = null;
+    if (client_ids && typeof client_ids === 'string') {
+      clientFilter = client_ids.split(',').map((s) => s.trim()).filter(Boolean);
+      if (clientFilter.length > 0) {
+        pipeline.push({ $match: { $or: [{ client_id: { $in: clientFilter } }, { client_id: '__null__' }] } });
+      }
+    }
+    pipeline.push({
+      $addFields: {
+        codeFirst: { $substr: [{ $ifNull: ['$acc.code', '0'] }, 0, 1] },
+        amount_income: { $cond: [{ $eq: ['$acc.type', 'income'] }, { $subtract: ['$credit', '$debit'] }, 0] },
+        amount_expense: { $cond: [{ $eq: ['$acc.type', 'expense'] }, { $subtract: ['$debit', '$credit'] }, 0] },
+      },
+    });
+    pipeline.push({
+      $addFields: {
+        group: {
+          $cond: [
+            { $eq: ['$acc.type', 'income'] },
+            'A',
+            { $cond: [{ $and: [{ $in: ['$codeFirst', ['5', '6']] }, { $ne: ['$entity_id', null] }] }, 'B', { $cond: [{ $in: ['$codeFirst', ['5', '6']] }, 'C', 'B'] }] },
+          ],
+        },
+      },
+    });
+    pipeline.push({
+      $group: {
+        _id: { client_id: '$client_id', currency: '$currency', group: '$group' },
+        amount: { $sum: { $add: ['$amount_income', '$amount_expense'] } },
+      },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
+
+    const clientIds = [...new Set((results as { _id: { client_id: string } }[]).map((r) => r._id.client_id).filter((id) => id && id !== '__null__'))];
+    const clients = clientIds.length > 0
+      ? await AcctClient.find({ id: { $in: clientIds } }).select('id name').lean().exec()
+      : [];
+    const clientMap = new Map((clients as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+
+    const columns: { id: string; name: string }[] = clientIds.map((cid) => ({ id: cid, name: clientMap.get(cid) ?? 'Sin nombre' }));
+    columns.push({ id: '__null__', name: 'No asignado' });
+    columns.push({ id: '__total__', name: 'TOTAL' });
+
+    const colKeys = [...clientIds, '__null__', '__total__'];
+    const dataMap = new Map<string, Record<string, { usd: number; cop: number }>>();
+    for (const col of colKeys) {
+      dataMap.set(col, { A: { usd: 0, cop: 0 }, B: { usd: 0, cop: 0 }, C: { usd: 0, cop: 0 } });
+    }
+
+    for (const r of results as { _id: { client_id: string; currency: string; group: string }; amount: number }[]) {
+      const cid = r._id.client_id === '__null__' ? '__null__' : r._id.client_id;
+      if (!colKeys.includes(cid)) continue;
+      const cur = normCurrency(r._id.currency || 'USD');
+      const amt = Math.round(r.amount * 100) / 100;
+      const g = (r._id.group || 'B') as 'A' | 'B' | 'C';
+      const row = dataMap.get(cid)!;
+      if (cur === 'COP') row[g].cop += amt;
+      else row[g].usd += amt;
+      const totalRow = dataMap.get('__total__')!;
+      if (cur === 'COP') totalRow[g].cop += amt;
+      else totalRow[g].usd += amt;
+    }
+
+    const conceptRows = [
+      { key: 'ingresos', label: '(+) Ingresos Operacionales', group: 'A' as const },
+      { key: 'costos_directos', label: '(-) Costos Directos', group: 'B' as const },
+      { key: 'utilidad_bruta', label: '(=) UTILIDAD BRUTA', computed: (col: string) => { const d = dataMap.get(col)!; return { usd: d.A.usd - d.B.usd, cop: d.A.cop - d.B.cop }; }},
+      { key: 'margen_bruto_pct', label: 'Margen Bruto (%)', computed: (col: string) => { const d = dataMap.get(col)!; const ingUsd = d.A.usd, ubUsd = d.A.usd - d.B.usd, ingCop = d.A.cop, ubCop = d.A.cop - d.B.cop; return { usd: ingUsd !== 0 ? Math.round((ubUsd / ingUsd) * 10000) / 100 : 0, cop: ingCop !== 0 ? Math.round((ubCop / ingCop) * 10000) / 100 : 0 }; }},
+      { key: 'gastos_indirectos', label: '(-) Gastos Operativos', group: 'C' as const },
+      { key: 'utilidad_operativa', label: '(=) UTILIDAD OPERATIVA', computed: (col: string) => { const d = dataMap.get(col)!; return { usd: d.A.usd - d.B.usd - d.C.usd, cop: d.A.cop - d.B.cop - d.C.cop }; }},
+      { key: 'margen_operativo_pct', label: 'Margen Operativo (%)', computed: (col: string) => { const d = dataMap.get(col)!; const ingUsd = d.A.usd, uoUsd = d.A.usd - d.B.usd - d.C.usd, ingCop = d.A.cop, uoCop = d.A.cop - d.B.cop - d.C.cop; return { usd: ingUsd !== 0 ? Math.round((uoUsd / ingUsd) * 10000) / 100 : 0, cop: ingCop !== 0 ? Math.round((uoCop / ingCop) * 10000) / 100 : 0 }; }},
+    ];
+
+    const rows = conceptRows.map((cr) => {
+      const cells: Record<string, { usd: number; cop: number }> = {};
+      for (const col of colKeys) {
+        if ('group' in cr && cr.group) cells[col] = { ...dataMap.get(col)![cr.group] };
+        else if ('computed' in cr && cr.computed) cells[col] = cr.computed(col);
+        else cells[col] = { usd: 0, cop: 0 };
+      }
+      return { key: cr.key, label: cr.label, cells };
+    });
+
+    res.json({ columns, rows, col_keys: colKeys });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/pyg', async (req: Request, res: Response) => {
   try {
     const { start, end, client_id } = req.query;
@@ -1163,6 +1471,118 @@ router.get('/account-balances', async (req: Request, res: Response) => {
     const totalCop = rows.reduce((acc, r) => acc + r.cop, 0);
 
     res.json({ rows, total_usd: Math.round(totalUsd * 100) / 100, total_cop: Math.round(totalCop * 100) / 100 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Balance General (jerarquía PUC: 1xxx Activos, 2xxx Pasivos, 3xxx Patrimonio) ---
+// Incluye Utilidad del Ejercicio en Patrimonio para que cuadre
+router.get('/balance-general', async (req: Request, res: Response) => {
+  try {
+    const { end } = req.query;
+    const entryMatch: Record<string, unknown> = {};
+    if (end) {
+      entryMatch.date = { $lte: new Date(end as string) };
+    }
+    const entryIds = Object.keys(entryMatch).length > 0
+      ? (await AcctJournalEntry.find(entryMatch).select('id').lean().exec()).map((e) => (e as { id: string }).id)
+      : (await AcctJournalEntry.find({}).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+
+    if (entryIds.length === 0) {
+      return res.json({
+        activos: [],
+        pasivos: [],
+        patrimonio: [],
+        utilidad_ejercicio: { usd: 0, cop: 0 },
+        total_activos: { usd: 0, cop: 0 },
+        total_pasivos_patrimonio: { usd: 0, cop: 0 },
+        cuadra: true,
+      });
+    }
+
+    const pipeline = [
+      { $match: { journal_entry_id: { $in: entryIds } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      {
+        $group: {
+          _id: { account_id: '$account_id', code: '$acc.code', name: '$acc.name', type: '$acc.type' },
+          debit_usd: { $sum: { $cond: [{ $or: [{ $eq: ['$currency', 'USD'] }, { $eq: ['$currency', null] }, { $eq: ['$currency', ''] }] }, '$debit', 0] } },
+          credit_usd: { $sum: { $cond: [{ $or: [{ $eq: ['$currency', 'USD'] }, { $eq: ['$currency', null] }, { $eq: ['$currency', ''] }] }, '$credit', 0] } },
+          debit_cop: { $sum: { $cond: [{ $eq: ['$currency', 'COP'] }, '$debit', 0] } },
+          credit_cop: { $sum: { $cond: [{ $eq: ['$currency', 'COP'] }, '$credit', 0] } },
+        },
+      },
+    ];
+    const results = await AcctJournalEntryLine.aggregate(pipeline).exec();
+
+    const activos: { code: string; name: string; usd: number; cop: number }[] = [];
+    const pasivos: { code: string; name: string; usd: number; cop: number }[] = [];
+    const patrimonio: { code: string; name: string; usd: number; cop: number }[] = [];
+    let utilidadUsd = 0;
+    let utilidadCop = 0;
+
+    for (const r of results as { _id: { account_id: string; code: string; name: string; type: string }; debit_usd: number; credit_usd: number; debit_cop: number; credit_cop: number }[]) {
+      const code = r._id.code || '0';
+      const first = code.charAt(0);
+      let balUsd = 0;
+      let balCop = 0;
+      if (r._id.type === 'asset') {
+        balUsd = r.debit_usd - r.credit_usd;
+        balCop = r.debit_cop - r.credit_cop;
+      } else if (r._id.type === 'liability' || r._id.type === 'equity') {
+        balUsd = r.credit_usd - r.debit_usd;
+        balCop = r.credit_cop - r.debit_cop;
+      } else if (r._id.type === 'income') {
+        utilidadUsd += r.credit_usd - r.debit_usd;
+        utilidadCop += r.credit_cop - r.debit_cop;
+        continue;
+      } else if (r._id.type === 'expense') {
+        utilidadUsd -= r.debit_usd - r.credit_usd;
+        utilidadCop -= r.debit_cop - r.credit_cop;
+        continue;
+      } else {
+        continue;
+      }
+      const row = { code: r._id.code, name: r._id.name, usd: Math.round(balUsd * 100) / 100, cop: Math.round(balCop * 100) / 100 };
+      if (first === '1') activos.push(row);
+      else if (first === '2') pasivos.push(row);
+      else if (first === '3') patrimonio.push(row);
+    }
+
+    patrimonio.push({
+      code: '36xx',
+      name: 'Utilidad del Ejercicio (Ingresos - Gastos)',
+      usd: Math.round(utilidadUsd * 100) / 100,
+      cop: Math.round(utilidadCop * 100) / 100,
+    });
+
+    const sum = (arr: { usd: number; cop: number }[]) => ({
+      usd: arr.reduce((s, x) => s + x.usd, 0),
+      cop: arr.reduce((s, x) => s + x.cop, 0),
+    });
+    const totalActivos = sum(activos);
+    const totalPasivos = sum(pasivos);
+    const totalPatrimonio = sum(patrimonio);
+    const totalPasivosPatrimonio = {
+      usd: totalPasivos.usd + totalPatrimonio.usd,
+      cop: totalPasivos.cop + totalPatrimonio.cop,
+    };
+    const cuadra =
+      Math.abs(totalActivos.usd - totalPasivosPatrimonio.usd) < 0.02 &&
+      Math.abs(totalActivos.cop - totalPasivosPatrimonio.cop) < 0.02;
+
+    res.json({
+      activos,
+      pasivos,
+      patrimonio,
+      utilidad_ejercicio: { usd: Math.round(utilidadUsd * 100) / 100, cop: Math.round(utilidadCop * 100) / 100 },
+      total_activos: totalActivos,
+      total_pasivos_patrimonio: totalPasivosPatrimonio,
+      cuadra,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
@@ -2121,6 +2541,56 @@ router.put('/journal-entries/:id', async (req: Request, res: Response) => {
         res.status(400).json({ error: `La partida no cuadra: débitos ${totalDebit.toFixed(2)} ≠ créditos ${totalCredit.toFixed(2)}` });
         return;
       }
+      const oldLines = await AcctJournalEntryLine.find({ journal_entry_id: id }).lean().exec();
+      const newLinesNormalized = lines.map((l) => ({
+        account_id: l.account_id,
+        entity_id: l.entity_id ?? null,
+        debit: Math.round((Number(l.debit) || 0) * 100) / 100,
+        credit: Math.round((Number(l.credit) || 0) * 100) / 100,
+      }));
+      if (created_by) {
+        for (let i = 0; i < Math.max(oldLines.length, newLinesNormalized.length); i++) {
+          const oldL = oldLines[i] as { account_id: string; entity_id?: string | null; debit: number; credit: number } | undefined;
+          const newL = newLinesNormalized[i];
+          if (!oldL && newL) {
+            await AuditLog.create({
+              user_id: created_by,
+              entity_type: 'acct_journal_entry',
+              entity_id: id,
+              action: 'update',
+              field_name: `line_${i + 1}`,
+              old_value: null,
+              new_value: newL,
+              summary: `Línea ${i + 1} agregada: cuenta ${newL.account_id} D ${newL.debit} C ${newL.credit}`,
+            });
+          } else if (oldL && !newL) {
+            await AuditLog.create({
+              user_id: created_by,
+              entity_type: 'acct_journal_entry',
+              entity_id: id,
+              action: 'update',
+              field_name: `line_${i + 1}`,
+              old_value: { account_id: oldL.account_id, entity_id: oldL.entity_id, debit: oldL.debit, credit: oldL.credit },
+              new_value: null,
+              summary: `Línea ${i + 1} eliminada: cuenta ${oldL.account_id} D ${oldL.debit} C ${oldL.credit}`,
+            });
+          } else if (oldL && newL) {
+            const changed = oldL.account_id !== newL.account_id || String(oldL.entity_id ?? '') !== String(newL.entity_id ?? '') || Math.abs(oldL.debit - newL.debit) > 0.01 || Math.abs(oldL.credit - newL.credit) > 0.01;
+            if (changed) {
+              await AuditLog.create({
+                user_id: created_by,
+                entity_type: 'acct_journal_entry',
+                entity_id: id,
+                action: 'update',
+                field_name: `line_${i + 1}`,
+                old_value: { account_id: oldL.account_id, entity_id: oldL.entity_id, debit: oldL.debit, credit: oldL.credit },
+                new_value: newL,
+                summary: `Línea ${i + 1} modificada: ${oldL.account_id} D${oldL.debit}/C${oldL.credit} → ${newL.account_id} D${newL.debit}/C${newL.credit}`,
+              });
+            }
+          }
+        }
+      }
       await AcctJournalEntryLine.deleteMany({ journal_entry_id: id }).exec();
       for (const line of lines) {
         await AcctJournalEntryLine.create({
@@ -2134,13 +2604,13 @@ router.put('/journal-entries/:id', async (req: Request, res: Response) => {
         });
       }
     }
-    if (created_by) {
+    if (created_by && (!lines || !Array.isArray(lines) || lines.length < 2)) {
       await AuditLog.create({
         user_id: created_by,
         entity_type: 'acct_journal_entry',
         entity_id: id,
         action: 'update',
-        summary: `Asiento actualizado: ${description ?? id}`,
+        summary: `Asiento actualizado (cabecera): ${description ?? id}`,
       });
     }
     const updated = await AcctJournalEntry.findOne({ id }).lean().exec();

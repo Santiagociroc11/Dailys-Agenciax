@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse, type PygMatrixResponse, type BalanceGeneralResponse } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -655,7 +655,7 @@ export default function Contabilidad() {
   const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [pygByClientData, setPygByClientData] = useState<{ rows: PygRowByClient[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; total_usd: number; total_cop: number } | null>(null);
-  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'accounts'>('balance');
+  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'pyg_matrix' | 'pyg_matrix_client' | 'balance_general' | 'accounts'>('pyg_matrix');
 
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -711,6 +711,11 @@ export default function Contabilidad() {
   const [pygClientSortOrder, setPygClientSortOrder] = useState<'asc' | 'desc'>('desc');
   const [pygClientHideNoClient, setPygClientHideNoClient] = useState(false);
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
+  const [pygMatrixData, setPygMatrixData] = useState<PygMatrixResponse | null>(null);
+  const [pygMatrixClientData, setPygMatrixClientData] = useState<PygMatrixResponse | null>(null);
+  const [balanceGeneralData, setBalanceGeneralData] = useState<BalanceGeneralResponse | null>(null);
+  const [pygMatrixCurrency, setPygMatrixCurrency] = useState<'usd' | 'cop'>('usd');
+  const [pygMatrixHideAdmin, setPygMatrixHideAdmin] = useState(false);
   const [pygFilterClient, setPygFilterClient] = useState('');
   const [pygDetailTransactions, setPygDetailTransactions] = useState<AcctTransaction[]>([]);
   const [pygDetailLedgerLines, setPygDetailLedgerLines] = useState<LedgerLine[]>([]);
@@ -824,6 +829,9 @@ export default function Contabilidad() {
       if (balanceView === 'balance') fetchBalance();
       else if (balanceView === 'pyg') fetchPyg();
       else if (balanceView === 'pyg_client') fetchPygByClient();
+      else if (balanceView === 'pyg_matrix') fetchPygMatrix();
+      else if (balanceView === 'pyg_matrix_client') fetchPygMatrixByClient();
+      else if (balanceView === 'balance_general') fetchBalanceGeneral();
       else fetchAccountBalances();
     }
     if (activeTab === 'asientos') {
@@ -831,7 +839,7 @@ export default function Contabilidad() {
       if (asientosTab === 'entries') fetchJournalEntries();
       if (asientosTab === 'trial') fetchTrialBalance();
     }
-  }, [isAdmin, activeTab, balanceView, asientosTab, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient, asientosStart, asientosEnd]);
+  }, [isAdmin, activeTab, balanceView, asientosTab, filterStart, filterEnd, filterEntity, filterCategory, filterAccount, balanceStart, balanceEnd, pygProjectsOnly, pygFilterClient, asientosStart, asientosEnd, entities]);
 
   async function fetchClients() {
     try {
@@ -955,6 +963,59 @@ export default function Contabilidad() {
       console.error(e);
       toast.error('Error al cargar P&G por cliente');
       setPygByClientData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchPygMatrix() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string; projects_only?: boolean; entity_ids?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      if (pygProjectsOnly) params.projects_only = true;
+      if (pygFilterClient) params.entity_ids = entities.filter((e) => e.client_id === pygFilterClient).map((e) => e.id).join(',');
+      const data = await contabilidadApi.getPygMatrix(params);
+      setPygMatrixData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar P&G Matrix');
+      setPygMatrixData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchPygMatrixByClient() {
+    setLoading(true);
+    try {
+      const params: { start?: string; end?: string; client_ids?: string } = {};
+      if (balanceStart) params.start = balanceStart;
+      if (balanceEnd) params.end = balanceEnd;
+      if (pygFilterClient) params.client_ids = pygFilterClient;
+      const data = await contabilidadApi.getPygMatrixByClient(params);
+      setPygMatrixClientData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar P&G Matrix por cliente');
+      setPygMatrixClientData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchBalanceGeneral() {
+    setLoading(true);
+    try {
+      const params: { end?: string } = {};
+      if (balanceEnd) params.end = balanceEnd;
+      const data = await contabilidadApi.getBalanceGeneral(params);
+      setBalanceGeneralData(data);
+    } catch (e) {
+      console.error(e);
+      toast.error('Error al cargar Balance General');
+      setBalanceGeneralData(null);
     } finally {
       setLoading(false);
     }
@@ -1740,16 +1801,22 @@ export default function Contabilidad() {
                 Balance
               </button>
               <button
-                onClick={() => setBalanceView('pyg')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                onClick={() => setBalanceView('pyg_matrix')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_matrix' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 P&G por proyecto
               </button>
               <button
-                onClick={() => setBalanceView('pyg_client')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_client' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                onClick={() => setBalanceView('pyg_matrix_client')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'pyg_matrix_client' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 P&G por cliente
+              </button>
+              <button
+                onClick={() => setBalanceView('balance_general')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${balanceView === 'balance_general' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                Balance General
               </button>
               <button
                 onClick={() => setBalanceView('accounts')}
@@ -1758,7 +1825,7 @@ export default function Contabilidad() {
                 Balance de cuentas
               </button>
             </div>
-            {balanceView !== 'accounts' && (
+            {balanceView !== 'accounts' && balanceView !== 'balance_general' && (
               <DateRangePicker
                 start={balanceStart}
                 end={balanceEnd}
@@ -1767,10 +1834,38 @@ export default function Contabilidad() {
                 onPreset={(id) => applyPeriodPreset(id, 'balance')}
               />
             )}
-            {balanceView === 'pyg' && (
+            {(balanceView === 'pyg_matrix' || balanceView === 'pyg_matrix_client') && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">Moneda:</span>
+                  <button
+                    onClick={() => setPygMatrixCurrency('usd')}
+                    className={`px-2 py-1 rounded text-sm font-medium ${pygMatrixCurrency === 'usd' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    USD
+                  </button>
+                  <button
+                    onClick={() => setPygMatrixCurrency('cop')}
+                    className={`px-2 py-1 rounded text-sm font-medium ${pygMatrixCurrency === 'cop' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}
+                  >
+                    COP
+                  </button>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pygMatrixHideAdmin}
+                    onChange={(e) => setPygMatrixHideAdmin(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Ocultar columna "No asignado"
+                </label>
+              </>
+            )}
+            {balanceView === 'pyg_matrix' && (
               <>
                 <div>
-                  <label className="block text-sm text-gray-600 mb-1">Cliente</label>
+                  <label className="block text-sm text-gray-600 mb-1">Filtrar por cliente</label>
                   <select
                     value={pygFilterClient}
                     onChange={(e) => setPygFilterClient(e.target.value)}
@@ -1789,20 +1884,35 @@ export default function Contabilidad() {
                     onChange={(e) => setPygProjectsOnly(e.target.checked)}
                     className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                   />
-                  Solo proyectos (excluir Hotmart, Fondo libre, etc.)
+                  Solo proyectos
                 </label>
               </>
             )}
-            {balanceView === 'pyg_client' && (
-              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            {balanceView === 'pyg_matrix_client' && (
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Filtrar cliente</label>
+                <select
+                  value={pygFilterClient}
+                  onChange={(e) => setPygFilterClient(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm min-w-[160px]"
+                >
+                  <option value="">Todos</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {balanceView === 'balance_general' && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">A la fecha:</span>
                 <input
-                  type="checkbox"
-                  checked={pygClientHideNoClient}
-                  onChange={(e) => setPygClientHideNoClient(e.target.checked)}
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  type="date"
+                  value={balanceEnd}
+                  onChange={(e) => setBalanceEnd(e.target.value)}
+                  className="px-3 py-2 border rounded-lg text-sm"
                 />
-                Ocultar "Sin cliente"
-              </label>
+              </div>
             )}
             {balanceView === 'accounts' && (
               <p className="text-sm text-gray-500">Saldo total acumulado (sin filtro de fechas)</p>
@@ -1859,6 +1969,162 @@ export default function Contabilidad() {
             </div>
             );
             })()
+          ) : balanceView === 'pyg_matrix' && pygMatrixData ? (
+            (() => {
+              const cols = pygMatrixHideAdmin
+                ? pygMatrixData.columns.filter((c) => c.id !== '__null__')
+                : pygMatrixData.columns;
+              const fmt = (n: number, isPct: boolean) =>
+                isPct ? `${n}%` : (n >= 0 ? '+' : '') + (pygMatrixCurrency === 'usd' ? n.toLocaleString('en-US', { minimumFractionDigits: 2 }) : n.toLocaleString('es-CO', { minimumFractionDigits: 0 }));
+              const getVal = (cells: Record<string, { usd: number; cop: number }>, colId: string) => {
+                const c = cells[colId];
+                return c ? (pygMatrixCurrency === 'usd' ? c.usd : c.cop) : 0;
+              };
+              const isPct = (key: string) => key.includes('margen') || key.includes('pct');
+              return (
+                <div className="bg-white rounded-lg shadow overflow-x-auto">
+                  <table className="w-full text-sm min-w-[500px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[220px]">Concepto</th>
+                        {cols.map((c) => (
+                          <th key={c.id} className={`px-3 py-3 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pygMatrixData.rows.map((row) => (
+                        <tr key={row.key} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className={`px-4 py-2 sticky left-0 bg-white ${row.key.includes('utilidad') ? 'font-semibold' : ''}`}>{row.label}</td>
+                          {cols.map((c) => {
+                            const v = getVal(row.cells, c.id);
+                            const pct = isPct(row.key);
+                            const isTotal = c.id === '__total__';
+                            return (
+                              <td key={c.id} className={`px-3 py-2 text-right ${isTotal ? 'font-medium sticky right-0 bg-white' : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${isTotal && (v >= 0 ? 'text-emerald-700' : 'text-red-700')}`}>
+                                {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {pygMatrixData.rows.length === 0 && (
+                    <div className="p-12 text-center text-gray-500">No hay movimientos en el período.</div>
+                  )}
+                </div>
+              );
+            })()
+          ) : balanceView === 'pyg_matrix_client' && pygMatrixClientData ? (
+            (() => {
+              const cols = pygMatrixHideAdmin
+                ? pygMatrixClientData.columns.filter((c) => c.id !== '__null__')
+                : pygMatrixClientData.columns;
+              const fmt = (n: number, isPct: boolean) =>
+                isPct ? `${n}%` : (n >= 0 ? '+' : '') + (pygMatrixCurrency === 'usd' ? n.toLocaleString('en-US', { minimumFractionDigits: 2 }) : n.toLocaleString('es-CO', { minimumFractionDigits: 0 }));
+              const getVal = (cells: Record<string, { usd: number; cop: number }>, colId: string) => {
+                const c = cells[colId];
+                return c ? (pygMatrixCurrency === 'usd' ? c.usd : c.cop) : 0;
+              };
+              const isPct = (key: string) => key.includes('margen') || key.includes('pct');
+              return (
+                <div className="bg-white rounded-lg shadow overflow-x-auto">
+                  <table className="w-full text-sm min-w-[500px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[220px]">Concepto</th>
+                        {cols.map((c) => (
+                          <th key={c.id} className={`px-3 py-3 text-right font-medium whitespace-nowrap ${c.id === '__total__' ? 'text-indigo-700 bg-indigo-50 sticky right-0 z-10' : 'text-gray-700'}`}>{c.name}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pygMatrixClientData.rows.map((row) => (
+                        <tr key={row.key} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className={`px-4 py-2 sticky left-0 bg-white ${row.key.includes('utilidad') ? 'font-semibold' : ''}`}>{row.label}</td>
+                          {cols.map((c) => {
+                            const v = getVal(row.cells, c.id);
+                            const pct = isPct(row.key);
+                            const isTotal = c.id === '__total__';
+                            return (
+                              <td key={c.id} className={`px-3 py-2 text-right ${isTotal ? 'font-medium sticky right-0 bg-white' : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${isTotal && (v >= 0 ? 'text-emerald-700' : 'text-red-700')}`}>
+                                {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {pygMatrixClientData.rows.length === 0 && (
+                    <div className="p-12 text-center text-gray-500">No hay movimientos en el período.</div>
+                  )}
+                </div>
+              );
+            })()
+          ) : balanceView === 'balance_general' && balanceGeneralData ? (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="p-4 border-b flex justify-between items-center">
+                <h3 className="font-semibold text-gray-800">Balance General</h3>
+                {balanceGeneralData.cuadra ? (
+                  <span className="text-sm text-emerald-600 font-medium">Cuadra</span>
+                ) : (
+                  <span className="text-sm text-amber-600 font-medium">Revisar</span>
+                )}
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">ACTIVOS</h4>
+                  <table className="w-full text-sm">
+                    {balanceGeneralData.activos.map((r) => (
+                      <tr key={r.code} className="border-t">
+                        <td className="py-1">{r.code} {r.name}</td>
+                        <td className="py-1 text-right text-emerald-600">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                        {r.cop !== 0 && <td className="py-1 text-right text-emerald-600">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                      </tr>
+                    ))}
+                    <tr className="font-semibold border-t-2">
+                      <td className="py-2">Total Activos</td>
+                      <td className="py-2 text-right">{balanceGeneralData.total_activos.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                      <td className="py-2 text-right">{balanceGeneralData.total_activos.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
+                    </tr>
+                  </table>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">PASIVOS</h4>
+                  <table className="w-full text-sm">
+                    {balanceGeneralData.pasivos.map((r) => (
+                      <tr key={r.code} className="border-t">
+                        <td className="py-1">{r.code} {r.name}</td>
+                        <td className="py-1 text-right">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                        {r.cop !== 0 && <td className="py-1 text-right">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                      </tr>
+                    ))}
+                  </table>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">PATRIMONIO</h4>
+                  <table className="w-full text-sm">
+                    {balanceGeneralData.patrimonio.map((r) => (
+                      <tr key={r.code} className="border-t">
+                        <td className="py-1">{r.code} {r.name}</td>
+                        <td className="py-1 text-right">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                        {r.cop !== 0 && <td className="py-1 text-right">{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>}
+                      </tr>
+                    ))}
+                    <tr className="font-semibold border-t-2">
+                      <td className="py-2">Total Pasivos + Patrimonio</td>
+                      <td className="py-2 text-right">{balanceGeneralData.total_pasivos_patrimonio.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
+                      <td className="py-2 text-right">{balanceGeneralData.total_pasivos_patrimonio.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+              {balanceGeneralData.activos.length === 0 && balanceGeneralData.pasivos.length === 0 && (
+                <div className="p-12 text-center text-gray-500">No hay datos para el Balance General.</div>
+              )}
+            </div>
           ) : balanceView === 'pyg' && pygData ? (
             (() => {
               const hasCopPyg = pygData.total_cop.ingresos !== 0 || pygData.total_cop.gastos !== 0 || pygData.total_cop.resultado !== 0 ||
