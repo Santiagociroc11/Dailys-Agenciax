@@ -315,18 +315,30 @@ router.post('/entities/:id/merge', async (req: Request, res: Response) => {
 router.get('/categories', async (_req: Request, res: Response) => {
   try {
     const list = await AcctCategory.find({}).lean().exec();
-    const ids = (list as { id: string }[]).map((c) => c.id);
-    if (ids.length === 0) return res.json([]);
-    const agg = await AcctTransaction.aggregate([
-      { $match: { category_id: { $in: ids } } },
-      { $group: { _id: '$category_id', count: { $sum: 1 }, lastDate: { $max: '$date' } } },
-    ]).exec();
+    if (list.length === 0) return res.json([]);
+
+    // Contar desde asientos (AcctJournalEntryLine): categoría se vincula por nombre de cuenta PUC = nombre de categoría
     const countMap = new Map<string, number>();
     const lastDateMap = new Map<string, Date>();
-    for (const r of agg as { _id: string; count: number; lastDate: Date }[]) {
-      countMap.set(r._id, r.count);
-      lastDateMap.set(r._id, r.lastDate);
+
+    for (const c of list as { id: string; name: string }[]) {
+      const accIds = (await AcctChartAccount.find({ name: c.name }).select('id').lean().exec()).map((a) => (a as { id: string }).id);
+      if (accIds.length === 0) {
+        countMap.set(c.id, 0);
+        continue;
+      }
+      const agg = await AcctJournalEntryLine.aggregate([
+        { $match: { account_id: { $in: accIds } } },
+        { $group: { _id: '$journal_entry_id' } },
+        { $lookup: { from: 'acct_journal_entries', localField: '_id', foreignField: 'id', as: 'entry' } },
+        { $unwind: '$entry' },
+        { $group: { _id: null, count: { $sum: 1 }, lastDate: { $max: '$entry.date' } } },
+      ]).exec();
+      const r = agg[0] as { count: number; lastDate: Date } | undefined;
+      countMap.set(c.id, r?.count ?? 0);
+      if (r?.lastDate) lastDateMap.set(c.id, r.lastDate);
     }
+
     const enriched = (list as { id: string; name: string; type: string; parent_id?: string | null }[]).map((c) => ({
       ...c,
       transaction_count: countMap.get(c.id) ?? 0,

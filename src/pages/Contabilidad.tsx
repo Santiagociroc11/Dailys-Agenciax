@@ -86,7 +86,11 @@ type ChartTreeNode = {
 
 function buildChartTree(accounts: AcctChartAccount[]): ChartTreeNode[] {
   const byCode = new Map<string, AcctChartAccount>();
-  for (const a of accounts) byCode.set(a.code, a);
+  for (const a of accounts) {
+    byCode.set(a.code, a);
+    const num = a.code.replace(/\D/g, '');
+    if (num && num !== a.code) byCode.set(num, a);
+  }
 
   const roots = new Map<string, ChartTreeNode>();
 
@@ -193,7 +197,9 @@ function ChartAccountsTree({
           <span className={`font-mono text-sm ${isVirtual ? 'text-gray-500 font-medium' : 'text-gray-800'}`}>
             {node.code}
           </span>
-          <span className={`flex-1 ${isVirtual ? 'text-gray-600' : 'text-gray-900'}`}>{node.label}</span>
+          <span className={`flex-1 min-w-0 truncate ${isVirtual ? 'text-gray-600' : 'text-gray-900'}`}>
+            {node.account?.name ?? node.label || node.code}
+          </span>
           {node.account && (
             <>
               <span className="text-xs px-2 py-0.5 rounded text-gray-500 bg-gray-100">
