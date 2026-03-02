@@ -2004,7 +2004,8 @@ router.post('/import', async (req: Request, res: Response) => {
       }
     }
 
-    // Protección contra duplicados: hashear entradas importadas existentes
+    // Protección contra duplicados: hash incluye fecha+desc+proyecto+montos para no marcar
+    // como duplicadas filas distintas (ej. mismo día "SALDOS INICIALES" en distintas cuentas).
     const existingImportEntries = await AcctJournalEntry.find({ reference: /^Import / }).select('date description').lean().exec();
     const existingHashes = new Set<string>();
     for (const e of existingImportEntries) {
@@ -2252,14 +2253,6 @@ router.post('/import', async (req: Request, res: Response) => {
         continue;
       }
 
-      // Protección contra duplicados
-      const dupHash = `${date.toISOString().slice(0, 10)}\x00${descripcion.slice(0, 200)}`;
-      if (existingHashes.has(dupHash)) {
-        duplicates++;
-        skipped++;
-        continue;
-      }
-
       const entityId = await getOrCreateEntity(proyectoStr);
       let rowCreated = 0;
 
@@ -2271,6 +2264,22 @@ router.post('/import', async (req: Request, res: Response) => {
         const accountName = accountHeaders[c];
         if (!accountName) continue;
         accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
+      }
+
+      // Firma única: índice de fila + fecha + desc + proyecto + montos.
+      // Incluimos el índice para que cada fila sea distinta (evita falsos duplicados cuando
+      // varias filas comparten fecha/desc/proyecto/montos, ej. SALDOS INICIALES por cuenta).
+      const amountsSig = accountAmounts.length > 0
+        ? accountAmounts
+            .sort((a, b) => a.accountName.localeCompare(b.accountName))
+            .map((a) => `${a.accountName}:${a.amount}`)
+            .join('|')
+        : `importe:${parseAmount((idxImporteContable >= 0 ? (row[idxImporteContable] || '') : '').trim()) ?? 0}`;
+      const dupHash = `${i}\x00${date.toISOString().slice(0, 10)}\x00${descripcion.slice(0, 200)}\x00${proyectoStr}\x00${amountsSig}`;
+      if (existingHashes.has(dupHash)) {
+        duplicates++;
+        skipped++;
+        continue;
       }
 
       const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(rawCategoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);

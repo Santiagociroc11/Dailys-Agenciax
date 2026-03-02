@@ -6,9 +6,9 @@
  *
  * Uso:
  *   OPENROUTER_API_KEY=tu_key npx tsx scripts/categorizador.ts [ruta_csv]
- *
- * Si no pasas ruta, usa csvejemplo.csv por defecto.
+ *   O con .env: npx tsx scripts/categorizador.ts [ruta_csv]
  */
+import 'dotenv/config';
 import { parse } from 'csv-parse/sync';
 import { readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';

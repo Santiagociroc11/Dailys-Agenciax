@@ -29,7 +29,7 @@ function parseAmount(str: string): number | null {
   return neg ? -num : num;
 }
 
-const csvPath = join(process.cwd(), 'csvejemplo.csv');
+const csvPath = process.argv[2] ? join(process.cwd(), process.argv[2]) : join(process.cwd(), 'csvejemplo.csv');
 const csvText = readFileSync(csvPath, 'utf-8');
 
 const records = parse(csvText, { relax_column_count: true, trim: true, skip_empty_lines: true }) as string[][];
