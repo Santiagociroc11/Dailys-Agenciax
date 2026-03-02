@@ -9,6 +9,10 @@ const acctImportBatchSchema = new mongoose.Schema(
     created_by: { type: String, default: null, ref: 'User' },
     created_count: { type: Number, default: 0 },
     skipped_count: { type: Number, default: 0 },
+    created_chart_account_ids: { type: [String], default: [] },
+    created_entity_ids: { type: [String], default: [] },
+    created_category_ids: { type: [String], default: [] },
+    created_payment_account_ids: { type: [String], default: [] },
   },
   {
     timestamps: true,

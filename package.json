@@ -4,6 +4,11 @@
   "version": "1.1.2",
   "type": "module",
   "scripts": {
+    "categorizador": "npx tsx scripts/categorizador.ts",
+    "categorizador:interactivo": "npx tsx scripts/categorizador-interactivo.ts",
+    "revisar:huerfanas": "npx tsx scripts/revisar-huerfanas.ts",
+    "fusionar:categorias-csv": "npx tsx scripts/fusionar-categorias-csv.ts",
+    "normalizar:detalles-csv": "npx tsx scripts/normalizar-detalles-csv.ts",
     "sugerir:fusion-categorias": "npx tsx scripts/sugerir-fusion-categorias.ts",
     "fusionar:comisiones": "npx tsx scripts/fusionar-comisiones.ts",
     "migrate:supabase-to-mongodb": "npx tsx scripts/migrate-supabase-to-mongodb.ts",

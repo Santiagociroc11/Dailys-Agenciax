@@ -1,0 +1,164 @@
+{
+  "decisiones": {
+    "PARTE JERWIN - ADELANTO AV VILLAS|AGENCIA X": {
+      "categoria": "REPARTICION UTILIDADES SOCIOS",
+      "detalle": "JERWIN"
+    },
+    "PLATA GIORGIO DEUDA|GIGI": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "GIGI"
+    },
+    "TRATO DANIEL CANIZO - GERSSON|GERSSON L1": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Trato Daniel Canizo"
+    },
+    "COSTO ANUAL PAYONEER|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Comisiones y costos bancarios"
+    },
+    "SALDO INICIAL|JSD": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "JSD"
+    },
+    "TOKECHAT|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "TOKECHAT"
+    },
+    "CAPTIONS|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "CAPTIONS"
+    },
+    "IPSTACK|GERSSON L4": {
+      "categoria": "Software y suscripciones",
+      "detalle": "IPSTACK"
+    },
+    "TIKTOK ADS|GERSSON L5": {
+      "categoria": "Gastos Publicitarios",
+      "detalle": "TikTok Ads"
+    },
+    "UCHAT|GERSSON L5": {
+      "categoria": "Software y suscripciones",
+      "detalle": "UCHAT"
+    },
+    "VOIP PRUEBA|GERSSON L5": {
+      "categoria": "Software y suscripciones",
+      "detalle": "VOIP"
+    },
+    "SENDMAILS|GERSSON L6": {
+      "categoria": "Software y suscripciones",
+      "detalle": "SENDMAILS"
+    },
+    "PAYONEER|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Comisiones y costos bancarios"
+    },
+    "DANIEL ADELANTO|GERSSON L6": {
+      "categoria": "REPARTICION UTILIDADES SOCIOS",
+      "detalle": "DANIEL"
+    },
+    "EASYPANEL|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "EASYPANEL"
+    },
+    "CONTRATOS ANDRES RENDON|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Nómina"
+    },
+    "Prestamo a un miembro del equipo|GERSSON L7": {
+      "categoria": "PRESTAMOS",
+      "detalle": "GERSSON L7"
+    },
+    "PAGO COMISIONES L6|GERSSON L6": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "PAGOS PENDIENTES"
+    },
+    "UTILIDADES ADRIANA|AGENCIA X": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "ADRIANA"
+    },
+    "Card charge (SUPABASE)|GERSSON L7": {
+      "categoria": "Software y suscripciones",
+      "detalle": "SUPABASE"
+    },
+    "Card charge (Paypro 448003688867)|GERSSON L7": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "WHATZAPPER"
+    },
+    "Pago por verificación de app hotapi|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "FIVEER"
+    },
+    "Card charge (READ - MEETING MANAGER)|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "IA Reuniones"
+    },
+    "UTILIDADES A 15 DE JULIO|FONDO LIBRE": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "INFOPRODUCTOS X"
+    },
+    "Card charge (CHATWOOT)|GERSSON L8": {
+      "categoria": "Software y suscripciones",
+      "detalle": "CHATWOOT"
+    },
+    "Card charge (COCOCUT)|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "COCOCUT"
+    },
+    "Card charge (HEYGEN TECHNOLOGY INC.)|GERSSON L8": {
+      "categoria": "Software y suscripciones",
+      "detalle": "HEYGEN"
+    },
+    "PAGO PLATAFORMA COPY|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "Plataforma Copy"
+    },
+    "TRASLADO EXCEDENTE PARA REPARTIR|FONDO LIBRE": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "EXCEDENTE"
+    },
+    "Sin descripción|": {
+      "categoria": "Sin clasificar",
+      "detalle": "Importación"
+    },
+    "Payment to Elevatech LLC|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CURSOS"
+    },
+    "Card charge (VANGUARD BUSINESS)|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Servicios profesionales"
+    },
+    "Card charge (WWW.ARTLIST.IO)|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "ARTLIST"
+    },
+    "Card charge (DLO*Hotmart)|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CURSO HOTMART"
+    },
+    "Card charge (LATAM AIRLINES COLOMBI)|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Viaje"
+    },
+    "Card charge (SGT*abestpdfcom)|AGENCIA X": {
+      "categoria": "Software y suscripciones",
+      "detalle": "PDF"
+    },
+    "Payment to Gersson Lopez|GERSSON L9": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CUADRE COMISIONES"
+    },
+    "Payment to Bancolombia (5406)|AGENCIA X": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Regalos Clientes"
+    },
+    "Card charge (www.fiverr.com)|SANTIAGO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Fiverr"
+    },
+    "Card charge (LLAMERICANSW)|AGENCIA X": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "AMERICAN SWIPE"
+    }
+  }
+}

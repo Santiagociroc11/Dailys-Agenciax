@@ -115,7 +115,7 @@ function buildChartTree(accounts: AcctChartAccount[]): ChartTreeNode[] {
   const ensurePath = (segments: string[]): ChartTreeNode => {
     let node: ChartTreeNode | null = null;
     for (let i = 0; i < segments.length; i++) {
-      const prefix = segments.slice(0, i + 1).join('');
+      const prefix = segments[i];
       if (i === 0) {
         if (!roots.has(prefix)) roots.set(prefix, getOrCreate(prefix, 1));
         node = roots.get(prefix)!;
@@ -194,8 +194,8 @@ function ChartAccountsTree({
               <span className="w-4" />
             )}
           </button>
-          <span className={`font-mono text-sm ${isVirtual ? 'text-gray-500 font-medium' : 'text-gray-800'}`}>
-            {node.code}
+          <span className={`font-mono text-sm min-w-[5rem] ${isVirtual ? 'text-gray-500 font-medium' : 'text-gray-800'}`}>
+            {node.account?.code ?? node.code}
           </span>
           <span className={`flex-1 min-w-0 truncate ${isVirtual ? 'text-gray-600' : 'text-gray-900'}`}>
             {node.account?.name ?? (node.label || node.code)}
@@ -1753,7 +1753,7 @@ export default function Contabilidad() {
   }
 
   async function handleRollback(batchId: string) {
-    if (!window.confirm('¿Revertir esta importación? Se eliminarán todos los asientos creados. Esta acción no se puede deshacer.')) return;
+    if (!window.confirm('¿Revertir esta importación? Se eliminarán todos los asientos, cuentas, categorías, entidades y cuentas de pago creados. Esta acción no se puede deshacer.')) return;
     setRollbackLoading(batchId);
     try {
       const res = await contabilidadApi.rollbackImport(batchId);

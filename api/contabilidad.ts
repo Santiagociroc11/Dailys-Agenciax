@@ -950,9 +950,9 @@ router.get('/pyg-matrix', async (req: Request, res: Response) => {
                 { $and: [{ $in: ['$codeFirst', ['5', '6']] }, { $ne: ['$entity_id', null] }] },
                 'B',
                 { $cond: [{ $in: ['$codeFirst', ['5', '6']] }, 'C', 'B'] },
-              ],
-            },
           ],
+        },
+      ],
         },
       },
     });
@@ -1647,9 +1647,9 @@ router.post('/import/preview', async (req: Request, res: Response) => {
     const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
     let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
     if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
-    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE|^CATEGOR[IÍ]A$/i.test(h));
     if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
-    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
+    const idxDetalle = headers.findIndex((h, i) => i !== idxCategoria && /^DETALLE$/i.test((h || '').trim()));
     const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
     const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
 
@@ -1674,12 +1674,14 @@ router.post('/import/preview', async (req: Request, res: Response) => {
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
       const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-      const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
-      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+      const categoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const detalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoria).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      const categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
-        ? `${subcategoria} (${categoriaDetalle})`
-        : (subcategoria || categoriaDetalle || 'Importación');
+      let categoryName = (subcategoria && categoria && subcategoria !== categoria)
+        ? `${subcategoria} (${categoria})`
+        : (subcategoria || categoria || 'Importación');
+      if (detalle) categoryName = `${categoryName} - ${detalle}`;
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
@@ -1700,7 +1702,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
         accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
       }
 
-      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoriaDetalle) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
       const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
 
       if (isTrasladoBancos) {
@@ -1809,7 +1811,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
                 skipNext = true;
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoriaDetalle.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
             }
@@ -1905,9 +1907,9 @@ router.post('/import', async (req: Request, res: Response) => {
     const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
     let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
     if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
-    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+    let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE|^CATEGOR[IÍ]A$/i.test(h));
     if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
-    if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
+    const idxDetalle = headers.findIndex((h, i) => i !== idxCategoria && /^DETALLE$/i.test((h || '').trim()));
     const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
     const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
 
@@ -1922,6 +1924,10 @@ router.post('/import', async (req: Request, res: Response) => {
 
     const batchRef = `imp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const journalEntryIds: string[] = [];
+    const createdChartAccountIds: string[] = [];
+    const createdEntityIds: string[] = [];
+    const createdCategoryIds: string[] = [];
+    const createdPaymentAccountIds: string[] = [];
 
     const entityByName = new Map<string, { id: string; type: string }>();
     const categoryByName = new Map<string, string>();
@@ -1949,6 +1955,7 @@ router.post('/import', async (req: Request, res: Response) => {
         return (existing as { id: string }).id;
       }
       const doc = await AcctChartAccount.create({ code, name: `Utilidades ${n}`, type: 'equity', is_header: false, sort_order: equityCounter });
+      createdChartAccountIds.push(doc.id);
       chartAccountByEquityName.set(n, doc.id);
       return doc.id;
     }
@@ -1964,15 +1971,65 @@ router.post('/import', async (req: Request, res: Response) => {
         return (existing as { id: string }).id;
       }
       const doc = await AcctChartAccount.create({ code, name: n, type: 'asset', is_header: false, sort_order: bankCounter });
+      createdChartAccountIds.push(doc.id);
       chartAccountByBankName.set(n, doc.id);
       return doc.id;
     }
+
+    const parentExpenseByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
+    const parentIncomeByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
 
     async function getOrCreateChartAccountForCategory(name: string, isExpense: boolean): Promise<string> {
       const n = (name || '').trim() || 'Importación';
       const key = `${n}::${isExpense ? 'expense' : 'income'}`;
       if (chartAccountByCategoryName.has(key)) return chartAccountByCategoryName.get(key)!;
+
+      const parts = n.includes(' - ') ? n.split(/ - (.+)/, 2).map((s) => s.trim()) : [n, ''];
+      const categoria = parts[0] || n;
+      const detalle = parts[1] || '';
+
       if (isExpense) {
+        if (detalle) {
+          let parent = parentExpenseByCategoria.get(categoria);
+          if (!parent) {
+            expenseCounter++;
+            const parentCode = `5195-${String(expenseCounter).padStart(2, '0')}`;
+            const existingParent = await AcctChartAccount.findOne({ code: parentCode }).select('id').lean().exec();
+            if (existingParent) {
+              parent = { id: (existingParent as { id: string }).id, code: parentCode, childCount: 0 };
+            } else {
+              const parentDoc = await AcctChartAccount.create({
+                code: parentCode,
+                name: categoria,
+                type: 'expense',
+                is_header: true,
+                parent_id: null,
+                sort_order: expenseCounter,
+              });
+              createdChartAccountIds.push(parentDoc.id);
+              parent = { id: parentDoc.id, code: parentCode, childCount: 0 };
+            }
+            parentExpenseByCategoria.set(categoria, parent);
+          }
+          parent.childCount++;
+          const childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
+          const existingChild = await AcctChartAccount.findOne({ code: childCode }).select('id').lean().exec();
+          if (existingChild) {
+            chartAccountByCategoryName.set(key, (existingChild as { id: string }).id);
+            return (existingChild as { id: string }).id;
+          }
+          const childDoc = await AcctChartAccount.create({
+            code: childCode,
+            name: detalle,
+            type: 'expense',
+            is_header: false,
+            parent_id: parent.id,
+            sort_order: parent.childCount,
+          });
+          createdChartAccountIds.push(childDoc.id);
+          chartAccountByCategoryName.set(key, childDoc.id);
+          return childDoc.id;
+        }
         expenseCounter++;
         const code = `5195-${String(expenseCounter).padStart(2, '0')}`;
         const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
@@ -1981,9 +2038,51 @@ router.post('/import', async (req: Request, res: Response) => {
           return (existing as { id: string }).id;
         }
         const doc = await AcctChartAccount.create({ code, name: n, type: 'expense', is_header: false, sort_order: expenseCounter });
+        createdChartAccountIds.push(doc.id);
         chartAccountByCategoryName.set(key, doc.id);
         return doc.id;
       } else {
+        if (detalle) {
+          let parent = parentIncomeByCategoria.get(categoria);
+          if (!parent) {
+            incomeCounter++;
+            const parentCode = `4135-${String(incomeCounter).padStart(2, '0')}`;
+            const existingParent = await AcctChartAccount.findOne({ code: parentCode }).select('id').lean().exec();
+            if (existingParent) {
+              parent = { id: (existingParent as { id: string }).id, code: parentCode, childCount: 0 };
+            } else {
+              const parentDoc = await AcctChartAccount.create({
+                code: parentCode,
+                name: categoria,
+                type: 'income',
+                is_header: true,
+                parent_id: null,
+                sort_order: incomeCounter,
+              });
+              createdChartAccountIds.push(parentDoc.id);
+              parent = { id: parentDoc.id, code: parentCode, childCount: 0 };
+            }
+            parentIncomeByCategoria.set(categoria, parent);
+          }
+          parent.childCount++;
+          const childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
+          const existingChild = await AcctChartAccount.findOne({ code: childCode }).select('id').lean().exec();
+          if (existingChild) {
+            chartAccountByCategoryName.set(key, (existingChild as { id: string }).id);
+            return (existingChild as { id: string }).id;
+          }
+          const childDoc = await AcctChartAccount.create({
+            code: childCode,
+            name: detalle,
+            type: 'income',
+            is_header: false,
+            parent_id: parent.id,
+            sort_order: parent.childCount,
+          });
+          createdChartAccountIds.push(childDoc.id);
+          chartAccountByCategoryName.set(key, childDoc.id);
+          return childDoc.id;
+        }
         incomeCounter++;
         const code = `4135-${String(incomeCounter).padStart(2, '0')}`;
         const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
@@ -1992,6 +2091,7 @@ router.post('/import', async (req: Request, res: Response) => {
           return (existing as { id: string }).id;
         }
         const doc = await AcctChartAccount.create({ code, name: n, type: 'income', is_header: false, sort_order: incomeCounter });
+        createdChartAccountIds.push(doc.id);
         chartAccountByCategoryName.set(key, doc.id);
         return doc.id;
       }
@@ -2008,6 +2108,7 @@ router.post('/import', async (req: Request, res: Response) => {
         return (existing as { id: string }).id;
       }
       const doc = await AcctEntity.create({ name: n, type, sort_order: 0 });
+      createdEntityIds.push(doc.id);
       if (created_by) {
         await AuditLog.create({ user_id: created_by, entity_type: 'acct_entity', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
       }
@@ -2024,6 +2125,7 @@ router.post('/import', async (req: Request, res: Response) => {
         return (existing as { id: string }).id;
       }
       const doc = await AcctCategory.create({ name: n, type: isExpense ? 'expense' : 'income', parent_id: null });
+      createdCategoryIds.push(doc.id);
       if (created_by) {
         await AuditLog.create({ user_id: created_by, entity_type: 'acct_category', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
       }
@@ -2040,6 +2142,7 @@ router.post('/import', async (req: Request, res: Response) => {
         return (existing as { id: string }).id;
       }
       const doc = await AcctPaymentAccount.create({ name: n, currency: default_currency });
+      createdPaymentAccountIds.push(doc.id);
       if (created_by) {
         await AuditLog.create({ user_id: created_by, entity_type: 'acct_payment_account', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
       }
@@ -2060,12 +2163,14 @@ router.post('/import', async (req: Request, res: Response) => {
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
       const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-      const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
-      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+      const categoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const detalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoria).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      let categoryName = (subcategoria && categoriaDetalle && subcategoria !== categoriaDetalle)
-        ? `${subcategoria} (${categoriaDetalle})`
-        : (subcategoria || categoriaDetalle || 'Importación');
+      let categoryName = (subcategoria && categoria && subcategoria !== categoria)
+        ? `${subcategoria} (${categoria})`
+        : (subcategoria || categoria || 'Importación');
+      if (detalle) categoryName = `${categoryName} - ${detalle}`;
       if (category_mapping && category_mapping[categoryName]) {
         categoryName = category_mapping[categoryName];
       }
@@ -2093,7 +2198,7 @@ router.post('/import', async (req: Request, res: Response) => {
         accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
       }
 
-      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoriaDetalle) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
       const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
 
       if (isTrasladoBancos) {
@@ -2212,18 +2317,18 @@ router.post('/import', async (req: Request, res: Response) => {
                 skipNext = true;
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoriaDetalle.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
             }
             const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
             const equityDestinoId = await getOrCreateChartAccountForEquity(entityDestino);
             const entry = await AcctJournalEntry.create({
-              date,
-              description: descripcion.slice(0, 500),
+            date,
+            description: descripcion.slice(0, 500),
               reference: `Import ${i + 1} (traslado utilidades)`,
-              created_by: created_by ?? null,
-            });
+            created_by: created_by ?? null,
+          });
             journalEntryIds.push(entry.id);
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: await getOrCreateEntity(entityDestino), debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: await getOrCreateEntity(entityOrigen), debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
@@ -2259,6 +2364,10 @@ router.post('/import', async (req: Request, res: Response) => {
       created_by: created_by ?? null,
       created_count: created,
       skipped_count: skipped,
+      created_chart_account_ids: createdChartAccountIds,
+      created_entity_ids: createdEntityIds,
+      created_category_ids: createdCategoryIds,
+      created_payment_account_ids: createdPaymentAccountIds,
     });
 
     res.json({
@@ -2300,16 +2409,55 @@ router.delete('/import/:batchId/rollback', async (req: Request, res: Response) =
       res.status(404).json({ error: 'Import no encontrado' });
       return;
     }
-    const ids = (batch as { journal_entry_ids: string[] }).journal_entry_ids || [];
-    if (ids.length === 0) {
+    const b = batch as {
+      journal_entry_ids?: string[];
+      created_chart_account_ids?: string[];
+      created_entity_ids?: string[];
+      created_category_ids?: string[];
+      created_payment_account_ids?: string[];
+    };
+    const journalEntryIds = b.journal_entry_ids || [];
+    const createdChartIds = b.created_chart_account_ids || [];
+    const createdEntityIds = b.created_entity_ids || [];
+    const createdCategoryIds = b.created_category_ids || [];
+    const createdPaymentIds = b.created_payment_account_ids || [];
+
+    if (journalEntryIds.length === 0 && createdChartIds.length === 0 && createdEntityIds.length === 0 && createdCategoryIds.length === 0 && createdPaymentIds.length === 0) {
       await AcctImportBatch.findOneAndDelete({ id: batchId }).exec();
-      res.json({ rolled_back: 0, message: 'Import no tenía asientos' });
+      res.json({ rolled_back: 0, message: 'Import no tenía asientos ni registros creados' });
       return;
     }
-    await AcctJournalEntryLine.deleteMany({ journal_entry_id: { $in: ids } }).exec();
-    const result = await AcctJournalEntry.deleteMany({ id: { $in: ids } }).exec();
+
+    let rolledBack = 0;
+
+    if (journalEntryIds.length > 0) {
+      await AcctJournalEntryLine.deleteMany({ journal_entry_id: { $in: journalEntryIds } }).exec();
+      const result = await AcctJournalEntry.deleteMany({ id: { $in: journalEntryIds } }).exec();
+      rolledBack += result.deletedCount ?? journalEntryIds.length;
+    }
+
+    if (createdChartIds.length > 0) {
+      const chartAccounts = await AcctChartAccount.find({ id: { $in: createdChartIds } }).select('id parent_id').lean().exec();
+      const childIds = chartAccounts.filter((a) => a.parent_id && createdChartIds.includes(a.parent_id)).map((a) => a.id);
+      const parentIds = chartAccounts.filter((a) => !a.parent_id || !createdChartIds.includes(a.parent_id)).map((a) => a.id);
+      const toDelete = [...childIds, ...parentIds];
+      if (toDelete.length > 0) {
+        await AcctChartAccount.deleteMany({ id: { $in: toDelete } }).exec();
+      }
+    }
+
+    if (createdCategoryIds.length > 0) {
+      await AcctCategory.deleteMany({ id: { $in: createdCategoryIds } }).exec();
+    }
+    if (createdEntityIds.length > 0) {
+      await AcctEntity.deleteMany({ id: { $in: createdEntityIds } }).exec();
+    }
+    if (createdPaymentIds.length > 0) {
+      await AcctPaymentAccount.deleteMany({ id: { $in: createdPaymentIds } }).exec();
+    }
+
     await AcctImportBatch.findOneAndDelete({ id: batchId }).exec();
-    res.json({ rolled_back: result.deletedCount ?? ids.length });
+    res.json({ rolled_back: rolledBack });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });

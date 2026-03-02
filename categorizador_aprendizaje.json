@@ -1,0 +1,505 @@
+{
+  "mappings": {
+    "VUELOS HOTMART": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Viaje",
+      "count": 1
+    },
+    "VIAJE DANIEL": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Viaje Daniel",
+      "count": 1
+    },
+    "VIAJE FRAN": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Viaje Fran",
+      "count": 1
+    },
+    "VIAJE MEXICO DANIEL": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Viaje México",
+      "count": 1
+    },
+    "COWORKING": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Coworking",
+      "count": 1
+    },
+    "COMIDA EQUIPO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Comida del equipo",
+      "count": 1
+    },
+    "COMIDA GERSSON": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Comida del equipo",
+      "count": 1
+    },
+    "SALDOS INICIALES": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "Saldos Iniciales",
+      "count": 1
+    },
+    "CURSOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CURSOS",
+      "count": 1
+    },
+    "PAGOS PENDIENTES": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "PAGOS PENDIENTES",
+      "count": 1
+    },
+    "HOSTINGER": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "HOSTINGUER",
+      "count": 1
+    },
+    "MANYCHAT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "MANYCHAT",
+      "count": 1
+    },
+    "PARTE": {
+      "categoria": "REPARTICION UTILIDADES SOCIOS",
+      "detalle": "FRAN",
+      "count": 1
+    },
+    "PLATA": {
+      "categoria": "Ingresos",
+      "detalle": "PLATA GIORGIO DEUDA",
+      "count": 1
+    },
+    "TRASLADO": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "JSD",
+      "count": 1
+    },
+    "RETIRO HOTMART": {
+      "categoria": "Retiros / Hotmart",
+      "detalle": "RETIRO HOTMART",
+      "count": 1
+    },
+    "INGRESOS PROYECTO": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "JSD Y VCAPITAL",
+      "count": 1
+    },
+    "CORTE": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "Vcapital",
+      "count": 1
+    },
+    "SOFTWARE": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "ZOOM",
+      "count": 1
+    },
+    "TRASLADOS": {
+      "categoria": "TRASLADOS",
+      "detalle": "TRASLADOS",
+      "count": 1
+    },
+    "TRATO": {
+      "categoria": "GASTOS DE LA AGENCIA",
+      "detalle": "TRATO DANIEL CANIZO",
+      "count": 1
+    },
+    "NOMINA": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Nómina",
+      "count": 1
+    },
+    "MAILERLITE": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "MAILERLITE",
+      "count": 1
+    },
+    "CHATGPT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CHATGPT",
+      "count": 1
+    },
+    "STREAMYARD": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "STREAMYARD",
+      "count": 1
+    },
+    "LEADTRACKER": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "LEADTRACKER",
+      "count": 1
+    },
+    "FB ADS": {
+      "categoria": "GASTOS PUBLICITARIOS",
+      "detalle": "FB ADS",
+      "count": 1
+    },
+    "SERVICIOS": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "DEVZAPP",
+      "count": 1
+    },
+    "COSTO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "COSTO ANUAL PAYONEER",
+      "count": 1
+    },
+    "SALDO": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "VENTA JSD Y COMPENSACION INICIAL",
+      "count": 1
+    },
+    "REPARTICION": {
+      "categoria": "REPARTICION UTILIDADES SOCIOS",
+      "detalle": "JOSHUA",
+      "count": 1
+    },
+    "TOKECHAT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "TOKECHAT",
+      "count": 1
+    },
+    "COSTOS": {
+      "categoria": "GASTOS DE LA AGENCIA",
+      "detalle": "CAPACITACIONES",
+      "count": 1
+    },
+    "INGRESOS HOTMART": {
+      "categoria": "Ingresos por Proyecto / Hotmart",
+      "detalle": "VENTAS DICIEMBRE HOTMART",
+      "count": 1
+    },
+    "ADVERONIX": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "ADVERONIX",
+      "count": 1
+    },
+    "GASTOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CONSTITUCIÓN EMPRESA",
+      "count": 1
+    },
+    "STAPE": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "STAPE",
+      "count": 1
+    },
+    "CAPCUT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CAPCUT",
+      "count": 1
+    },
+    "GASTO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "GASTO NO IDENTIFICADO",
+      "count": 1
+    },
+    "DOMINIOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "DOMINIOS",
+      "count": 1
+    },
+    "FLODESK": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "FLODESK",
+      "count": 1
+    },
+    "WP": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "WP ROCKET",
+      "count": 1
+    },
+    "VIAJE": {
+      "categoria": "GASTOS DE LA AGENCIA",
+      "detalle": "VIAJES",
+      "count": 1
+    },
+    "CAPTIONS": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CAPTIONS",
+      "count": 1
+    },
+    "IPSTACK": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "IPSTACK",
+      "count": 1
+    },
+    "GOOGLE": {
+      "categoria": "GASTOS PUBLICITARIOS",
+      "detalle": "GOOGLE ADS",
+      "count": 1
+    },
+    "TIKTOK": {
+      "categoria": "GASTOS PUBLICITARIOS",
+      "detalle": "TIKTOK ADS",
+      "count": 1
+    },
+    "UCHAT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "UCHAT",
+      "count": 1
+    },
+    "VOIP": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "VOIP",
+      "count": 1
+    },
+    "SENDMAILS": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "SENDMAILS",
+      "count": 1
+    },
+    "PAYONEER": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "AGENCIA X",
+      "count": 1
+    },
+    "DEUDA": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "DEUDA JSD REVOLUTION",
+      "count": 1
+    },
+    "DANIEL": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "DANIEL ADELANTO",
+      "count": 1
+    },
+    "PAGO": {
+      "categoria": "Ingresos por Proyecto",
+      "detalle": "FEE AGENCIA",
+      "count": 1
+    },
+    "EASYPANEL": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "EASYPANEL",
+      "count": 1
+    },
+    "GREATPAGES": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "GREATPAGES",
+      "count": 1
+    },
+    "VPS": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "HOSTINGUER",
+      "count": 1
+    },
+    "SUELDOS AGENCIA": {
+      "categoria": "GASTOS DE LA AGENCIA",
+      "detalle": "NOMINA",
+      "count": 1
+    },
+    "FACEBK": {
+      "categoria": "GASTOS PUBLICITARIOS",
+      "detalle": "FB ADS",
+      "count": 1
+    },
+    "SUELDOS": {
+      "categoria": "GASTOS DE LA AGENCIA",
+      "detalle": "NOMINA",
+      "count": 1
+    },
+    "CONTRATOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Contratos",
+      "count": 1
+    },
+    "THRIVE": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "PRESTAMO A GERSSON DE THRIVE",
+      "count": 1
+    },
+    "PAGOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "PAGOS COMISIONES",
+      "count": 1
+    },
+    "CURSOR": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CURSOR",
+      "count": 1
+    },
+    "NINJABR": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "NINJABR",
+      "count": 1
+    },
+    "[ADRIANA] UTILIDADES 15 MAYO": {
+      "categoria": "INGRESOS POR PROEYCTO",
+      "detalle": "ADRIANA",
+      "count": 1
+    },
+    "SUPABASE": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "SUPABASE",
+      "count": 1
+    },
+    "WHATZAPPER": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "WHATZAPPER",
+      "count": 1
+    },
+    "FIVEER": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "FIVEER",
+      "count": 1
+    },
+    "[ADRIANA] UTILIDAD A JUNIO 30": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "ADRIANA",
+      "count": 1
+    },
+    "UTILIDAD": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "ADRIANA",
+      "count": 1
+    },
+    "IA": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "IA REUNIONES",
+      "count": 1
+    },
+    "CLAUDE": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CLAUDE",
+      "count": 1
+    },
+    "[INFOPRODUCTOS X] UTILIDADES 15 JUN": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "INFOPRODUCTOS X",
+      "count": 1
+    },
+    "[GERSSON] UTILIDAD VD": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "GERSSON",
+      "count": 1
+    },
+    "REPOSICIÓN": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "REPOSICION",
+      "count": 1
+    },
+    "WPROCKET": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "WP ROCKET",
+      "count": 1
+    },
+    "CHATWOOT": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "CHATWOOT",
+      "count": 1
+    },
+    "SENDFLOW": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "SENDFLOW",
+      "count": 1
+    },
+    "EXTENSION": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "COCOCUT",
+      "count": 1
+    },
+    "HEYGEN": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "HEYGEN",
+      "count": 1
+    },
+    "PANDAVIDEO": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "PANDAVIDEO",
+      "count": 1
+    },
+    "JUEGO": {
+      "categoria": "PRESTAMOS",
+      "detalle": "SANTIAGO",
+      "count": 1
+    },
+    "PLATAFORMA": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "PLATAFORMA COPY",
+      "count": 1
+    },
+    "DOMINIO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "DOMINIO",
+      "count": 1
+    },
+    "OPENROUTER": {
+      "categoria": "PRESTAMOS",
+      "detalle": "SANTIAGO",
+      "count": 1
+    },
+    "[ADRIANA] UTILIDADES 15 OCTUBRE": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "ADRIANA",
+      "count": 1
+    },
+    "EXCEDENTE": {
+      "categoria": "CORTE UTILIDADES",
+      "detalle": "EXCEDENTE",
+      "count": 1
+    },
+    "IMPORTACIÓN": {
+      "categoria": "Sin clasificar",
+      "detalle": "Importación",
+      "count": 1
+    },
+    "MENTORIA": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "MENTORIA JUANITA",
+      "count": 1
+    },
+    "CONTADORES": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CONTADORES LLC",
+      "count": 1
+    },
+    "ARLIST": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "ARTLIST",
+      "count": 1
+    },
+    "CURSO": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CURSO HOTMART",
+      "count": 1
+    },
+    "PRUEBA": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "PRUEBA PDF",
+      "count": 1
+    },
+    "CUADRE": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "CUADRE COMISIONES",
+      "count": 1
+    },
+    "REGALOS": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "Regalos Clientes",
+      "count": 1
+    },
+    "NIFTY": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "NIFTY",
+      "count": 1
+    },
+    "FIVER": {
+      "categoria": "Gastos de la Agencia",
+      "detalle": "FIVER",
+      "count": 1
+    },
+    "NIFTYIMAGES": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "NIFTY",
+      "count": 1
+    },
+    "AMERICA": {
+      "categoria": "Sotware y suscripciones",
+      "detalle": "AMERICAN SWIPE",
+      "count": 1
+    }
+  },
+  "siempre_preguntar": []
+}

@@ -52,9 +52,9 @@ const idxProyecto = headers.findIndex((h) => /PROYECTO/i.test(h));
 const idxSubcategoria = headers.findIndex((h) => /SUBCATEGORIA/i.test(h));
 let idxDescripcion = headers.findIndex((h) => /DESCRIPCI[OÓ]N/i.test(h));
 if (idxDescripcion < 0) idxDescripcion = headers.findIndex((h) => /NOTA|CONCEPTO|OBSERVACI[OÓ]N/i.test(h));
-let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE/i.test(h));
+let idxCategoria = headers.findIndex((h) => /CATEGOR[IÍ]A\/DETALLE|^CATEGOR[IÍ]A$/i.test(h));
 if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^DETALLE$/i.test(h));
-if (idxCategoria < 0) idxCategoria = headers.findIndex((h) => /^CATEGOR[IÍ]A$/i.test(h));
+const idxDetalle = headers.findIndex((h, i) => i !== idxCategoria && /^DETALLE$/i.test((h || '').trim()));
 const idxTipo = headers.findIndex((h) => /TIPO/i.test(h));
 const idxImporteContable = headers.findIndex((h) => /IMPORTE\s*CONTABLE/i.test(h));
 const accountColStart = idxImporteContable >= 0 ? idxImporteContable + 1 : 7;
@@ -93,10 +93,12 @@ for (let i = headerRow + 1; i < records.length; i++) {
   const fechaStr = (row[idxFecha] || '').trim();
   let proyectoStr = (row[idxProyecto] || '').trim();
   const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-  const categoriaDetalle = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
-  const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoriaDetalle).trim() || 'Sin descripción';
+  const categoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+  const detalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
+  const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoria).trim() || 'Sin descripción';
   const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-  const categoryName = subcategoria || categoriaDetalle || 'Importación';
+  let categoryName = subcategoria || categoria || 'Importación';
+  if (detalle) categoryName = `${categoryName} - ${detalle}`;
 
   if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
   if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
@@ -108,7 +110,7 @@ for (let i = headerRow + 1; i < records.length; i++) {
   }
 
   if (descripcion === 'Sin descripción') {
-    const motivo = subcategoria ? `DESCRIPCION y CATEGORIA/DETALLE vacíos (SUBCATEGORIA="${subcategoria}")` : 'DESCRIPCION y CATEGORIA/DETALLE vacíos';
+    const motivo = subcategoria ? `DESCRIPCION y CATEGORIA vacíos (SUBCATEGORIA="${subcategoria}")` : 'DESCRIPCION y CATEGORIA vacíos';
     descripcionesProblema.push({ linea: i + 1, proyecto: proyectoStr, desc: subcategoria, motivo });
   }
 
