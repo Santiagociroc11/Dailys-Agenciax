@@ -1664,6 +1664,12 @@ router.post('/import/preview', async (req: Request, res: Response) => {
     const preview: ImportPreviewItem[] = [];
     let skipped = 0;
     let skipNext = false;
+    const COP_RE_PREVIEW = /BANCOLOMBIA|DAVIVIENDA|NEQUI\s*COP/i;
+    const previewCurrency = (acctName: string, amt: number): string => {
+      if (COP_RE_PREVIEW.test(acctName)) return 'COP';
+      if (amt > 100000) return 'COP';
+      return default_currency;
+    };
 
     for (let i = headerRow + 1; i < records.length; i++) {
       if (skipNext) {
@@ -1674,17 +1680,22 @@ router.post('/import/preview', async (req: Request, res: Response) => {
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
       const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-      const categoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
-      const detalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
-      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoria).trim() || 'Sin descripción';
+      const rawCategoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const rawDetalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || rawCategoria).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      let categoryName = (subcategoria && categoria && subcategoria !== categoria)
-        ? `${subcategoria} (${categoria})`
-        : (subcategoria || categoria || 'Importación');
-      if (detalle) categoryName = `${categoryName} - ${detalle}`;
+
+      let catForAccount = (subcategoria && rawCategoria && subcategoria !== rawCategoria)
+        ? `${subcategoria} (${rawCategoria})`
+        : (subcategoria || rawCategoria || 'Importación');
+      let detForAccount = rawDetalle;
+      const categoryName = detForAccount ? `${catForAccount} - ${detForAccount}` : catForAccount;
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
+
+      const tipoForzado = /SALIDA/i.test(tipoStr) && !/CONTABLE/i.test(tipoStr) ? 'gasto'
+        : /INGRESO/i.test(tipoStr) && !/CONTABLE/i.test(tipoStr) ? 'ingreso' : null;
 
       const date = parseSpanishDate(fechaStr);
       if (!date) {
@@ -1702,11 +1713,14 @@ router.post('/import/preview', async (req: Request, res: Response) => {
         accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
       }
 
-      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
-      const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
-
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(rawCategoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+      const totalSum = accountAmounts.reduce((s, a) => s + a.amount, 0);
+      const totalAbs = accountAmounts.reduce((s, a) => s + Math.abs(a.amount), 0);
+      const isTrasladoBancos = accountAmounts.length >= 2 && (
+        Math.abs(totalSum) < 0.02 || (totalAbs > 0 && Math.abs(totalSum) / totalAbs < 0.005)
+      );
       if (isTrasladoBancos) {
-        const currency = accountAmounts.some((a) => Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
+        const currency = accountAmounts.some((a) => COP_RE_PREVIEW.test(a.accountName) || Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
         const cuentas = accountAmounts.map((a) => `${a.accountName}: ${a.amount > 0 ? '+' : ''}${a.amount}`).join(' ↔ ');
         preview.push({
           rowIndex: i + 1,
@@ -1721,7 +1735,8 @@ router.post('/import/preview', async (req: Request, res: Response) => {
       } else if (accountAmounts.length === 1) {
         const { accountName, amount } = accountAmounts[0];
         const amt = Math.abs(amount);
-        const currency = amt > 100000 ? 'COP' : default_currency;
+        const currency = previewCurrency(accountName, amt);
+        const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
         if (isReparto) {
           preview.push({
             rowIndex: i + 1,
@@ -1736,7 +1751,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
             explicacion: `Pago a socio/colaborador desde utilidades (no es gasto operativo)`,
           });
         } else {
-          const tipo = amount > 0 ? 'ingreso' : 'gasto';
+          const tipo = isExpense ? 'gasto' : 'ingreso';
           preview.push({
             rowIndex: i + 1,
             fecha: fechaStr,
@@ -1747,15 +1762,16 @@ router.post('/import/preview', async (req: Request, res: Response) => {
             concepto: categoryName,
             monto: amt,
             currency,
-            explicacion: amount > 0
-              ? `Ingreso: entra dinero a ${accountName} por ${categoryName}`
-              : `Gasto: sale dinero de ${accountName} por ${categoryName}`,
+            explicacion: isExpense
+              ? `Gasto: sale dinero de ${accountName} por ${categoryName}`
+              : `Ingreso: entra dinero a ${accountName} por ${categoryName}`,
           });
         }
       } else if (accountAmounts.length > 1 && !isTrasladoBancos) {
         for (const { accountName, amount } of accountAmounts) {
           const amt = Math.abs(amount);
-          const currency = amt > 100000 ? 'COP' : default_currency;
+          const currency = previewCurrency(accountName, amt);
+          const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
           if (isReparto) {
             preview.push({
               rowIndex: i + 1,
@@ -1770,7 +1786,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
               explicacion: `Pago a socio desde utilidades`,
             });
           } else {
-            const tipo = amount > 0 ? 'ingreso' : 'gasto';
+            const tipo = isExpense ? 'gasto' : 'ingreso';
             preview.push({
               rowIndex: i + 1,
               fecha: fechaStr,
@@ -1781,7 +1797,7 @@ router.post('/import/preview', async (req: Request, res: Response) => {
               concepto: categoryName,
               monto: amt,
               currency,
-              explicacion: amount > 0 ? `Ingreso en ${accountName}` : `Gasto desde ${accountName}`,
+              explicacion: isExpense ? `Gasto desde ${accountName}` : `Ingreso en ${accountName}`,
             });
           }
         }
@@ -1806,12 +1822,17 @@ router.post('/import/preview', async (req: Request, res: Response) => {
               const nextTipo = (idxTipo >= 0 ? (nextRow[idxTipo] || '') : '').trim();
               const nextProyecto = (nextRow[idxProyecto] || '').trim();
               const nextImporte = parseAmount((idxImporteContable >= 0 ? (nextRow[idxImporteContable] || '') : '').trim());
-              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null && Math.abs(Math.abs(nextImporte) - amt) < 0.02) {
+              const nextDesc = (idxDescripcion >= 0 ? (nextRow[idxDescripcion] || '') : '').trim();
+              const descSimilar = descripcion.slice(0, 30).toUpperCase() === nextDesc.slice(0, 30).toUpperCase()
+                || /UTILIDADES|CORTE/i.test(nextDesc);
+              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null
+                && Math.abs(Math.abs(nextImporte) - amt) < 0.02 && descSimilar) {
                 entityDestino = nextProyecto || entityDestino;
                 skipNext = true;
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i)
+                || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
             }
@@ -1929,30 +1950,91 @@ router.post('/import', async (req: Request, res: Response) => {
     const createdCategoryIds: string[] = [];
     const createdPaymentAccountIds: string[] = [];
 
+    // ── Pre-carga masiva de registros existentes (elimina N+1 queries) ──
     const entityByName = new Map<string, { id: string; type: string }>();
     const categoryByName = new Map<string, string>();
     const accountByName = new Map<string, string>();
     const chartAccountByBankName = new Map<string, string>();
     const chartAccountByCategoryName = new Map<string, string>();
-    const maxBank = await AcctChartAccount.findOne({ code: /^1110-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
-    const maxIncome = await AcctChartAccount.findOne({ code: /^4135-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
-    const maxExpense = await AcctChartAccount.findOne({ code: /^5195-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
-    const maxEquity = await AcctChartAccount.findOne({ code: /^3605-\d+$/ }).sort({ code: -1 }).select('code').lean().exec();
-    let bankCounter = maxBank?.code ? parseInt(maxBank.code.split('-')[1] || '0', 10) : 0;
-    let incomeCounter = maxIncome?.code ? parseInt(maxIncome.code.split('-')[1] || '0', 10) : 0;
-    let expenseCounter = maxExpense?.code ? parseInt(maxExpense.code.split('-')[1] || '0', 10) : 0;
-    let equityCounter = maxEquity?.code ? parseInt(maxEquity.code.split('-')[1] || '0', 10) : 0;
     const chartAccountByEquityName = new Map<string, string>();
+    const parentExpenseByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
+    const parentIncomeByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
 
-    async function getOrCreateChartAccountForEquity(entityName: string): Promise<string> {
+    const [preEntities, preCategories, preAccounts, preChartAccounts] = await Promise.all([
+      AcctEntity.find({}).select('id name type').lean().exec(),
+      AcctCategory.find({}).select('id name parent_id').lean().exec(),
+      AcctPaymentAccount.find({}).select('id name').lean().exec(),
+      AcctChartAccount.find({}).select('id code name type parent_id is_header').lean().exec(),
+    ]);
+    for (const e of preEntities) {
+      entityByName.set((e as any).name, { id: (e as any).id, type: (e as any).type });
+    }
+    for (const c of preCategories) {
+      categoryByName.set((c as any).name, (c as any).id);
+    }
+    for (const a of preAccounts) {
+      accountByName.set((a as any).name, (a as any).id);
+    }
+    let bankCounter = 0, incomeCounter = 0, expenseCounter = 0, equityCounter = 0;
+    for (const ca of preChartAccounts) {
+      const a = ca as any;
+      const m2 = a.code.match(/^(\d{4})-(\d{2})$/);
+      if (m2) {
+        const num = parseInt(m2[2], 10);
+        if (m2[1] === '1110') { if (num > bankCounter) bankCounter = num; chartAccountByBankName.set(a.name, a.id); }
+        if (m2[1] === '4135') { if (num > incomeCounter) incomeCounter = num; }
+        if (m2[1] === '5195') { if (num > expenseCounter) expenseCounter = num; }
+        if (m2[1] === '3605') { if (num > equityCounter) equityCounter = num; chartAccountByEquityName.set(a.name.replace(/^Utilidades\s+/i, '').trim() || 'Sin asignar', a.id); }
+      }
+      if (a.is_header && /^(5195|4135)-\d{2}$/.test(a.code)) {
+        const childCount = preChartAccounts.filter((c: any) => (c as any).parent_id === a.id).length;
+        const map = a.type === 'expense' ? parentExpenseByCategoria : parentIncomeByCategoria;
+        map.set(a.name, { id: a.id, code: a.code, childCount });
+      }
+      if (!a.is_header && a.parent_id && /^(5195|4135)-\d{2}-\d{2}$/.test(a.code)) {
+        const parent = preChartAccounts.find((p: any) => (p as any).id === a.parent_id) as any;
+        if (parent) {
+          const typeStr = a.type === 'expense' ? 'expense' : 'income';
+          chartAccountByCategoryName.set(`${parent.name}\x00${a.name}\x00${typeStr}`, a.id);
+        }
+      }
+      if (!a.is_header && !a.parent_id && /^(5195|4135)-\d{2}$/.test(a.code)) {
+        const typeStr = a.type === 'expense' ? 'expense' : 'income';
+        chartAccountByCategoryName.set(`${a.name}\x00\x00${typeStr}`, a.id);
+      }
+    }
+
+    // Protección contra duplicados: hashear entradas importadas existentes
+    const existingImportEntries = await AcctJournalEntry.find({ reference: /^Import / }).select('date description').lean().exec();
+    const existingHashes = new Set<string>();
+    for (const e of existingImportEntries) {
+      const d = (e as any).date instanceof Date ? (e as any).date.toISOString().slice(0, 10) : '';
+      existingHashes.add(`${d}\x00${((e as any).description || '').slice(0, 200)}`);
+    }
+
+    // Detección de moneda por nombre de cuenta bancaria
+    const COP_ACCOUNT_RE = /BANCOLOMBIA|DAVIVIENDA|NEQUI\s*COP/i;
+    const detectCurrency = (accountName: string, amt: number): string => {
+      if (COP_ACCOUNT_RE.test(accountName)) return 'COP';
+      if (amt > 100000) return 'COP';
+      return default_currency;
+    };
+
+    // ── Funciones getOrCreate (buscan por nombre, no por código) ──
+
+    const getOrCreateChartAccountForEquity = async (entityName: string): Promise<string> => {
       const n = (entityName || '').trim() || 'Sin asignar';
       if (chartAccountByEquityName.has(n)) return chartAccountByEquityName.get(n)!;
-      equityCounter++;
-      const code = `3605-${String(equityCounter).padStart(2, '0')}`;
-      const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+      const existing = await AcctChartAccount.findOne({ name: `Utilidades ${n}`, type: 'equity' }).select('id').lean().exec();
       if (existing) {
-        chartAccountByEquityName.set(n, (existing as { id: string }).id);
-        return (existing as { id: string }).id;
+        chartAccountByEquityName.set(n, (existing as any).id);
+        return (existing as any).id;
+      }
+      equityCounter++;
+      let code = `3605-${String(equityCounter).padStart(2, '0')}`;
+      while (await AcctChartAccount.findOne({ code }).select('id').lean().exec()) {
+        equityCounter++;
+        code = `3605-${String(equityCounter).padStart(2, '0')}`;
       }
       const doc = await AcctChartAccount.create({ code, name: `Utilidades ${n}`, type: 'equity', is_header: false, sort_order: equityCounter });
       createdChartAccountIds.push(doc.id);
@@ -1960,15 +2042,19 @@ router.post('/import', async (req: Request, res: Response) => {
       return doc.id;
     }
 
-    async function getOrCreateChartAccountForBank(name: string): Promise<string> {
+    const getOrCreateChartAccountForBank = async (name: string): Promise<string> => {
       const n = (name || '').trim() || 'Sin cuenta';
       if (chartAccountByBankName.has(n)) return chartAccountByBankName.get(n)!;
-      bankCounter++;
-      const code = `1110-${String(bankCounter).padStart(2, '0')}`;
-      const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
+      const existing = await AcctChartAccount.findOne({ name: n, type: 'asset' }).select('id').lean().exec();
       if (existing) {
-        chartAccountByBankName.set(n, (existing as { id: string }).id);
-        return (existing as { id: string }).id;
+        chartAccountByBankName.set(n, (existing as any).id);
+        return (existing as any).id;
+      }
+      bankCounter++;
+      let code = `1110-${String(bankCounter).padStart(2, '0')}`;
+      while (await AcctChartAccount.findOne({ code }).select('id').lean().exec()) {
+        bankCounter++;
+        code = `1110-${String(bankCounter).padStart(2, '0')}`;
       }
       const doc = await AcctChartAccount.create({ code, name: n, type: 'asset', is_header: false, sort_order: bankCounter });
       createdChartAccountIds.push(doc.id);
@@ -1976,136 +2062,84 @@ router.post('/import', async (req: Request, res: Response) => {
       return doc.id;
     }
 
-    const parentExpenseByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
-    const parentIncomeByCategoria = new Map<string, { id: string; code: string; childCount: number }>();
-
-    async function getOrCreateChartAccountForCategory(name: string, isExpense: boolean): Promise<string> {
-      const n = (name || '').trim() || 'Importación';
-      const key = `${n}::${isExpense ? 'expense' : 'income'}`;
+    const getOrCreateChartAccountForCategory = async (categoria: string, detalle: string, isExpense: boolean): Promise<string> => {
+      const catName = (categoria || '').trim() || 'Importación';
+      const detName = (detalle || '').trim();
+      const acctType = isExpense ? 'expense' : 'income';
+      const codePrefix = isExpense ? '5195' : '4135';
+      const parentMap = isExpense ? parentExpenseByCategoria : parentIncomeByCategoria;
+      const key = `${catName}\x00${detName}\x00${acctType}`;
       if (chartAccountByCategoryName.has(key)) return chartAccountByCategoryName.get(key)!;
 
-      const parts = n.includes(' - ') ? n.split(/ - (.+)/, 2).map((s) => s.trim()) : [n, ''];
-      const categoria = parts[0] || n;
-      const detalle = parts[1] || '';
-
-      if (isExpense) {
-        if (detalle) {
-          let parent = parentExpenseByCategoria.get(categoria);
-          if (!parent) {
-            expenseCounter++;
-            const parentCode = `5195-${String(expenseCounter).padStart(2, '0')}`;
-            const existingParent = await AcctChartAccount.findOne({ code: parentCode }).select('id').lean().exec();
-            if (existingParent) {
-              parent = { id: (existingParent as { id: string }).id, code: parentCode, childCount: 0 };
-            } else {
-              const parentDoc = await AcctChartAccount.create({
-                code: parentCode,
-                name: categoria,
-                type: 'expense',
-                is_header: true,
-                parent_id: null,
-                sort_order: expenseCounter,
-              });
-              createdChartAccountIds.push(parentDoc.id);
-              parent = { id: parentDoc.id, code: parentCode, childCount: 0 };
+      if (detName) {
+        let parent = parentMap.get(catName);
+        if (!parent) {
+          const existingParent = await AcctChartAccount.findOne({ name: catName, type: acctType, is_header: true }).select('id code').lean().exec();
+          if (existingParent) {
+            const childCount = await AcctChartAccount.countDocuments({ parent_id: (existingParent as any).id }).exec();
+            parent = { id: (existingParent as any).id, code: (existingParent as any).code, childCount };
+          } else {
+            if (isExpense) expenseCounter++; else incomeCounter++;
+            let parentCode = `${codePrefix}-${String(isExpense ? expenseCounter : incomeCounter).padStart(2, '0')}`;
+            while (await AcctChartAccount.findOne({ code: parentCode }).select('id').lean().exec()) {
+              if (isExpense) expenseCounter++; else incomeCounter++;
+              parentCode = `${codePrefix}-${String(isExpense ? expenseCounter : incomeCounter).padStart(2, '0')}`;
             }
-            parentExpenseByCategoria.set(categoria, parent);
+            const parentDoc = await AcctChartAccount.create({
+              code: parentCode, name: catName, type: acctType, is_header: true, parent_id: null,
+              sort_order: isExpense ? expenseCounter : incomeCounter,
+            });
+            createdChartAccountIds.push(parentDoc.id);
+            parent = { id: parentDoc.id, code: parentCode, childCount: 0 };
           }
+          parentMap.set(catName, parent);
+        }
+        const existingChild = await AcctChartAccount.findOne({ name: detName, parent_id: parent.id, type: acctType }).select('id').lean().exec();
+        if (existingChild) {
+          chartAccountByCategoryName.set(key, (existingChild as any).id);
+          return (existingChild as any).id;
+        }
+        parent.childCount++;
+        let childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
+        while (await AcctChartAccount.findOne({ code: childCode }).select('id').lean().exec()) {
           parent.childCount++;
-          const childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
-          const existingChild = await AcctChartAccount.findOne({ code: childCode }).select('id').lean().exec();
-          if (existingChild) {
-            chartAccountByCategoryName.set(key, (existingChild as { id: string }).id);
-            return (existingChild as { id: string }).id;
-          }
-          const childDoc = await AcctChartAccount.create({
-            code: childCode,
-            name: detalle,
-            type: 'expense',
-            is_header: false,
-            parent_id: parent.id,
-            sort_order: parent.childCount,
-          });
-          createdChartAccountIds.push(childDoc.id);
-          chartAccountByCategoryName.set(key, childDoc.id);
-          return childDoc.id;
+          childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
         }
-        expenseCounter++;
-        const code = `5195-${String(expenseCounter).padStart(2, '0')}`;
-        const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
-        if (existing) {
-          chartAccountByCategoryName.set(key, (existing as { id: string }).id);
-          return (existing as { id: string }).id;
-        }
-        const doc = await AcctChartAccount.create({ code, name: n, type: 'expense', is_header: false, sort_order: expenseCounter });
-        createdChartAccountIds.push(doc.id);
-        chartAccountByCategoryName.set(key, doc.id);
-        return doc.id;
-      } else {
-        if (detalle) {
-          let parent = parentIncomeByCategoria.get(categoria);
-          if (!parent) {
-            incomeCounter++;
-            const parentCode = `4135-${String(incomeCounter).padStart(2, '0')}`;
-            const existingParent = await AcctChartAccount.findOne({ code: parentCode }).select('id').lean().exec();
-            if (existingParent) {
-              parent = { id: (existingParent as { id: string }).id, code: parentCode, childCount: 0 };
-            } else {
-              const parentDoc = await AcctChartAccount.create({
-                code: parentCode,
-                name: categoria,
-                type: 'income',
-                is_header: true,
-                parent_id: null,
-                sort_order: incomeCounter,
-              });
-              createdChartAccountIds.push(parentDoc.id);
-              parent = { id: parentDoc.id, code: parentCode, childCount: 0 };
-            }
-            parentIncomeByCategoria.set(categoria, parent);
-          }
-          parent.childCount++;
-          const childCode = `${parent.code}-${String(parent.childCount).padStart(2, '0')}`;
-          const existingChild = await AcctChartAccount.findOne({ code: childCode }).select('id').lean().exec();
-          if (existingChild) {
-            chartAccountByCategoryName.set(key, (existingChild as { id: string }).id);
-            return (existingChild as { id: string }).id;
-          }
-          const childDoc = await AcctChartAccount.create({
-            code: childCode,
-            name: detalle,
-            type: 'income',
-            is_header: false,
-            parent_id: parent.id,
-            sort_order: parent.childCount,
-          });
-          createdChartAccountIds.push(childDoc.id);
-          chartAccountByCategoryName.set(key, childDoc.id);
-          return childDoc.id;
-        }
-        incomeCounter++;
-        const code = `4135-${String(incomeCounter).padStart(2, '0')}`;
-        const existing = await AcctChartAccount.findOne({ code }).select('id').lean().exec();
-        if (existing) {
-          chartAccountByCategoryName.set(key, (existing as { id: string }).id);
-          return (existing as { id: string }).id;
-        }
-        const doc = await AcctChartAccount.create({ code, name: n, type: 'income', is_header: false, sort_order: incomeCounter });
-        createdChartAccountIds.push(doc.id);
-        chartAccountByCategoryName.set(key, doc.id);
-        return doc.id;
+        const childDoc = await AcctChartAccount.create({
+          code: childCode, name: detName, type: acctType, is_header: false, parent_id: parent.id,
+          sort_order: parent.childCount,
+        });
+        createdChartAccountIds.push(childDoc.id);
+        chartAccountByCategoryName.set(key, childDoc.id);
+        return childDoc.id;
       }
+
+      const existingFlat = await AcctChartAccount.findOne({ name: catName, type: acctType, is_header: false, parent_id: null }).select('id').lean().exec();
+      if (existingFlat) {
+        chartAccountByCategoryName.set(key, (existingFlat as any).id);
+        return (existingFlat as any).id;
+      }
+      if (isExpense) expenseCounter++; else incomeCounter++;
+      let code = `${codePrefix}-${String(isExpense ? expenseCounter : incomeCounter).padStart(2, '0')}`;
+      while (await AcctChartAccount.findOne({ code }).select('id').lean().exec()) {
+        if (isExpense) expenseCounter++; else incomeCounter++;
+        code = `${codePrefix}-${String(isExpense ? expenseCounter : incomeCounter).padStart(2, '0')}`;
+      }
+      const doc = await AcctChartAccount.create({ code, name: catName, type: acctType, is_header: false, sort_order: isExpense ? expenseCounter : incomeCounter });
+      createdChartAccountIds.push(doc.id);
+      chartAccountByCategoryName.set(key, doc.id);
+      return doc.id;
     }
 
-    async function getOrCreateEntity(name: string): Promise<string | null> {
+    const getOrCreateEntity = async (name: string): Promise<string | null> => {
       const n = (name || '').trim();
       if (!n || n === 'NA') return null;
       if (entityByName.has(n)) return entityByName.get(n)!.id;
       const type = /AGENCIA\s*X/i.test(n) ? 'agency' : /UTILIDADES|HOTMART|EQUIPO|NA/i.test(n) ? 'internal' : 'project';
       const existing = await AcctEntity.findOne({ name: n }).select('id').lean().exec();
       if (existing) {
-        entityByName.set(n, { id: (existing as { id: string }).id, type });
-        return (existing as { id: string }).id;
+        entityByName.set(n, { id: (existing as any).id, type });
+        return (existing as any).id;
       }
       const doc = await AcctEntity.create({ name: n, type, sort_order: 0 });
       createdEntityIds.push(doc.id);
@@ -2116,30 +2150,46 @@ router.post('/import', async (req: Request, res: Response) => {
       return doc.id;
     }
 
-    async function getOrCreateCategory(name: string, isExpense: boolean): Promise<string | null> {
-      const n = (name || '').trim() || 'Importación';
-      if (categoryByName.has(n)) return categoryByName.get(n)!;
-      const existing = await AcctCategory.findOne({ name: n }).select('id').lean().exec();
+    const getOrCreateCategory = async (categoria: string, detalle: string, isExpense: boolean): Promise<string | null> => {
+      const catName = (categoria || '').trim() || 'Importación';
+      const detName = (detalle || '').trim();
+      const fullName = detName ? `${catName} - ${detName}` : catName;
+      if (categoryByName.has(fullName)) return categoryByName.get(fullName)!;
+      const existing = await AcctCategory.findOne({ name: fullName }).select('id').lean().exec();
       if (existing) {
-        categoryByName.set(n, (existing as { id: string }).id);
-        return (existing as { id: string }).id;
+        categoryByName.set(fullName, (existing as any).id);
+        return (existing as any).id;
       }
-      const doc = await AcctCategory.create({ name: n, type: isExpense ? 'expense' : 'income', parent_id: null });
+      let parentId: string | null = null;
+      if (detName) {
+        if (!categoryByName.has(catName)) {
+          const existingParent = await AcctCategory.findOne({ name: catName }).select('id').lean().exec();
+          if (existingParent) {
+            categoryByName.set(catName, (existingParent as any).id);
+          } else {
+            const parentDoc = await AcctCategory.create({ name: catName, type: isExpense ? 'expense' : 'income', parent_id: null });
+            createdCategoryIds.push(parentDoc.id);
+            categoryByName.set(catName, parentDoc.id);
+          }
+        }
+        parentId = categoryByName.get(catName) ?? null;
+      }
+      const doc = await AcctCategory.create({ name: fullName, type: isExpense ? 'expense' : 'income', parent_id: parentId });
       createdCategoryIds.push(doc.id);
       if (created_by) {
-        await AuditLog.create({ user_id: created_by, entity_type: 'acct_category', entity_id: doc.id, action: 'create', summary: `Import: ${n}` });
+        await AuditLog.create({ user_id: created_by, entity_type: 'acct_category', entity_id: doc.id, action: 'create', summary: `Import: ${fullName}` });
       }
-      categoryByName.set(n, doc.id);
+      categoryByName.set(fullName, doc.id);
       return doc.id;
     }
 
-    async function getOrCreateAccount(name: string): Promise<string> {
+    const getOrCreateAccount = async (name: string): Promise<string> => {
       const n = (name || '').trim() || 'Sin cuenta';
       if (accountByName.has(n)) return accountByName.get(n)!;
       const existing = await AcctPaymentAccount.findOne({ name: n }).select('id').lean().exec();
       if (existing) {
-        accountByName.set(n, (existing as { id: string }).id);
-        return (existing as { id: string }).id;
+        accountByName.set(n, (existing as any).id);
+        return (existing as any).id;
       }
       const doc = await AcctPaymentAccount.create({ name: n, currency: default_currency });
       createdPaymentAccountIds.push(doc.id);
@@ -2152,6 +2202,7 @@ router.post('/import', async (req: Request, res: Response) => {
 
     let created = 0;
     let skipped = 0;
+    let duplicates = 0;
     let skipNext = false;
 
     for (let i = headerRow + 1; i < records.length; i++) {
@@ -2163,20 +2214,37 @@ router.post('/import', async (req: Request, res: Response) => {
       const fechaStr = (row[idxFecha] || '').trim();
       let proyectoStr = (row[idxProyecto] || '').trim();
       const tipoStr = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-      const categoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
-      const detalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
-      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || categoria).trim() || 'Sin descripción';
+      const rawCategoria = (idxCategoria >= 0 ? (row[idxCategoria] || '').trim() : '');
+      const rawDetalle = (idxDetalle >= 0 ? (row[idxDetalle] || '').trim() : '');
+      const descripcion = ((idxDescripcion >= 0 ? (row[idxDescripcion] || '').trim() : '') || rawCategoria).trim() || 'Sin descripción';
       const subcategoria = (idxSubcategoria >= 0 ? (row[idxSubcategoria] || '').trim() : '');
-      let categoryName = (subcategoria && categoria && subcategoria !== categoria)
-        ? `${subcategoria} (${categoria})`
-        : (subcategoria || categoria || 'Importación');
-      if (detalle) categoryName = `${categoryName} - ${detalle}`;
-      if (category_mapping && category_mapping[categoryName]) {
-        categoryName = category_mapping[categoryName];
+
+      // Construir categoria y detalle como parámetros separados (no concatenar con " - ")
+      let catForAccount = (subcategoria && rawCategoria && subcategoria !== rawCategoria)
+        ? `${subcategoria} (${rawCategoria})`
+        : (subcategoria || rawCategoria || 'Importación');
+      let detForAccount = rawDetalle;
+
+      // category_mapping sobre el nombre combinado para display
+      const categoryDisplay = detForAccount ? `${catForAccount} - ${detForAccount}` : catForAccount;
+      if (category_mapping && category_mapping[categoryDisplay]) {
+        const mapped = category_mapping[categoryDisplay];
+        if (mapped.includes(' - ')) {
+          const mapParts = mapped.split(/ - (.+)/, 2);
+          catForAccount = mapParts[0].trim();
+          detForAccount = (mapParts[1] || '').trim();
+        } else {
+          catForAccount = mapped;
+          detForAccount = '';
+        }
       }
 
       if (proyectoStr === 'TRASLADO') proyectoStr = 'AGENCIA X';
       if (proyectoStr === 'RETIRO HOTMART') proyectoStr = 'HOTMART';
+
+      // Usar TIPO para forzar clasificación cuando la columna está disponible
+      const tipoForzado = /SALIDA/i.test(tipoStr) && !/CONTABLE/i.test(tipoStr) ? 'gasto'
+        : /INGRESO/i.test(tipoStr) && !/CONTABLE/i.test(tipoStr) ? 'ingreso' : null;
 
       const date = parseSpanishDate(fechaStr);
       if (!date) {
@@ -2184,10 +2252,17 @@ router.post('/import', async (req: Request, res: Response) => {
         continue;
       }
 
+      // Protección contra duplicados
+      const dupHash = `${date.toISOString().slice(0, 10)}\x00${descripcion.slice(0, 200)}`;
+      if (existingHashes.has(dupHash)) {
+        duplicates++;
+        skipped++;
+        continue;
+      }
+
       const entityId = await getOrCreateEntity(proyectoStr);
       let rowCreated = 0;
 
-      // Recolectar montos por cuenta
       const accountAmounts: { accountName: string; amount: number }[] = [];
       for (let c = 0; c < accountHeaders.length; c++) {
         const cell = (row[accountColStart + c] || '').trim();
@@ -2198,11 +2273,16 @@ router.post('/import', async (req: Request, res: Response) => {
         accountAmounts.push({ accountName, amount: Math.round(amount * 100) / 100 });
       }
 
-      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(categoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
-      const isTrasladoBancos = accountAmounts.length >= 2 && Math.abs(accountAmounts.reduce((s, a) => s + a.amount, 0)) < 0.02;
+      const isReparto = /REPARTO|REPARTICI[OÓ]N/i.test(rawCategoria) || /REPARTO|REPARTICI[OÓ]N/i.test(descripcion);
+
+      // Tolerancia absoluta + porcentual para detectar traslados entre bancos
+      const totalSum = accountAmounts.reduce((s, a) => s + a.amount, 0);
+      const totalAbs = accountAmounts.reduce((s, a) => s + Math.abs(a.amount), 0);
+      const isTrasladoBancos = accountAmounts.length >= 2 && (
+        Math.abs(totalSum) < 0.02 || (totalAbs > 0 && Math.abs(totalSum) / totalAbs < 0.005)
+      );
 
       if (isTrasladoBancos) {
-        // Traslado entre bancos: un solo asiento (débito cuenta origen, crédito cuenta destino)
         const entry = await AcctJournalEntry.create({
           date,
           description: descripcion.slice(0, 500),
@@ -2210,46 +2290,41 @@ router.post('/import', async (req: Request, res: Response) => {
           created_by: created_by ?? null,
         });
         journalEntryIds.push(entry.id);
-        const currency = accountAmounts.some((a) => Math.abs(a.amount) > 100000) ? 'COP' : default_currency;
         for (const { accountName, amount } of accountAmounts) {
           await getOrCreateAccount(accountName);
           const bankChartId = await getOrCreateChartAccountForBank(accountName);
           const amt = Math.abs(amount);
+          const currency = detectCurrency(accountName, amt);
           if (amount > 0) {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
           } else {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
           }
         }
+        existingHashes.add(dupHash);
         created++;
         rowCreated++;
       } else if (accountAmounts.length === 1) {
-        // Un solo monto: ingreso o gasto (o reparto)
         const { accountName, amount } = accountAmounts[0];
         await getOrCreateAccount(accountName);
-        await getOrCreateCategory(categoryName, amount < 0 && !isReparto);
+        const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
+        await getOrCreateCategory(catForAccount, detForAccount, isExpense && !isReparto);
         const amt = Math.abs(amount);
-        const currency = amt > 100000 ? 'COP' : default_currency;
+        const currency = detectCurrency(accountName, amt);
         const bankChartId = await getOrCreateChartAccountForBank(accountName);
 
         if (isReparto) {
           const equityChartId = await getOrCreateChartAccountForEquity(proyectoStr);
           const entry = await AcctJournalEntry.create({
-            date,
-            description: descripcion.slice(0, 500),
-            reference: `Import ${i + 1}`,
-            created_by: created_by ?? null,
+            date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
           });
           journalEntryIds.push(entry.id);
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
         } else {
-          const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+          const categoryChartId = await getOrCreateChartAccountForCategory(catForAccount, detForAccount, isExpense);
           const entry = await AcctJournalEntry.create({
-            date,
-            description: descripcion.slice(0, 500),
-            reference: `Import ${i + 1}`,
-            created_by: created_by ?? null,
+            date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
           });
           journalEntryIds.push(entry.id);
           if (amount > 0) {
@@ -2260,24 +2335,22 @@ router.post('/import', async (req: Request, res: Response) => {
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
           }
         }
+        existingHashes.add(dupHash);
         created++;
         rowCreated++;
       } else if (accountAmounts.length > 1 && !isTrasladoBancos) {
-        // Varios montos sin compensar: un asiento por cuenta (como antes)
         for (const { accountName, amount } of accountAmounts) {
           await getOrCreateAccount(accountName);
-          await getOrCreateCategory(categoryName, amount < 0 && !isReparto);
+          const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
+          await getOrCreateCategory(catForAccount, detForAccount, isExpense && !isReparto);
           const amt = Math.abs(amount);
-          const currency = amt > 100000 ? 'COP' : default_currency;
+          const currency = detectCurrency(accountName, amt);
           const bankChartId = await getOrCreateChartAccountForBank(accountName);
           const categoryChartId = isReparto
             ? await getOrCreateChartAccountForEquity(proyectoStr)
-            : await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+            : await getOrCreateChartAccountForCategory(catForAccount, detForAccount, isExpense);
           const entry = await AcctJournalEntry.create({
-            date,
-            description: descripcion.slice(0, 500),
-            reference: `Import ${i + 1}`,
-            created_by: created_by ?? null,
+            date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
           });
           journalEntryIds.push(entry.id);
           if (amount > 0) {
@@ -2290,9 +2363,9 @@ router.post('/import', async (req: Request, res: Response) => {
           created++;
           rowCreated++;
         }
+        existingHashes.add(dupHash);
       }
 
-      // Si no hubo montos en cuentas pero sí en IMPORTE CONTABLE (SALIDA/INGRESO CONTABLE)
       if (rowCreated === 0) {
         const importeCell = idxImporteContable >= 0 ? (row[idxImporteContable] || '').trim() : '';
         const amount = parseAmount(importeCell);
@@ -2312,37 +2385,39 @@ router.post('/import', async (req: Request, res: Response) => {
               const nextTipo = (idxTipo >= 0 ? (nextRow[idxTipo] || '') : '').trim();
               const nextProyecto = (nextRow[idxProyecto] || '').trim();
               const nextImporte = parseAmount((idxImporteContable >= 0 ? (nextRow[idxImporteContable] || '') : '').trim());
-              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null && Math.abs(Math.abs(nextImporte) - amt) < 0.02) {
+              const nextDesc = (idxDescripcion >= 0 ? (nextRow[idxDescripcion] || '') : '').trim();
+              const descSimilar = descripcion.slice(0, 30).toUpperCase() === nextDesc.slice(0, 30).toUpperCase()
+                || /UTILIDADES|CORTE/i.test(nextDesc);
+              if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null
+                && Math.abs(Math.abs(nextImporte) - amt) < 0.02 && descSimilar) {
                 entityDestino = nextProyecto || entityDestino;
                 skipNext = true;
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i) || categoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i)
+                || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
             }
             const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
             const equityDestinoId = await getOrCreateChartAccountForEquity(entityDestino);
             const entry = await AcctJournalEntry.create({
-            date,
-            description: descripcion.slice(0, 500),
+              date, description: descripcion.slice(0, 500),
               reference: `Import ${i + 1} (traslado utilidades)`,
-            created_by: created_by ?? null,
-          });
+              created_by: created_by ?? null,
+            });
             journalEntryIds.push(entry.id);
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: await getOrCreateEntity(entityDestino), debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: await getOrCreateEntity(entityOrigen), debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
           } else {
             const accountName = accountHeaders[0];
             await getOrCreateAccount(accountName);
-            await getOrCreateCategory(categoryName, amount < 0);
+            const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
+            await getOrCreateCategory(catForAccount, detForAccount, isExpense);
             const bankChartId = await getOrCreateChartAccountForBank(accountName);
-            const categoryChartId = await getOrCreateChartAccountForCategory(categoryName, amount < 0);
+            const categoryChartId = await getOrCreateChartAccountForCategory(catForAccount, detForAccount, isExpense);
             const entry = await AcctJournalEntry.create({
-              date,
-              description: descripcion.slice(0, 500),
-              reference: `Import ${i + 1}`,
-              created_by: created_by ?? null,
+              date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
             });
             journalEntryIds.push(entry.id);
             if (amount > 0) {
@@ -2353,6 +2428,7 @@ router.post('/import', async (req: Request, res: Response) => {
               await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
             }
           }
+          existingHashes.add(dupHash);
           created++;
         }
       }
@@ -2373,6 +2449,7 @@ router.post('/import', async (req: Request, res: Response) => {
     res.json({
       created,
       skipped,
+      duplicates,
       entities: entityByName.size,
       categories: categoryByName.size,
       accounts: accountByName.size,
