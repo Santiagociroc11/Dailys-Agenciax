@@ -2048,13 +2048,63 @@ router.post('/import', async (req: Request, res: Response) => {
       }
     }
 
-    // Protección contra duplicados: hash incluye fecha+desc+proyecto+montos para no marcar
-    // como duplicadas filas distintas (ej. mismo día "SALDOS INICIALES" en distintas cuentas).
-    const existingImportEntries = await AcctJournalEntry.find({ reference: /^Import / }).select('date description').lean().exec();
+    // Protección contra duplicados: hash debe coincidir con dupHash (rowIndex+date+desc+proyecto+amountsSig)
+    // para detectar re-importaciones del mismo CSV.
+    const existingImportEntries = await AcctJournalEntry.find({ reference: /^Import / })
+      .select('id date description reference')
+      .lean()
+      .exec();
+    const entryIds = (existingImportEntries as { id: string }[]).map((e) => e.id);
     const existingHashes = new Set<string>();
-    for (const e of existingImportEntries) {
-      const d = (e as any).date instanceof Date ? (e as any).date.toISOString().slice(0, 10) : '';
-      existingHashes.add(`${d}\x00${((e as any).description || '').slice(0, 200)}`);
+    if (entryIds.length > 0) {
+      const lines = await AcctJournalEntryLine.find({ journal_entry_id: { $in: entryIds } })
+        .select('journal_entry_id account_id entity_id debit credit')
+        .lean()
+        .exec();
+      const accIds = [...new Set((lines as { account_id: string }[]).map((l) => l.account_id))];
+      const entityIds = [...new Set((lines as { entity_id?: string | null }[]).map((l) => l.entity_id).filter(Boolean))];
+      const [accounts, entities] = await Promise.all([
+        AcctChartAccount.find({ id: { $in: accIds } }).select('id name type').lean().exec(),
+        AcctEntity.find({ id: { $in: entityIds } }).select('id name').lean().exec(),
+      ]);
+      const accMap = new Map((accounts as { id: string; name: string; type: string }[]).map((a) => [a.id, a]));
+      const entityMap = new Map((entities as { id: string; name: string }[]).map((e) => [e.id, e.name]));
+      const assetLinesByEntry = new Map<string, Array<{ accountName: string; amount: number }>>();
+      for (const l of lines as { journal_entry_id: string; account_id: string; entity_id?: string | null; debit: number; credit: number }[]) {
+        const acc = accMap.get(l.account_id);
+        if (!acc || acc.type !== 'asset') continue;
+        const amt = Math.round((l.debit - l.credit) * 100) / 100;
+        if (amt === 0) continue;
+        const arr = assetLinesByEntry.get(l.journal_entry_id) || [];
+        arr.push({ accountName: acc.name, amount: amt });
+        assetLinesByEntry.set(l.journal_entry_id, arr);
+      }
+      // Agrupar por fila CSV (múltiples entries pueden venir de una misma fila con varias cuentas)
+      const byRow = new Map<string, { dateStr: string; desc: string; entityName: string; amounts: Array<{ accountName: string; amount: number }>; importeAmount?: number }>();
+      for (const e of existingImportEntries as { id: string; date: Date; description: string; reference: string }[]) {
+        const m = e.reference.match(/Import\s+(\d+)/);
+        const rowIndex = m ? parseInt(m[1], 10) : 0;
+        const dateStr = e.date instanceof Date ? e.date.toISOString().slice(0, 10) : '';
+        const desc = (e.description || '').slice(0, 200);
+        const firstLine = (lines as { journal_entry_id: string; entity_id?: string | null; debit: number; credit: number }[]).find((l) => l.journal_entry_id === e.id);
+        const entityName = firstLine?.entity_id ? (entityMap.get(firstLine.entity_id) || '') : '';
+        const key = `${rowIndex}\x00${dateStr}\x00${desc}\x00${entityName}`;
+        const existing = byRow.get(key) || { dateStr, desc, entityName, amounts: [] };
+        const assetLines = assetLinesByEntry.get(e.id) || [];
+        if (assetLines.length > 0) {
+          existing.amounts.push(...assetLines);
+        } else if (firstLine && (firstLine.debit > 0 || firstLine.credit > 0)) {
+          existing.importeAmount = Math.round((firstLine.debit || firstLine.credit) * 100) / 100;
+        }
+        byRow.set(key, existing);
+      }
+      for (const [key, data] of byRow) {
+        const amountsSig = data.amounts.length > 0
+          ? data.amounts.sort((a, b) => a.accountName.localeCompare(b.accountName)).map((a) => `${a.accountName}:${a.amount}`).join('|')
+          : (data.importeAmount != null ? `importe:${data.importeAmount}` : '');
+        const dupHash = `${key}\x00${amountsSig}`;
+        existingHashes.add(dupHash);
+      }
     }
 
     // Detección de moneda por nombre de cuenta bancaria
@@ -2319,7 +2369,7 @@ router.post('/import', async (req: Request, res: Response) => {
             .map((a) => `${a.accountName}:${a.amount}`)
             .join('|')
         : `importe:${parseAmount((idxImporteContable >= 0 ? (row[idxImporteContable] || '') : '').trim()) ?? 0}`;
-      const dupHash = `${i}\x00${date.toISOString().slice(0, 10)}\x00${descripcion.slice(0, 200)}\x00${proyectoStr}\x00${amountsSig}`;
+      const dupHash = `${i + 1}\x00${date.toISOString().slice(0, 10)}\x00${descripcion.slice(0, 200)}\x00${proyectoStr}\x00${amountsSig}`;
       if (existingHashes.has(dupHash)) {
         duplicates++;
         skipped++;
