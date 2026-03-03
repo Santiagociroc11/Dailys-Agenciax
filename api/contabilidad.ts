@@ -2520,6 +2520,12 @@ router.post('/import', async (req: Request, res: Response) => {
                 || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
+              // Evitar duplicado: el par SALIDA/INGRESO puede no estar contiguo en el CSV (todas las
+              // SALIDAS primero, luego INGRESOS). La SALIDA ya creó el asiento; saltar este INGRESO.
+              if (entityOrigen !== 'Sin asignar') {
+                skipped++;
+                continue;
+              }
             }
             const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
             const equityDestinoId = await getOrCreateChartAccountForEquity(entityDestino);
