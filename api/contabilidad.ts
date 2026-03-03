@@ -1941,12 +1941,13 @@ router.post('/import/preview', async (req: Request, res: Response) => {
               if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null
                 && Math.abs(Math.abs(nextImporte) - amt) < 0.02 && descSimilar) {
                 entityDestino = nextProyecto || entityDestino;
-                skipNext = true;
+                // No saltar la fila INGRESO: el receptor (ej. AGENCIA X) debe crear income para que
+                // el balance de liquidación coincida con el Excel.
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i)
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)|DESDE\s+(FONDO\s+LIBRE)|(FONDO\s+LIBRE)/i)
                 || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
-              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
+              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || sourceMatch[3] || sourceMatch[4] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
             }
             preview.push({
@@ -2531,12 +2532,13 @@ router.post('/import', async (req: Request, res: Response) => {
               if (/INGRESO\s*CONTABLE/i.test(nextTipo) && nextImporte != null
                 && Math.abs(Math.abs(nextImporte) - amt) < 0.02 && descSimilar) {
                 entityDestino = nextProyecto || entityDestino;
-                skipNext = true;
+                // No saltar la fila INGRESO: el receptor (ej. AGENCIA X) debe crear income para que
+                // el balance de liquidación coincida con el Excel.
               }
             } else if (isIngreso) {
-              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)/i)
+              const sourceMatch = descripcion.match(/\[([^\]]+)\]|UTILIDADES\s+([A-Z0-9\s]+?)(?:\s+15|\s+CORTE|$)|DESDE\s+(FONDO\s+LIBRE)|(FONDO\s+LIBRE)/i)
                 || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
-              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
+              entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || sourceMatch[3] || sourceMatch[4] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
               // INGRESO CONTABLE: el receptor (destino) recibe utilidades. Crear línea de INGRESO para que
               // la vista de liquidación muestre el balance correcto (incluya CORTE UTILIDADES como Excel).
