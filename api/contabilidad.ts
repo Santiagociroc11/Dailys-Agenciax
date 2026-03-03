@@ -963,10 +963,39 @@ router.get('/balance', async (req: Request, res: Response) => {
       if (cur === 'COP') row.cop += amt;
       else row.usd += amt;
     }
-    if (liquidacion === '1' || liquidacion === 'true') {
-      const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
-      const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
-      if (equityIds.length > 0) {
+    // Incluir movimientos de patrimonio (CORTE UTILIDADES) para coincidir con Excel
+    const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
+    const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
+    if (equityIds.length > 0) {
+      const isLiquidacion = liquidacion === '1' || liquidacion === 'true';
+      if (!isLiquidacion) {
+        // Balance completo: incluir neto patrimonio (debit - credit) = CORTE UTILIDADES recibido - enviado
+        const equityPipeline = [
+          { $match: { journal_entry_id: { $in: entryIds }, account_id: { $in: equityIds } } },
+          { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, debit: { $sum: '$debit' }, credit: { $sum: '$credit' } } },
+        ];
+        const equityResults = await AcctJournalEntryLine.aggregate(equityPipeline).exec();
+        for (const d of equityResults as { _id: { entity_id: string | null; currency: string }; debit: number; credit: number }[]) {
+          const eid = d._id.entity_id;
+          const key = eid ?? 'null';
+          const cur = normCurrency(d._id.currency || 'USD');
+          const netEquity = Math.round((d.debit - d.credit) * 100) / 100;
+          if (netEquity === 0) continue;
+          if (!rowMap.has(key)) {
+            rowMap.set(key, {
+              entity_id: eid,
+              entity_name: eid ? (entityMap.get(eid)?.name ?? 'Sin asignar') : 'Sin asignar',
+              entity_type: eid ? (entityMap.get(eid)?.type ?? null) : null,
+              usd: 0,
+              cop: 0,
+            });
+          }
+          const row = rowMap.get(key)!;
+          if (cur === 'COP') row.cop += netEquity;
+          else row.usd += netEquity;
+        }
+      } else {
+        // Modo liquidación: restar créditos (lo ya distribuido) para mostrar pendiente de liquidar
         const distPipeline = [
           { $match: { journal_entry_id: { $in: entryIds }, account_id: { $in: equityIds } } },
           { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' } } },
@@ -2532,8 +2561,8 @@ router.post('/import', async (req: Request, res: Response) => {
             const entry = await AcctJournalEntry.create({
               date, description: descripcion.slice(0, 500),
               reference: `Import ${i + 1} (traslado utilidades)`,
-              created_by: created_by ?? null,
-            });
+            created_by: created_by ?? null,
+          });
             journalEntryIds.push(entry.id);
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: await getOrCreateEntity(entityDestino), debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
             await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: await getOrCreateEntity(entityOrigen), debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
