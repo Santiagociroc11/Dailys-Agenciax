@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse, type ImportBatch, type PygMatrixResponse, type BalanceGeneralResponse } from '../lib/contabilidadApi';
+import { contabilidadApi, type AcctClient, type AcctEntity, type AcctCategory, type AcctPaymentAccount, type AcctTransaction, type BalanceRow, type PygRow, type PygRowByClient, type AccountBalanceRow, type AcctChartAccount, type AcctJournalEntry, type AcctJournalEntryLine, type LedgerLine, type ImportPreviewItem, type ImportPreviewResponse, type ImportBatch, type PygMatrixResponse } from '../lib/contabilidadApi';
 import {
   DollarSign,
   Plus,
@@ -849,7 +849,7 @@ export default function Contabilidad() {
   const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [pygByClientData, setPygByClientData] = useState<{ rows: PygRowByClient[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; total_usd: number; total_cop: number } | null>(null);
-  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'pyg_matrix' | 'pyg_matrix_client' | 'balance_general' | 'accounts' | 'liquidacion'>('pyg_matrix');
+  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'pyg_matrix' | 'pyg_matrix_client' | 'accounts' | 'liquidacion'>('pyg_matrix');
 
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -908,7 +908,6 @@ export default function Contabilidad() {
   const [pygProjectsOnly, setPygProjectsOnly] = useState(true);
   const [pygMatrixData, setPygMatrixData] = useState<PygMatrixResponse | null>(null);
   const [pygMatrixClientData, setPygMatrixClientData] = useState<PygMatrixResponse | null>(null);
-  const [balanceGeneralData, setBalanceGeneralData] = useState<BalanceGeneralResponse | null>(null);
   const [pygMatrixCurrency, setPygMatrixCurrency] = useState<'usd' | 'cop'>('usd');
   const [pygMatrixHideAdmin, setPygMatrixHideAdmin] = useState(false);
   const [pygFilterClient, setPygFilterClient] = useState('');
@@ -1082,7 +1081,6 @@ export default function Contabilidad() {
       else if (balanceView === 'pyg_client') fetchPygByClient();
       else if (balanceView === 'pyg_matrix') fetchPygMatrix();
       else if (balanceView === 'pyg_matrix_client') fetchPygMatrixByClient();
-      else if (balanceView === 'balance_general') fetchBalanceGeneral();
       else fetchAccountBalances();
     }
     if (activeTab === 'asientos') {
@@ -1254,22 +1252,6 @@ export default function Contabilidad() {
       console.error(e);
       toast.error('Error al cargar P&G Matrix por cliente');
       setPygMatrixClientData(null);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchBalanceGeneral() {
-    setLoading(true);
-    try {
-      const params: { end?: string } = {};
-      if (balanceEnd) params.end = balanceEnd;
-      const data = await contabilidadApi.getBalanceGeneral(params);
-      setBalanceGeneralData(data);
-    } catch (e) {
-      console.error(e);
-      toast.error('Error al cargar Balance General');
-      setBalanceGeneralData(null);
     } finally {
       setLoading(false);
     }
@@ -1879,7 +1861,6 @@ export default function Contabilidad() {
       else if (activeTab === 'balance') {
         if (balanceView === 'pyg_matrix') fetchPygMatrix();
         else if (balanceView === 'pyg_matrix_client') fetchPygMatrixByClient();
-        else if (balanceView === 'balance_general') fetchBalanceGeneral();
         else if (balanceView === 'accounts') fetchAccountBalances();
       }
     } catch (e) {
@@ -2157,7 +2138,6 @@ export default function Contabilidad() {
                 { id: 'pyg_matrix', label: 'P&G por proyecto', icon: BarChart3 },
                 { id: 'pyg_matrix_client', label: 'P&G por cliente', icon: Users },
                 { id: 'liquidacion', label: 'Liquidación', icon: CheckCircle2 },
-                { id: 'balance_general', label: 'Balance General', icon: Building2 },
                 { id: 'accounts', label: 'Cuentas', icon: CreditCard },
                 { id: 'balance', label: 'Balance', icon: DollarSign },
               ].map(({ id, label, icon: Icon }) => (
@@ -2176,7 +2156,7 @@ export default function Contabilidad() {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {balanceView !== 'accounts' && balanceView !== 'balance_general' && (
+              {balanceView !== 'accounts' && (
                 <DateRangePicker
                   start={balanceStart}
                   end={balanceEnd}
@@ -2262,17 +2242,6 @@ export default function Contabilidad() {
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
-                </div>
-              )}
-              {balanceView === 'balance_general' && (
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-600">A la fecha:</label>
-                  <input
-                    type="date"
-                    value={balanceEnd}
-                    onChange={(e) => setBalanceEnd(e.target.value)}
-                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  />
                 </div>
               )}
               {balanceView === 'accounts' && (
@@ -2495,110 +2464,6 @@ export default function Contabilidad() {
                 </div>
               );
             })()
-          ) : balanceView === 'balance_general' && balanceGeneralData ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-3 bg-gray-50/50">
-                <h3 className="font-semibold text-gray-900 text-lg">Balance General</h3>
-                {balanceGeneralData.cuadra ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-medium">
-                    <CheckCircle2 className="w-4 h-4" />
-                    Cuadra
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-sm font-medium">
-                    <Info className="w-4 h-4" />
-                    Revisar
-                  </span>
-                )}
-              </div>
-              <div className="p-6 space-y-8">
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-4 py-3 bg-emerald-50/80 border-b border-emerald-100">
-                    <h4 className="font-semibold text-emerald-800">ACTIVOS</h4>
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {balanceGeneralData.activos.map((r) => (
-                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
-                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
-                        </tr>
-                      ))}
-                      <tr className="border-t-2 border-emerald-200 bg-emerald-50/50 font-semibold">
-                        <td className="px-4 py-3 text-gray-900">Total Activos</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{balanceGeneralData.total_activos.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{balanceGeneralData.total_activos.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100">
-                    <h4 className="font-semibold text-amber-800">PASIVOS</h4>
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {balanceGeneralData.pasivos.map((r) => (
-                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
-                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-4 py-3 bg-indigo-50/80 border-b border-indigo-100">
-                    <h4 className="font-semibold text-indigo-800">PATRIMONIO</h4>
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="px-4 py-2.5 text-left font-medium text-gray-600">Cuenta</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">USD</th>
-                        <th className="px-4 py-2.5 text-right font-medium text-gray-600">COP</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {balanceGeneralData.patrimonio.map((r) => (
-                        <tr key={r.code} className="border-t border-gray-100 hover:bg-gray-50/50">
-                          <td className="px-4 py-2.5 text-gray-700">{r.code} {r.name}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-indigo-600 font-medium">{r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-indigo-600">{r.cop !== 0 ? r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 }) : '—'}</td>
-                        </tr>
-                      ))}
-                      <tr className="border-t-2 border-indigo-200 bg-indigo-50/50 font-semibold">
-                        <td className="px-4 py-3 text-gray-900">Total Pasivos + Patrimonio</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-indigo-700">{balanceGeneralData.total_pasivos_patrimonio.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-indigo-700">{balanceGeneralData.total_pasivos_patrimonio.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              {balanceGeneralData.activos.length === 0 && balanceGeneralData.pasivos.length === 0 && (
-                <div className="p-16 text-center">
-                  <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">No hay datos para el Balance General.</p>
-                </div>
-              )}
-            </div>
           ) : balanceView === 'pyg' && pygData ? (
             (() => {
               const hasCopPyg = pygData.total_cop.ingresos !== 0 || pygData.total_cop.gastos !== 0 || pygData.total_cop.resultado !== 0 ||

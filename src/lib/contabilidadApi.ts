@@ -124,16 +124,6 @@ export interface PygMatrixResponse {
   col_keys: string[];
 }
 
-export interface BalanceGeneralResponse {
-  activos: Array<{ code: string; name: string; usd: number; cop: number }>;
-  pasivos: Array<{ code: string; name: string; usd: number; cop: number }>;
-  patrimonio: Array<{ code: string; name: string; usd: number; cop: number }>;
-  utilidad_ejercicio: { usd: number; cop: number };
-  total_activos: { usd: number; cop: number };
-  total_pasivos_patrimonio: { usd: number; cop: number };
-  cuadra: boolean;
-}
-
 export interface AcctChartAccount {
   id: string;
   code: string;
@@ -431,12 +421,6 @@ export const contabilidadApi = {
     if (params?.end) search.end = params.end;
     if (params?.client_ids) search.client_ids = params.client_ids;
     return fetchJson<PygMatrixResponse>(url('/pyg-matrix-by-client', Object.keys(search).length > 0 ? search : undefined));
-  },
-
-  async getBalanceGeneral(params?: { end?: string }): Promise<BalanceGeneralResponse> {
-    const search: Record<string, string> = {};
-    if (params?.end) search.end = params.end;
-    return fetchJson<BalanceGeneralResponse>(url('/balance-general', Object.keys(search).length > 0 ? search : undefined));
   },
 
   async getChartAccounts(): Promise<AcctChartAccount[]> {
