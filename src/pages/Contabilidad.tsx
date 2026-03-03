@@ -1152,13 +1152,10 @@ export default function Contabilidad() {
   async function fetchBalance() {
     setLoading(true);
     try {
-      const params: { start?: string; end?: string; liquidacion?: boolean; debug?: boolean } = {};
+      const params: { start?: string; end?: string; liquidacion?: boolean } = {};
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
-      if (balanceView === 'liquidacion') {
-        params.liquidacion = true;
-        params.debug = true;
-      }
+      if (balanceView === 'liquidacion') params.liquidacion = true;
       const data = await contabilidadApi.getBalance(params);
       setBalanceData(data);
     } catch (e) {
@@ -2897,14 +2894,6 @@ export default function Contabilidad() {
               </table>
               {balanceData.rows.length === 0 && (
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
-              )}
-              {balanceData.debug && (
-                <details className="mt-4 mx-4 mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-indigo-600">Ver debug (FONDO LIBRE / AGENCIA X)</summary>
-                  <pre className="mt-3 text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
-                    {JSON.stringify(balanceData.debug, null, 2)}
-                  </pre>
-                </details>
               )}
             </div>
             );
