@@ -745,7 +745,8 @@ router.get('/pyg-cell-lines', async (req: Request, res: Response) => {
       ...(Object.keys(entityFilter).length > 0 ? [{ $match: entityFilter }] : []),
     ];
 
-    const raw = await AcctJournalEntryLine.aggregate(pipeline as object[]).exec();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
     const accountIds = [...new Set((raw as { account_id: string }[]).map((l) => l.account_id))];
     const entityIds = [...new Set((raw as { entity_id?: string | null }[]).map((l) => l.entity_id).filter(Boolean))];
     const accounts = accountIds.length > 0 ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id code name type').lean().exec() : [];
@@ -2896,10 +2897,13 @@ router.post('/liquidar', async (req: Request, res: Response) => {
       return;
     }
     const entityName = (entity as { name: string }).name;
-    let fondoLibreEntity = await AcctEntity.findOne({ name: 'FONDO LIBRE' }).select('id').lean().exec();
-    if (!fondoLibreEntity) {
+    let fondoLibreId: string;
+    const existingFondo = await AcctEntity.findOne({ name: 'FONDO LIBRE' }).select('id').lean().exec();
+    if (existingFondo) {
+      fondoLibreId = (existingFondo as { id: string }).id;
+    } else {
       const doc = await AcctEntity.create({ name: 'FONDO LIBRE', type: 'internal', sort_order: 0 });
-      fondoLibreEntity = { id: doc.id } as { id: string };
+      fondoLibreId = doc.id;
     }
     const getOrCreateEquityAccount = async (name: string): Promise<string> => {
       const accName = `Utilidades ${name}`;
@@ -2920,11 +2924,11 @@ router.post('/liquidar', async (req: Request, res: Response) => {
     const entryDate = date ? new Date(date) : new Date();
     const lines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
     if (amtUsd > 0) {
-      lines.push({ account_id: equityFondo, entity_id: (fondoLibreEntity as { id: string }).id, debit: amtUsd, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtUsd, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
       lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtUsd, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
     }
     if (amtCop > 0) {
-      lines.push({ account_id: equityFondo, entity_id: (fondoLibreEntity as { id: string }).id, debit: amtCop, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtCop, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
       lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtCop, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
     }
     const entry = await AcctJournalEntry.create({
