@@ -863,11 +863,8 @@ export default function Contabilidad() {
   const [filterAccount, setFilterAccount] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
 
-  const [balanceStart, setBalanceStart] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
-  });
-  const [balanceEnd, setBalanceEnd] = useState(() => new Date().toISOString().split('T')[0]);
+  const [balanceStart, setBalanceStart] = useState(() => '');
+  const [balanceEnd, setBalanceEnd] = useState(() => '');
 
   const [currentClient, setCurrentClient] = useState<Partial<AcctClient>>({ name: '', sort_order: 0 });
   const [currentEntity, setCurrentEntity] = useState<Partial<AcctEntity>>({ name: '', type: 'project', sort_order: 0 });
@@ -1806,6 +1803,8 @@ export default function Contabilidad() {
       fetchAccounts();
       fetchChartAccounts();
       fetchLedgerLines();
+      fetchImportBatches();
+      if (balanceView === 'balance' || balanceView === 'liquidacion') fetchBalance();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al importar');
     } finally {

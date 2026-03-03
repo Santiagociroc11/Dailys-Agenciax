@@ -202,19 +202,6 @@ console.log(`  Expense:    $${totalExpenseF.toLocaleString('en-US', { minimumFra
 console.log(`  Eq. créd.:  $${totalEquityCreditF.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
 console.log(`  Balance:    $${balanceF.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
 
-console.log('\n--- Diagnóstico AGENCIA X ---');
-let ingresoContableAX = 0;
-for (let i = headerRow + 1; i < records.length; i++) {
-  const row = records[i];
-  const proy = (row[idxProyecto] || '').trim();
-  const tipo = (idxTipo >= 0 ? (row[idxTipo] || '') : '').trim();
-  if (proy !== 'AGENCIA X') continue;
-  if (!/INGRESO\s*CONTABLE/i.test(tipo)) continue;
-  const amt = parseAmount((idxImporteContable >= 0 ? (row[idxImporteContable] || '') : '').trim());
-  if (amt != null && amt > 0) ingresoContableAX += amt;
-}
-console.log(`  INGRESO CONTABLE recibido (traslados FONDO LIBRE→AX): $${ingresoContableAX.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
-console.log('  En el import actual: se SALTA la fila INGRESO AX (par con SALIDA FL) → NO crea income.');
-console.log(`  Si SÍ se creara income: Balance filtrado sería $${(balanceF + ingresoContableAX).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
-console.log('  comparar-agencia-x-csv.ts (Excel): Balance 2025+2026 ≈ -13,714 (incluye CORTE UTILIDADES como gasto)');
-console.log('  Diferencia ~7,800: el Excel cuenta INGRESO CONTABLE como ingreso; el import no.\n');
+console.log('\n--- Diagnóstico (con fix: INGRESO CONTABLE ya crea income para AX) ---');
+console.log(`  Balance filtrado simulado: $${balanceF.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+console.log('  comparar-agencia-x-csv.ts (Excel): Balance 2025+2026 ≈ -13,714\n');
