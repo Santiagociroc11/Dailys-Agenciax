@@ -186,8 +186,7 @@ for (let i = headerRow + 1; i < records.length; i++) {
             || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
           entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || sourceMatch[3] || sourceMatch[4] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
           entityDestino = proyectoStr;
-          addDelta(entityOrigen, 'equityCredit', amt);
-          addDelta(entityDestino, 'equityCredit', -amt);
+          addDelta(entityDestino, 'income', amt);
         } else {
           addDelta(entityOrigen, 'equityCredit', amt);
         }

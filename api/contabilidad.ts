@@ -713,7 +713,7 @@ router.get('/pyg-cell-lines', async (req: Request, res: Response) => {
     const entryMap = new Map(entryIds.map((e) => [e.id, e]));
     if (eids.length === 0) return res.json([]);
 
-    const excludedIds = (await AcctChartAccount.find({ type: { $in: ['income', 'expense'] }, name: { $regex: CORTE_UTILIDADES_NAME_REGEX } }).select('id').lean().exec()).map((a) => (a as { id: string }).id);
+    const excludedIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec()).map((a) => (a as { id: string }).id);
 
     const groupMatch: Record<string, unknown> =
       pyg_group === 'A'
@@ -898,8 +898,7 @@ function normCurrency(c: string): 'USD' | 'COP' {
 }
 
 // --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
-// Con ?liquidacion=1: balance = (income - expense) + (equity_debits - equity_credits).
-// Crédito a Utilidades = distribuyó (baja); débito = recibió (sube). Modelo ERP: todo equity 3605-xx.
+// Con ?liquidacion=1 resta las distribuciones (créditos a cuentas Utilidades por entidad) para mostrar saldo pendiente de liquidar
 router.get('/balance', async (req: Request, res: Response) => {
   try {
     const { start, end, liquidacion } = req.query;
@@ -968,36 +967,21 @@ router.get('/balance', async (req: Request, res: Response) => {
       const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
       const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
       if (equityIds.length > 0) {
-        const eqPipeline = [
+        const distPipeline = [
           { $match: { journal_entry_id: { $in: entryIds }, account_id: { $in: equityIds } } },
-          { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' }, debit: { $sum: '$debit' } } },
+          { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' } } },
         ];
-        const eqResults = await AcctJournalEntryLine.aggregate(eqPipeline).exec();
-        const eqEntityIds = [...new Set((eqResults as { _id: { entity_id: string | null } }[]).map((x) => x._id.entity_id).filter((id): id is string => id != null))];
-        const missingEntityIds = eqEntityIds.filter((id) => !entityMap.has(id));
-        if (missingEntityIds.length > 0) {
-          const extraEntities = await AcctEntity.find({ id: { $in: missingEntityIds } }).select('id name type').lean().exec();
-          for (const e of extraEntities as { id: string; name: string; type: string }[]) {
-            entityMap.set(e.id, { name: e.name, type: e.type });
-          }
-        }
-        for (const d of eqResults as { _id: { entity_id: string | null; currency: string }; credit: number; debit: number }[]) {
+        const distResults = await AcctJournalEntryLine.aggregate(distPipeline).exec();
+        for (const d of distResults as { _id: { entity_id: string | null; currency: string }; credit: number }[]) {
           const eid = d._id.entity_id;
           const key = eid ?? 'null';
           const cur = normCurrency(d._id.currency || 'USD');
-          const net = Math.round((d.debit - d.credit) * 100) / 100;
-          if (!rowMap.has(key)) {
-            rowMap.set(key, {
-              entity_id: eid,
-              entity_name: eid ? (entityMap.get(eid)?.name ?? 'Sin asignar') : 'Sin asignar',
-              entity_type: eid ? (entityMap.get(eid)?.type ?? null) : null,
-              usd: 0,
-              cop: 0,
-            });
+          const amt = Math.round(d.credit * 100) / 100;
+          if (rowMap.has(key)) {
+            const row = rowMap.get(key)!;
+            if (cur === 'COP') row.cop -= amt;
+            else row.usd -= amt;
           }
-          const row = rowMap.get(key)!;
-          if (cur === 'COP') row.cop += net;
-          else row.usd += net;
         }
       }
     }
@@ -1013,9 +997,8 @@ router.get('/balance', async (req: Request, res: Response) => {
 });
 
 // --- P&G (Pérdidas y Ganancias) por proyecto ---
-// Excluye solo CORTE UTILIDADES (legacy: cuenta income para traslados intercompany).
-// Con el modelo ERP, los traslados van a equity 3605-xx y no aparecen en income/expense.
-const CORTE_UTILIDADES_NAME_REGEX = /CORTE\s*UTILIDADES/i;
+// Excluye traslados de utilidades para que el resultado operativo de cada proyecto sea visible
+const TRASLADO_UTILIDADES_REGEX = /traslado.*utilidad|utilidad.*traslado|traslado\s+utilidades|^utilidades\s|utilidades\s+[a-z0-9]/i;
 
 // --- P&G Matrix (layout horizontal: columnas = proyectos, filas = conceptos) ---
 // Grupos: A=Ingresos (4xx), B=Costos Directos (5xx/6xx con entity_id), C=Gastos Indirectos (5xx/6xx sin entity_id)
@@ -1042,7 +1025,7 @@ router.get('/pyg-matrix', async (req: Request, res: Response) => {
       });
     }
 
-    const excludedAccountIds = (await AcctChartAccount.find({ type: { $in: ['income', 'expense'] }, name: { $regex: CORTE_UTILIDADES_NAME_REGEX } }).select('id').lean().exec())
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
       .map((a) => (a as { id: string }).id);
 
     let entityFilter: string[] | null = null;
@@ -1096,7 +1079,7 @@ router.get('/pyg-matrix', async (req: Request, res: Response) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results = await AcctJournalEntryLine.aggregate(pipeline as any[]).exec();
 
-    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter((id): id is string => id != null))];
+    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
       : [];
@@ -1219,7 +1202,7 @@ router.get('/pyg-matrix-by-client', async (req: Request, res: Response) => {
       return res.json({ columns: [], rows: [], col_keys: [] });
     }
 
-    const excludedAccountIds = (await AcctChartAccount.find({ type: { $in: ['income', 'expense'] }, name: { $regex: CORTE_UTILIDADES_NAME_REGEX } }).select('id').lean().exec())
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
       .map((a) => (a as { id: string }).id);
 
     const pipeline: Record<string, unknown>[] = [
@@ -1360,7 +1343,7 @@ router.get('/pyg', async (req: Request, res: Response) => {
       }
     }
 
-    const excludedAccountIds = (await AcctChartAccount.find({ type: { $in: ['income', 'expense'] }, name: { $regex: CORTE_UTILIDADES_NAME_REGEX } }).select('id').lean().exec())
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
       .map((a) => (a as { id: string }).id);
 
     const pipeline: Record<string, unknown>[] = [
@@ -1468,7 +1451,7 @@ router.get('/pyg-by-client', async (req: Request, res: Response) => {
       });
     }
 
-    const excludedAccountIds = (await AcctChartAccount.find({ type: { $in: ['income', 'expense'] }, name: { $regex: CORTE_UTILIDADES_NAME_REGEX } }).select('id').lean().exec())
+    const excludedAccountIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec())
       .map((a) => (a as { id: string }).id);
 
     const pipeline: Record<string, unknown>[] = [
@@ -2557,22 +2540,23 @@ router.post('/import', async (req: Request, res: Response) => {
                 || rawCategoria.match(/(?:ADRIANA|GERSSON|INFOPRODUCTOS|GIORGIO|NELLY|VCAPITAL|FONDO)/i);
               entityOrigen = sourceMatch ? (sourceMatch[1] || sourceMatch[2] || sourceMatch[3] || sourceMatch[4] || '').trim().replace(/\s+15.*$/i, '').trim() || 'Sin asignar' : 'Sin asignar';
               entityDestino = proyectoStr;
-              // INGRESO CONTABLE: traslado de utilidades (equity). Débito origen, crédito destino.
-              // Modelo ERP: todo en equity 3605-xx, no income. El balance suma equity_credits - equity_debits.
+              // INGRESO CONTABLE: el receptor (destino) recibe utilidades. Crear línea de INGRESO para que
+              // la vista de liquidación muestre el balance correcto (incluya CORTE UTILIDADES como Excel).
+              // La SALIDA ya creó el asiento de equity; nosotros creamos el ingreso para el balance.
               const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
-              const equityDestinoId = await getOrCreateChartAccountForEquity(entityDestino);
+              const incomeCorteId = await getOrCreateChartAccountForCategory('CORTE UTILIDADES', 'CORTE UTILIDADES', false);
               const entityDestinoId = await getOrCreateEntity(entityDestino);
               const entityOrigenId = await getOrCreateEntity(entityOrigen);
               const entry = await AcctJournalEntry.create({
                 date, description: descripcion.slice(0, 500),
                 reference: `Import ${i + 1} (ingreso contable)`,
-                created_by: created_by ?? null,
-              });
+            created_by: created_by ?? null,
+          });
               journalEntryIds.push(entry.id);
               await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityOrigenId, entity_id: entityOrigenId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
-              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityDestinoId, entity_id: entityDestinoId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
+              await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: incomeCorteId, entity_id: entityDestinoId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
               existingHashes.add(dupHash);
-              created++;
+          created++;
               continue;
             }
             const equityOrigenId = await getOrCreateChartAccountForEquity(entityOrigen);
@@ -2978,12 +2962,12 @@ router.post('/liquidar', async (req: Request, res: Response) => {
     const entryDate = date ? new Date(date) : new Date();
     const lines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
     if (amtUsd > 0) {
-      lines.push({ account_id: equityProyecto, entity_id, debit: amtUsd, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
-      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: 0, credit: amtUsd, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtUsd, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
+      lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtUsd, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
     }
     if (amtCop > 0) {
-      lines.push({ account_id: equityProyecto, entity_id, debit: amtCop, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
-      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: 0, credit: amtCop, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtCop, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
+      lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtCop, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
     }
     const entry = await AcctJournalEntry.create({
       date: entryDate,
@@ -3051,17 +3035,29 @@ router.post('/reponer', async (req: Request, res: Response) => {
       const doc = await AcctChartAccount.create({ code, name: accName, type: 'equity', is_header: false, sort_order: num });
       return doc.id;
     };
+    const getOrCreateIncomeAccount = async (): Promise<string> => {
+      const existing = await AcctChartAccount.findOne({ name: 'CORTE UTILIDADES', type: 'income' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^4135-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^4135-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const doc = await AcctChartAccount.create({ code: `4135-${String(num).padStart(2, '0')}`, name: 'CORTE UTILIDADES', type: 'income', is_header: false, sort_order: num });
+      return doc.id;
+    };
     const equityFondo = await getOrCreateEquity('FONDO LIBRE');
-    const equityAgencia = await getOrCreateEquity('AGENCIA X');
+    const incomeCorteId = await getOrCreateIncomeAccount();
     const entryDate = date ? new Date(date) : new Date();
     const lines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
     if (amtUsd > 0) {
       lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtUsd, credit: 0, description: 'Reposición a AGENCIA X', currency: 'USD' });
-      lines.push({ account_id: equityAgencia, entity_id: agenciaXId, debit: 0, credit: amtUsd, description: 'Reposición desde FONDO LIBRE', currency: 'USD' });
+      lines.push({ account_id: incomeCorteId, entity_id: agenciaXId, debit: 0, credit: amtUsd, description: 'Reposición desde FONDO LIBRE', currency: 'USD' });
     }
     if (amtCop > 0) {
       lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtCop, credit: 0, description: 'Reposición a AGENCIA X', currency: 'COP' });
-      lines.push({ account_id: equityAgencia, entity_id: agenciaXId, debit: 0, credit: amtCop, description: 'Reposición desde FONDO LIBRE', currency: 'COP' });
+      lines.push({ account_id: incomeCorteId, entity_id: agenciaXId, debit: 0, credit: amtCop, description: 'Reposición desde FONDO LIBRE', currency: 'COP' });
     }
     const entry = await AcctJournalEntry.create({
       date: entryDate,
