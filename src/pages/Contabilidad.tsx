@@ -1292,6 +1292,38 @@ export default function Contabilidad() {
     }
   }
 
+  const [pygCellModal, setPygCellModal] = useState<{ colId: string; colName: string; rowKey: string; rowLabel: string; group: 'A' | 'B' | 'C'; byClient: boolean } | null>(null);
+  const [pygCellLines, setPygCellLines] = useState<LedgerLine[]>([]);
+  const [pygCellLoading, setPygCellLoading] = useState(false);
+
+  async function openPygCellModal(colId: string, colName: string, rowKey: string, rowLabel: string, byClient: boolean) {
+    if (colId === '__total__') return;
+    const groupMap: Record<string, 'A' | 'B' | 'C'> = {
+      ingresos: 'A',
+      costos_directos: 'B',
+      gastos_indirectos: 'C',
+    };
+    const group = groupMap[rowKey];
+    if (!group) return;
+    setPygCellModal({ colId, colName, rowKey, rowLabel, group, byClient });
+    setPygCellLoading(true);
+    setPygCellLines([]);
+    try {
+      const params: { start: string; end: string; pyg_group: 'A' | 'B' | 'C'; entity_id?: string | null; client_id?: string } = {
+        start: balanceStart || '',
+        end: balanceEnd || '',
+        pyg_group: group,
+      };
+      if (byClient) params.client_id = colId === '__null__' ? '' : colId;
+      else params.entity_id = colId === '__null__' ? null : colId;
+      const data = await contabilidadApi.getPygCellLines(params);
+      setPygCellLines(data);
+    } catch {
+      setPygCellLines([]);
+    }
+    setPygCellLoading(false);
+  }
+
   const [pygDetailModalEntity, setPygDetailModalEntity] = useState<PygRow | null>(null);
   const [pygDetailModalClient, setPygDetailModalClient] = useState<PygRowByClient | null>(null);
 
@@ -2270,12 +2302,17 @@ export default function Contabilidad() {
                               const v = getVal(row.cells, c.id);
                               const pct = isPct(row.key);
                               const isTotal = c.id === '__total__';
+                              const isClickable = !isTotal && ['ingresos', 'costos_directos', 'gastos_indirectos'].includes(row.key);
                               return (
-                                <td key={c.id} className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
-                                  isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
-                                } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
-                                  isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
-                                }`}>
+                                <td
+                                  key={c.id}
+                                  className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
+                                    isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
+                                  } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
+                                    isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
+                                  } ${isClickable ? 'cursor-pointer hover:bg-indigo-50/80 hover:underline' : ''}`}
+                                  onClick={isClickable ? () => openPygCellModal(c.id, c.name, row.key, row.label, false) : undefined}
+                                >
                                   {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
                                 </td>
                               );
@@ -2343,12 +2380,17 @@ export default function Contabilidad() {
                               const v = getVal(row.cells, c.id);
                               const pct = isPct(row.key);
                               const isTotal = c.id === '__total__';
+                              const isClickable = !isTotal && ['ingresos', 'costos_directos', 'gastos_indirectos'].includes(row.key);
                               return (
-                                <td key={c.id} className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
-                                  isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
-                                } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
-                                  isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
-                                }`}>
+                                <td
+                                  key={c.id}
+                                  className={`px-4 py-3 text-right tabular-nums group-hover:bg-gray-50/80 ${
+                                    isTotal ? 'font-semibold sticky right-0 z-[1]' : ''
+                                  } ${isTotal ? (isUtilidad(row.key) ? 'bg-gray-50/50' : 'bg-white') : ''} ${pct ? 'text-gray-600' : v >= 0 ? 'text-emerald-600' : 'text-red-600'} ${
+                                    isTotal && isUtilidad(row.key) ? (v >= 0 ? 'text-emerald-700' : 'text-red-700') : ''
+                                  } ${isClickable ? 'cursor-pointer hover:bg-indigo-50/80 hover:underline' : ''}`}
+                                  onClick={isClickable ? () => openPygCellModal(c.id, c.name, row.key, row.label, true) : undefined}
+                                >
                                   {pct ? (v !== 0 ? fmt(v, true) : '—') : fmt(v, false)}
                                 </td>
                               );
@@ -3369,6 +3411,35 @@ export default function Contabilidad() {
               ) : (
                 <PygDetailPanel
                   transactions={pygDetailTransactions}
+                  onEditTransaction={(t) => {
+                    const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
+                    if (jeId) handleEditJournalEntry(jeId);
+                    else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pygCellModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPygCellModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-[95vw] w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b shrink-0">
+              <h3 className="font-semibold text-lg">
+                {pygCellModal.rowLabel} — {pygCellModal.colName}
+              </h3>
+              <button onClick={() => setPygCellModal(null)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              {pygCellLoading ? (
+                <div className="text-sm text-gray-500 py-8">Cargando registros…</div>
+              ) : pygCellLines.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">No hay registros en esta celda.</div>
+              ) : (
+                <PygDetailPanel
+                  transactions={ledgerLinesToTransactionLike(pygCellLines)}
                   onEditTransaction={(t) => {
                     const jeId = (t as AcctTransaction & { journal_entry_id?: string }).journal_entry_id;
                     if (jeId) handleEditJournalEntry(jeId);

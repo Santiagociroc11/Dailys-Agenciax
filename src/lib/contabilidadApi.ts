@@ -321,6 +321,12 @@ export const contabilidadApi = {
     if (params?.category_id) search.category_id = params.category_id;
     return fetchJson<LedgerLine[]>(url('/ledger-lines', Object.keys(search).length > 0 ? search : undefined));
   },
+  async getPygCellLines(params: { start: string; end: string; pyg_group: 'A' | 'B' | 'C'; entity_id?: string | null; client_id?: string }): Promise<LedgerLine[]> {
+    const search: Record<string, string> = { start: params.start, end: params.end, pyg_group: params.pyg_group };
+    if (params.entity_id !== undefined) search.entity_id = params.entity_id == null || params.entity_id === '' ? '__null__' : params.entity_id;
+    if (params.client_id) search.client_id = params.client_id;
+    return fetchJson<LedgerLine[]>(url('/pyg-cell-lines', search));
+  },
   async createTransaction(data: {
     date: string;
     amount: number;

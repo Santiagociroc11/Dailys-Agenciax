@@ -696,6 +696,95 @@ router.get('/ledger-lines', async (req: Request, res: Response) => {
   }
 });
 
+// --- P&G Cell Lines: registros que componen una celda del P&G Matrix ---
+router.get('/pyg-cell-lines', async (req: Request, res: Response) => {
+  try {
+    const { start, end, entity_id, client_id, pyg_group } = req.query;
+    if (!start || !end || !pyg_group || !['A', 'B', 'C'].includes(pyg_group as string)) {
+      return res.status(400).json({ error: 'Requiere start, end y pyg_group (A|B|C)' });
+    }
+    const entryIds = (await AcctJournalEntry.find({
+      date: { $gte: new Date(start as string), $lte: new Date(end as string) },
+    })
+      .select('id date description reference')
+      .lean()
+      .exec()) as { id: string; date?: Date; description?: string; reference?: string }[];
+    const eids = entryIds.map((e) => e.id);
+    const entryMap = new Map(entryIds.map((e) => [e.id, e]));
+    if (eids.length === 0) return res.json([]);
+
+    const excludedIds = (await AcctChartAccount.find({ name: { $regex: TRASLADO_UTILIDADES_REGEX } }).select('id').lean().exec()).map((a) => (a as { id: string }).id);
+
+    const groupMatch: Record<string, unknown> =
+      pyg_group === 'A'
+        ? { 'acc.type': 'income' }
+        : pyg_group === 'B'
+          ? { 'acc.type': 'expense', 'acc.code': { $regex: /^[56]/ }, entity_id: { $ne: null } }
+          : { 'acc.type': 'expense', 'acc.code': { $regex: /^[56]/ }, $or: [{ entity_id: null }, { entity_id: { $exists: false } }] };
+
+    let entityFilter: Record<string, unknown> = {};
+    if (client_id && typeof client_id === 'string') {
+      const ids = (await AcctEntity.find({ client_id }).select('id').lean().exec()).map((e) => (e as { id: string }).id);
+      if (ids.length === 0) return res.json([]);
+      entityFilter = { entity_id: { $in: ids } };
+    } else if (entity_id !== undefined && entity_id !== null && entity_id !== '') {
+      if (entity_id === '__null__' || entity_id === 'null') {
+        entityFilter = { entity_id: null };
+      } else {
+        entityFilter = { entity_id: entity_id as string };
+      }
+    }
+
+    const pipeline: Record<string, unknown>[] = [
+      { $match: { journal_entry_id: { $in: eids } } },
+      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
+      { $unwind: '$acc' },
+      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+      ...(excludedIds.length > 0 ? [{ $match: { account_id: { $nin: excludedIds } } }] : []),
+      { $match: groupMatch },
+      ...(Object.keys(entityFilter).length > 0 ? [{ $match: entityFilter }] : []),
+    ];
+
+    const raw = await AcctJournalEntryLine.aggregate(pipeline as object[]).exec();
+    const accountIds = [...new Set((raw as { account_id: string }[]).map((l) => l.account_id))];
+    const entityIds = [...new Set((raw as { entity_id?: string | null }[]).map((l) => l.entity_id).filter(Boolean))];
+    const accounts = accountIds.length > 0 ? await AcctChartAccount.find({ id: { $in: accountIds } }).select('id code name type').lean().exec() : [];
+    const entities = entityIds.length > 0 ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name').lean().exec() : [];
+    const accountMap = new Map((accounts as { id: string; code: string; name: string; type: string }[]).map((a) => [a.id, a]));
+    const entityMap = new Map((entities as { id: string; name: string }[]).map((e) => [e.id, e.name]));
+
+    const enriched = (raw as { id: string; journal_entry_id: string; account_id: string; entity_id?: string | null; debit: number; credit: number; description?: string; currency?: string }[]).map((l) => {
+      const entry = entryMap.get(l.journal_entry_id);
+      const acc = accountMap.get(l.account_id);
+      return {
+        id: l.id,
+        journal_entry_id: l.journal_entry_id,
+        date: entry?.date,
+        description: l.description || entry?.description || '',
+        reference: entry?.reference,
+        account_id: l.account_id,
+        account_code: acc?.code ?? '',
+        account_name: acc?.name ?? '',
+        account_type: acc?.type ?? '',
+        entity_id: l.entity_id,
+        entity_name: l.entity_id ? entityMap.get(l.entity_id) ?? null : null,
+        debit: l.debit,
+        credit: l.credit,
+        currency: l.currency ?? 'USD',
+      };
+    });
+    enriched.sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
+    res.json(enriched);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 // --- Transactions (deprecado: usar ledger-lines) - mantiene compatibilidad para merge/delete de entidades/categorías ---
 router.get('/transactions', async (_req: Request, res: Response) => {
   try {

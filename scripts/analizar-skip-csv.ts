@@ -65,7 +65,7 @@ for (let i = headerRow + 1; i < records.length; i++) {
     const amountsSig = amounts.length > 0
       ? amounts.sort((a, b) => a.accountName.localeCompare(b.accountName)).map((a) => `${a.accountName}:${a.amount}`).join('|')
       : `importe:${parseAmount((row[idxImporte] || '').trim()) ?? 0}`;
-    const h = `${d.toISOString().slice(0, 10)}\x00${desc}\x00${proyecto}\x00${amountsSig}`;
+    const h = `${i}\x00${d.toISOString().slice(0, 10)}\x00${desc}\x00${proyecto}\x00${amountsSig}`;
     if (hashes.has(h)) inFileDupes++;
     hashes.add(h);
   }
