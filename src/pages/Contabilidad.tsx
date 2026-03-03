@@ -847,7 +847,7 @@ export default function Contabilidad() {
   const [pygData, setPygData] = useState<{ rows: PygRow[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [pygByClientData, setPygByClientData] = useState<{ rows: PygRowByClient[]; total_usd: { ingresos: number; gastos: number; resultado: number }; total_cop: { ingresos: number; gastos: number; resultado: number } } | null>(null);
   const [accountBalancesData, setAccountBalancesData] = useState<{ rows: AccountBalanceRow[]; total_usd: number; total_cop: number } | null>(null);
-  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'pyg_matrix' | 'pyg_matrix_client' | 'balance_general' | 'accounts'>('pyg_matrix');
+  const [balanceView, setBalanceView] = useState<'balance' | 'pyg' | 'pyg_client' | 'pyg_matrix' | 'pyg_matrix_client' | 'balance_general' | 'accounts' | 'liquidacion'>('pyg_matrix');
 
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -951,6 +951,8 @@ export default function Contabilidad() {
     reference: '',
     lines: [{ account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }],
   });
+  const [liquidarEntity, setLiquidarEntity] = useState<BalanceRow | null>(null);
+  const [liquidarLoading, setLiquidarLoading] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -1022,7 +1024,7 @@ export default function Contabilidad() {
       fetchChartAccounts();
     }
     if (activeTab === 'balance') {
-      if (balanceView === 'balance') fetchBalance();
+      if (balanceView === 'balance' || balanceView === 'liquidacion') fetchBalance();
       else if (balanceView === 'pyg') fetchPyg();
       else if (balanceView === 'pyg_client') fetchPygByClient();
       else if (balanceView === 'pyg_matrix') fetchPygMatrix();
@@ -1114,9 +1116,10 @@ export default function Contabilidad() {
   async function fetchBalance() {
     setLoading(true);
     try {
-      const params: { start?: string; end?: string } = {};
+      const params: { start?: string; end?: string; liquidacion?: boolean } = {};
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
+      if (balanceView === 'liquidacion') params.liquidacion = true;
       const data = await contabilidadApi.getBalance(params);
       setBalanceData(data);
     } catch (e) {
@@ -2072,6 +2075,7 @@ export default function Contabilidad() {
               {[
                 { id: 'pyg_matrix', label: 'P&G por proyecto', icon: BarChart3 },
                 { id: 'pyg_matrix_client', label: 'P&G por cliente', icon: Users },
+                { id: 'liquidacion', label: 'Liquidación', icon: CheckCircle2 },
                 { id: 'balance_general', label: 'Balance General', icon: Building2 },
                 { id: 'accounts', label: 'Cuentas', icon: CreditCard },
                 { id: 'balance', label: 'Balance', icon: DollarSign },
@@ -2754,6 +2758,79 @@ export default function Contabilidad() {
               </table>
               {sortedPygClientRows.length === 0 && (
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado. Asigna clientes a las entidades para ver el P&G por cliente.</div>
+              )}
+            </div>
+            );
+            })()
+          ) : balanceView === 'liquidacion' && balanceData ? (
+            (() => {
+              const hasCopBalance = balanceData.total_cop !== 0 || balanceData.rows.some((r) => r.cop !== 0);
+              const totalDisplay = (r: BalanceRow) => {
+                if (hasCopBalance && r.cop !== 0) return `${r.usd >= 0 ? '+' : ''}${r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD / ${r.cop >= 0 ? '+' : ''}${r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP`;
+                return `${r.usd >= 0 ? '+' : ''}${r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              };
+              return (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100">
+                <p className="text-sm text-amber-800">
+                  <strong>Vista de liquidación:</strong> Los proyectos con total $0 están liquidados. Usa <strong>Liquidar</strong> para trasladar la utilidad a FONDO LIBRE.
+                </p>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto</th>
+                    <th className="px-6 py-3 text-right font-medium text-gray-700">TOTALES</th>
+                    <th className="px-6 py-3 w-28"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {balanceData.rows.map((r) => {
+                    const isLiquidado = Math.abs(r.usd) < 0.01 && Math.abs(r.cop) < 0.01;
+                    const canLiquidar = (r.usd > 0 || r.cop > 0) && r.entity_id && r.entity_name !== 'Sin asignar';
+                    return (
+                    <tr key={r.entity_id ?? 'sin-asignar'} className={`border-t border-gray-100 hover:bg-gray-50 ${isLiquidado ? 'bg-emerald-50/50' : ''}`}>
+                      <td className="px-6 py-3 font-medium flex items-center gap-2">
+                        {r.entity_name}
+                        {isLiquidado && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Liquidado
+                          </span>
+                        )}
+                      </td>
+                      <td className={`px-6 py-3 text-right font-medium tabular-nums ${r.usd >= 0 && r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {totalDisplay(r)}
+                      </td>
+                      <td className="px-6 py-3">
+                        {canLiquidar && (
+                          <button
+                            type="button"
+                            onClick={() => setLiquidarEntity(r)}
+                            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                          >
+                            Liquidar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );})}
+                </tbody>
+                <tfoot className="bg-gray-100 font-semibold">
+                  <tr>
+                    <td className="px-6 py-3">Total general</td>
+                    <td className={`px-6 py-3 text-right ${balanceData.total_usd + (hasCopBalance ? balanceData.total_cop / 4000 : 0) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      {hasCopBalance && balanceData.total_cop !== 0 && (
+                        <span className="ml-2">{balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP</span>
+                      )}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+              {balanceData.rows.length === 0 && (
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
               )}
             </div>
             );
@@ -3447,6 +3524,64 @@ export default function Contabilidad() {
                   }}
                 />
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {liquidarEntity && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setLiquidarEntity(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-4">Liquidar proyecto</h3>
+            <p className="text-gray-600 mb-4">
+              Trasladar la utilidad de <strong>{liquidarEntity.entity_name}</strong> a FONDO LIBRE:
+            </p>
+            <div className="space-y-2 mb-6">
+              {liquidarEntity.usd !== 0 && (
+                <p className="text-lg font-medium text-emerald-600">
+                  {liquidarEntity.usd >= 0 ? '+' : ''}{liquidarEntity.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                </p>
+              )}
+              {liquidarEntity.cop !== 0 && (
+                <p className="text-lg font-medium text-emerald-600">
+                  {liquidarEntity.cop >= 0 ? '+' : ''}{liquidarEntity.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                </p>
+              )}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setLiquidarEntity(null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={liquidarLoading}
+                onClick={async () => {
+                  if (!liquidarEntity.entity_id) return;
+                  setLiquidarLoading(true);
+                  try {
+                    await contabilidadApi.liquidar({
+                      entity_id: liquidarEntity.entity_id,
+                      amount_usd: liquidarEntity.usd > 0 ? liquidarEntity.usd : undefined,
+                      amount_cop: liquidarEntity.cop > 0 ? liquidarEntity.cop : undefined,
+                      date: new Date().toISOString().split('T')[0],
+                    }, currentUser?.id);
+                    toast.success('Proyecto liquidado correctamente');
+                    setLiquidarEntity(null);
+                    fetchBalance();
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Error al liquidar');
+                  } finally {
+                    setLiquidarLoading(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {liquidarLoading ? 'Liquidando…' : 'Confirmar liquidación'}
+              </button>
             </div>
           </div>
         </div>

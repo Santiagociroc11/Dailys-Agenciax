@@ -363,11 +363,19 @@ export const contabilidadApi = {
     });
   },
 
-  async getBalance(params?: { start?: string; end?: string }): Promise<BalanceResponse> {
+  async getBalance(params?: { start?: string; end?: string; liquidacion?: boolean }): Promise<BalanceResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
+    if (params?.liquidacion) search.liquidacion = '1';
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
+  },
+
+  async liquidar(params: { entity_id: string; amount_usd?: number; amount_cop?: number; date?: string }, createdBy?: string): Promise<{ id: string; entity_name: string; amount_usd: number; amount_cop: number }> {
+    return fetchJson(url('/liquidar'), {
+      method: 'POST',
+      body: JSON.stringify({ ...params, created_by: createdBy }),
+    });
   },
 
   async getPyg(params?: { start?: string; end?: string; projects_only?: boolean; client_id?: string }): Promise<PygResponse> {

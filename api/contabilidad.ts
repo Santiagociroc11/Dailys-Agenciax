@@ -897,9 +897,10 @@ function normCurrency(c: string): 'USD' | 'COP' {
 }
 
 // --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
+// Con ?liquidacion=1 resta las distribuciones (créditos a cuentas Utilidades por entidad) para mostrar saldo pendiente de liquidar
 router.get('/balance', async (req: Request, res: Response) => {
   try {
-    const { start, end } = req.query;
+    const { start, end, liquidacion } = req.query;
     const entryMatch: Record<string, unknown> = {};
     if (start && end) {
       entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
@@ -960,6 +961,28 @@ router.get('/balance', async (req: Request, res: Response) => {
       const row = rowMap.get(key)!;
       if (cur === 'COP') row.cop += amt;
       else row.usd += amt;
+    }
+    if (liquidacion === '1' || liquidacion === 'true') {
+      const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
+      const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
+      if (equityIds.length > 0) {
+        const distPipeline = [
+          { $match: { journal_entry_id: { $in: entryIds }, account_id: { $in: equityIds } } },
+          { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' } } },
+        ];
+        const distResults = await AcctJournalEntryLine.aggregate(distPipeline).exec();
+        for (const d of distResults as { _id: { entity_id: string | null; currency: string }; credit: number }[]) {
+          const eid = d._id.entity_id;
+          const key = eid ?? 'null';
+          const cur = normCurrency(d._id.currency || 'USD');
+          const amt = Math.round(d.credit * 100) / 100;
+          if (rowMap.has(key)) {
+            const row = rowMap.get(key)!;
+            if (cur === 'COP') row.cop -= amt;
+            else row.usd -= amt;
+          }
+        }
+      }
     }
     const rows = Array.from(rowMap.values()).sort((a, b) => (b.usd + b.cop) - (a.usd + a.cop));
     const totalUsd = rows.reduce((acc, r) => acc + r.usd, 0);
@@ -2841,6 +2864,96 @@ router.get('/journal-entries/:id', async (req: Request, res: Response) => {
       };
     });
     res.json({ ...entry, lines: enrichedLines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Liquidar proyecto (traslado de utilidades a FONDO LIBRE) ---
+router.post('/liquidar', async (req: Request, res: Response) => {
+  try {
+    const { entity_id, amount_usd, amount_cop, date } = req.body as {
+      entity_id?: string;
+      amount_usd?: number;
+      amount_cop?: number;
+      date?: string;
+    };
+    const created_by = req.body.created_by as string | undefined;
+    if (!entity_id || (amount_usd == null && amount_cop == null)) {
+      res.status(400).json({ error: 'Faltan entity_id y (amount_usd o amount_cop)' });
+      return;
+    }
+    const amtUsd = Math.round((Number(amount_usd) || 0) * 100) / 100;
+    const amtCop = Math.round((Number(amount_cop) || 0) * 100) / 100;
+    if (amtUsd <= 0 && amtCop <= 0) {
+      res.status(400).json({ error: 'El monto debe ser positivo' });
+      return;
+    }
+    const entity = await AcctEntity.findOne({ id: entity_id }).select('id name').lean().exec();
+    if (!entity) {
+      res.status(404).json({ error: 'Entidad no encontrada' });
+      return;
+    }
+    const entityName = (entity as { name: string }).name;
+    let fondoLibreEntity = await AcctEntity.findOne({ name: 'FONDO LIBRE' }).select('id').lean().exec();
+    if (!fondoLibreEntity) {
+      const doc = await AcctEntity.create({ name: 'FONDO LIBRE', type: 'internal', sort_order: 0 });
+      fondoLibreEntity = { id: doc.id } as { id: string };
+    }
+    const getOrCreateEquityAccount = async (name: string): Promise<string> => {
+      const accName = `Utilidades ${name}`;
+      const existing = await AcctChartAccount.findOne({ name: accName, type: 'equity' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^3605-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^3605-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const code = `3605-${String(num).padStart(2, '0')}`;
+      const doc = await AcctChartAccount.create({ code, name: accName, type: 'equity', is_header: false, sort_order: num });
+      return doc.id;
+    };
+    const equityProyecto = await getOrCreateEquityAccount(entityName);
+    const equityFondo = await getOrCreateEquityAccount('FONDO LIBRE');
+    const entryDate = date ? new Date(date) : new Date();
+    const lines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
+    if (amtUsd > 0) {
+      lines.push({ account_id: equityFondo, entity_id: (fondoLibreEntity as { id: string }).id, debit: amtUsd, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
+      lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtUsd, description: `Traslado utilidades ${entityName}`, currency: 'USD' });
+    }
+    if (amtCop > 0) {
+      lines.push({ account_id: equityFondo, entity_id: (fondoLibreEntity as { id: string }).id, debit: amtCop, credit: 0, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
+      lines.push({ account_id: equityProyecto, entity_id, debit: 0, credit: amtCop, description: `Traslado utilidades ${entityName}`, currency: 'COP' });
+    }
+    const entry = await AcctJournalEntry.create({
+      date: entryDate,
+      description: `Corte utilidades ${entityName}`,
+      reference: 'Liquidación desde plataforma',
+      created_by: created_by ?? null,
+    });
+    for (const line of lines) {
+      await AcctJournalEntryLine.create({
+        journal_entry_id: entry.id,
+        account_id: line.account_id,
+        entity_id: line.entity_id,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description,
+        currency: line.currency,
+      });
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: entry.id,
+        action: 'create',
+        summary: `Liquidación: ${entityName} → FONDO LIBRE`,
+      });
+    }
+    res.status(201).json({ id: entry.id, entity_name: entityName, amount_usd: amtUsd, amount_cop: amtCop });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
