@@ -342,24 +342,6 @@ export const contabilidadApi = {
       body: JSON.stringify({ ...data, created_by: createdBy }),
     });
   },
-  async createTransactionsBatch(
-    transactions: Array<{
-      date: string;
-      amount: number;
-      currency?: string;
-      type: string;
-      entity_id?: string | null;
-      category_id?: string | null;
-      payment_account_id: string;
-      description?: string;
-    }>,
-    createdBy?: string
-  ): Promise<{ created: number; total: number; errors?: Array<{ index: number; error: string }> }> {
-    return fetchJson<{ created: number; total: number; errors?: Array<{ index: number; error: string }> }>(url('/transactions/batch'), {
-      method: 'POST',
-      body: JSON.stringify({ transactions, created_by: createdBy }),
-    });
-  },
   async updateTransaction(id: string, data: Partial<{
     date: string;
     amount: number;

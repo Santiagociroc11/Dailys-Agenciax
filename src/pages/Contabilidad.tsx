@@ -928,11 +928,6 @@ export default function Contabilidad() {
   const [transactionsPageSize, setTransactionsPageSize] = useState(25);
   const [categorySearchFilter, setCategorySearchFilter] = useState('');
   const [modalForTransaction, setModalForTransaction] = useState(false);
-  const [showBatchTransactionModal, setShowBatchTransactionModal] = useState(false);
-  const [batchTransactions, setBatchTransactions] = useState<Array<{ date: string; amount: number; currency: string; type: 'income' | 'expense'; entity_id: string | null; category_id: string | null; payment_account_id: string; description: string }>>([
-    { date: new Date().toISOString().split('T')[0], amount: 0, currency: 'USD', type: 'expense', entity_id: null, category_id: null, payment_account_id: '', description: '' },
-  ]);
-  const [batchSaving, setBatchSaving] = useState(false);
   const [showCreateCategoryInTransaction, setShowCreateCategoryInTransaction] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [configSearch, setConfigSearch] = useState('');
@@ -1618,49 +1613,12 @@ export default function Contabilidad() {
         payment_account_id: '',
         description: '',
       });
-      fetchLedgerLines();
-      if (balanceView === 'balance' || balanceView === 'liquidacion') fetchBalance();
+      fetchTransactions();
       if (modalForTransaction && configEntityExpanded) fetchConfigDetail('entity', configEntityExpanded);
       if (modalForTransaction && configCategoryExpanded) fetchConfigDetail('category', configCategoryExpanded);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error');
       toast.error(err instanceof Error ? err.message : 'Error');
-    }
-  }
-
-  async function handleSaveBatchTransactions(e: React.FormEvent) {
-    e.preventDefault();
-    const valid = batchTransactions.filter((t) => t.amount !== 0 && t.payment_account_id);
-    if (valid.length === 0) {
-      toast.error('Agrega al menos una fila con monto y cuenta');
-      return;
-    }
-    setBatchSaving(true);
-    try {
-      const result = await contabilidadApi.createTransactionsBatch(
-        valid.map((t) => ({
-          date: t.date,
-          amount: t.amount,
-          currency: t.currency,
-          type: t.type,
-          entity_id: t.entity_id,
-          category_id: t.category_id,
-          payment_account_id: t.payment_account_id,
-          description: t.description || undefined,
-        })),
-        currentUser?.id
-      );
-      toast.success(`${result.created} de ${result.total} creadas` + (result.errors?.length ? `. ${result.errors.length} con error.` : ''));
-      if (result.errors?.length) {
-        result.errors.forEach((err) => toast.error(`Fila ${err.index + 1}: ${err.error}`));
-      }
-      setShowBatchTransactionModal(false);
-      fetchLedgerLines();
-      if (balanceView === 'balance' || balanceView === 'liquidacion') fetchBalance();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error');
-    } finally {
-      setBatchSaving(false);
     }
   }
 
@@ -2083,45 +2041,6 @@ export default function Contabilidad() {
               <Plus className="w-5 h-5" />
               Nuevo asiento
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCurrentTransaction({
-                  date: new Date().toISOString().split('T')[0],
-                  amount: 0,
-                  currency: 'USD',
-                  type: 'expense',
-                  entity_id: null,
-                  category_id: null,
-                  payment_account_id: accounts[0]?.id ?? '',
-                  description: '',
-                });
-                setModalMode('create');
-                setModalForTransaction(true);
-                setShowModal(true);
-              }}
-              disabled={accounts.length === 0}
-              className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={accounts.length === 0 ? 'Crea primero una cuenta de pago en Config > Cuentas' : 'Ingreso o gasto simple (fecha, monto, proyecto, categoría, cuenta)'}
-            >
-              <DollarSign className="w-5 h-5" />
-              Transacción rápida
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setBatchTransactions([
-                  { date: new Date().toISOString().split('T')[0], amount: 0, currency: 'USD', type: 'expense', entity_id: null, category_id: null, payment_account_id: accounts[0]?.id ?? '', description: '' },
-                ]);
-                setShowBatchTransactionModal(true);
-              }}
-              disabled={accounts.length === 0}
-              className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Agregar varias transacciones a la vez (máx. 100)"
-            >
-              <Plus className="w-5 h-5" />
-              Agregar varias
-            </button>
           </div>
 
           {loading ? (
@@ -2136,11 +2055,7 @@ export default function Contabilidad() {
                 />
               </div>
               {ledgerLines.length === 0 ? (
-                <div className="p-12 text-center text-gray-500">
-                  No hay movimientos en el período seleccionado.
-                  <br />
-                  <span className="text-sm">Usa <strong>Transacción rápida</strong> para ingresos/gastos simples, <strong>Importar CSV</strong> para cargar muchos, o <strong>Nuevo asiento</strong> para partidas complejas.</span>
-                </div>
+                <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado. Importa un CSV o crea un asiento.</div>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-t border-gray-100 bg-gray-50 text-sm">
                   <div className="flex items-center gap-2">
@@ -4359,103 +4274,6 @@ export default function Contabilidad() {
               <div className="flex gap-2 pt-4">
                 <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Guardar</button>
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showBatchTransactionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="font-semibold text-lg">Agregar varias transacciones</h3>
-              <button onClick={() => setShowBatchTransactionModal(false)} className="p-2 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-            </div>
-            <form onSubmit={handleSaveBatchTransactions} className="flex flex-col flex-1 min-h-0">
-              <div className="flex-1 overflow-auto p-4">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-600 border-b">
-                        <th className="pb-2 pr-2">Fecha</th>
-                        <th className="pb-2 pr-2">Monto</th>
-                        <th className="pb-2 pr-2">Moneda</th>
-                        <th className="pb-2 pr-2">Tipo</th>
-                        <th className="pb-2 pr-2">Entidad</th>
-                        <th className="pb-2 pr-2">Categoría</th>
-                        <th className="pb-2 pr-2">Cuenta</th>
-                        <th className="pb-2 pr-2">Descripción</th>
-                        <th className="pb-2 w-10"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {batchTransactions.map((row, i) => (
-                        <tr key={i} className="border-b border-gray-100">
-                          <td className="py-1 pr-2">
-                            <input type="date" value={row.date} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, date: e.target.value } : r))} className="w-full px-2 py-1.5 border rounded text-sm" />
-                          </td>
-                          <td className="py-1 pr-2">
-                            <input type="number" step="0.01" value={row.amount || ''} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, amount: Number(e.target.value) || 0 } : r))} className="w-24 px-2 py-1.5 border rounded text-sm" placeholder="0" />
-                          </td>
-                          <td className="py-1 pr-2">
-                            <select value={row.currency} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, currency: e.target.value } : r))} className="px-2 py-1.5 border rounded text-sm">
-                              <option value="USD">USD</option>
-                              <option value="COP">COP</option>
-                            </select>
-                          </td>
-                          <td className="py-1 pr-2">
-                            <select value={row.type} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, type: e.target.value as 'income' | 'expense' | 'transfer' } : r))} className="px-2 py-1.5 border rounded text-sm">
-                              <option value="income">Ingreso</option>
-                              <option value="expense">Gasto</option>
-                              <option value="transfer">Transfer</option>
-                            </select>
-                          </td>
-                          <td className="py-1 pr-2">
-                            <select value={row.entity_id ?? ''} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, entity_id: e.target.value || null } : r))} className="px-2 py-1.5 border rounded text-sm min-w-[120px]">
-                              <option value="">—</option>
-                              {entities.map((e) => (
-                                <option key={e.id} value={e.id}>{e.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-1 pr-2">
-                            <select value={row.category_id ?? ''} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, category_id: e.target.value || null } : r))} className="px-2 py-1.5 border rounded text-sm min-w-[120px]">
-                              <option value="">—</option>
-                              {categories.map((c) => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-1 pr-2">
-                            <select value={row.payment_account_id} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, payment_account_id: e.target.value } : r))} className="px-2 py-1.5 border rounded text-sm min-w-[100px]">
-                              <option value="">Cuenta</option>
-                              {accounts.map((a) => (
-                                <option key={a.id} value={a.id}>{a.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-1 pr-2">
-                            <input type="text" value={row.description} onChange={(e) => setBatchTransactions((p) => p.map((r, j) => j === i ? { ...r, description: e.target.value } : r))} className="w-full px-2 py-1.5 border rounded text-sm" placeholder="Opcional" />
-                          </td>
-                          <td className="py-1">
-                            <button type="button" onClick={() => setBatchTransactions((p) => p.filter((_, j) => j !== i))} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Quitar fila"><Trash2 className="w-4 h-4" /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <button type="button" onClick={() => batchTransactions.length < 100 && setBatchTransactions((p) => [...p, { date: new Date().toISOString().split('T')[0], amount: 0, currency: 'USD', type: 'expense', entity_id: null, category_id: null, payment_account_id: accounts[0]?.id ?? '', description: '' }])} disabled={batchTransactions.length >= 100} className="mt-3 text-indigo-600 hover:text-indigo-700 flex items-center gap-1 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Plus className="w-4 h-4" /> Agregar fila {batchTransactions.length >= 100 && '(máx. 100)'}
-                </button>
-                <p className="text-xs text-gray-500 mt-2">Máximo 100 transacciones por lote. Las filas con monto 0 o sin cuenta se ignoran.</p>
-              </div>
-              <div className="flex gap-2 p-4 border-t">
-                <button type="submit" disabled={batchSaving} className="flex-1 bg-amber-600 text-white py-2 rounded-lg hover:bg-amber-700 disabled:opacity-50">
-                  {batchSaving ? 'Guardando...' : 'Crear transacciones'}
-                </button>
-                <button type="button" onClick={() => setShowBatchTransactionModal(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancelar</button>
               </div>
             </form>
           </div>
