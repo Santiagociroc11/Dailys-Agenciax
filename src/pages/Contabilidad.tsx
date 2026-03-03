@@ -952,10 +952,15 @@ export default function Contabilidad() {
     lines: [{ account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }],
   });
   const [liquidarEntity, setLiquidarEntity] = useState<BalanceRow | null>(null);
+  const [reponerEntity, setReponerEntity] = useState<BalanceRow | null>(null);
+  const [showRepartirModal, setShowRepartirModal] = useState(false);
+  const [repartirItems, setRepartirItems] = useState<Array<{ socio: string; amount_usd: number; amount_cop: number }>>([{ socio: '', amount_usd: 0, amount_cop: 0 }]);
   const [detalleLiquidacionEntity, setDetalleLiquidacionEntity] = useState<BalanceRow | null>(null);
   const [detalleLiquidacionLines, setDetalleLiquidacionLines] = useState<LedgerLine[]>([]);
   const [detalleLiquidacionLoading, setDetalleLiquidacionLoading] = useState(false);
   const [liquidarLoading, setLiquidarLoading] = useState(false);
+  const [reponerLoading, setReponerLoading] = useState(false);
+  const [repartirLoading, setRepartirLoading] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2802,23 +2807,32 @@ export default function Contabilidad() {
               };
               return (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100">
+              <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-amber-800">
-                  <strong>Vista de liquidación:</strong> Los proyectos con total $0 están liquidados. Usa <strong>Liquidar</strong> para trasladar la utilidad a FONDO LIBRE.
+                  <strong>Vista de liquidación:</strong> 1) <strong>Liquidar</strong> proyectos positivos → FONDO LIBRE. 2) <strong>Reponer</strong> AGENCIA X si está en negativo. 3) <strong>Repartir</strong> lo que queda a socios.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => { setRepartirItems([{ socio: '', amount_usd: 0, amount_cop: 0 }]); setShowRepartirModal(true); }}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  Repartir a socios
+                </button>
               </div>
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto</th>
                     <th className="px-6 py-3 text-right font-medium text-gray-700">TOTALES</th>
-                    <th className="px-6 py-3 w-28"></th>
+                    <th className="px-6 py-3 w-40"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {balanceData.rows.map((r) => {
                     const isLiquidado = Math.abs(r.usd) < 0.01 && Math.abs(r.cop) < 0.01;
                     const canLiquidar = (r.usd > 0 || r.cop > 0) && r.entity_id && r.entity_name !== 'Sin asignar';
+                    const isAgenciaX = (r.entity_name || '').toUpperCase() === 'AGENCIA X';
+                    const canReponer = isAgenciaX && (r.usd < -0.01 || r.cop < -0.01) && r.entity_id;
                     return (
                     <tr key={r.entity_id ?? 'sin-asignar'} className={`border-t border-gray-100 hover:bg-gray-50 ${isLiquidado ? 'bg-emerald-50/50' : ''}`}>
                       <td className="px-6 py-3 font-medium flex items-center gap-2">
@@ -2842,7 +2856,7 @@ export default function Contabilidad() {
                       <td className={`px-6 py-3 text-right font-medium tabular-nums ${r.usd >= 0 && r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {totalDisplay(r)}
                       </td>
-                      <td className="px-6 py-3">
+                      <td className="px-6 py-3 flex gap-2">
                         {canLiquidar && (
                           <button
                             type="button"
@@ -2850,6 +2864,15 @@ export default function Contabilidad() {
                             className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
                           >
                             Liquidar
+                          </button>
+                        )}
+                        {canReponer && (
+                          <button
+                            type="button"
+                            onClick={() => setReponerEntity(r)}
+                            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                          >
+                            Reponer
                           </button>
                         )}
                       </td>
@@ -3646,6 +3669,150 @@ export default function Contabilidad() {
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {liquidarLoading ? 'Liquidando…' : 'Confirmar liquidación'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reponerEntity && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setReponerEntity(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-4">Reponer AGENCIA X</h3>
+            <p className="text-gray-600 mb-4">
+              Trasladar desde <strong>FONDO LIBRE</strong> para cubrir el saldo negativo de AGENCIA X:
+            </p>
+            <div className="space-y-2 mb-6">
+              {reponerEntity.usd < -0.01 && (
+                <p className="text-lg font-medium text-red-600">
+                  {Math.abs(reponerEntity.usd).toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                </p>
+              )}
+              {reponerEntity.cop < -0.01 && (
+                <p className="text-lg font-medium text-red-600">
+                  {Math.abs(reponerEntity.cop).toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                </p>
+              )}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setReponerEntity(null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={reponerLoading}
+                onClick={async () => {
+                  setReponerLoading(true);
+                  try {
+                    await contabilidadApi.reponer({
+                      amount_usd: reponerEntity.usd < -0.01 ? Math.abs(reponerEntity.usd) : undefined,
+                      amount_cop: reponerEntity.cop < -0.01 ? Math.abs(reponerEntity.cop) : undefined,
+                      date: new Date().toISOString().split('T')[0],
+                    }, currentUser?.id);
+                    toast.success('AGENCIA X repuesta correctamente');
+                    setReponerEntity(null);
+                    fetchBalance();
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Error al reponer');
+                  } finally {
+                    setReponerLoading(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {reponerLoading ? 'Reponiendo…' : 'Confirmar reposición'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRepartirModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowRepartirModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-4">Repartir a socios</h3>
+            <p className="text-gray-600 mb-4 text-sm">
+              Registra los pagos desde FONDO LIBRE a cada socio. Lo que queda en FONDO LIBRE después de liquidar y reponer AGENCIA X se reparte aquí.
+            </p>
+            <div className="space-y-3 mb-6">
+              {repartirItems.map((it, i) => (
+                <div key={i} className="flex gap-2 items-center flex-wrap">
+                  <input
+                    type="text"
+                    value={it.socio}
+                    onChange={(e) => setRepartirItems((prev) => prev.map((p, j) => j === i ? { ...p, socio: e.target.value } : p))}
+                    placeholder="Nombre socio"
+                    className="flex-1 min-w-[120px] px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={it.amount_usd || ''}
+                    onChange={(e) => setRepartirItems((prev) => prev.map((p, j) => j === i ? { ...p, amount_usd: parseFloat(e.target.value) || 0 } : p))}
+                    placeholder="USD"
+                    className="w-24 px-2 py-2 border rounded-lg text-sm"
+                  />
+                  <input
+                    type="number"
+                    step="1"
+                    value={it.amount_cop || ''}
+                    onChange={(e) => setRepartirItems((prev) => prev.map((p, j) => j === i ? { ...p, amount_cop: parseFloat(e.target.value) || 0 } : p))}
+                    placeholder="COP"
+                    className="w-24 px-2 py-2 border rounded-lg text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRepartirItems((prev) => prev.filter((_, j) => j !== i))}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setRepartirItems((prev) => [...prev, { socio: '', amount_usd: 0, amount_cop: 0 }])}
+                className="text-sm text-indigo-600 hover:underline"
+              >
+                + Agregar socio
+              </button>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowRepartirModal(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={repartirLoading || repartirItems.every((it) => !it.socio.trim() && (it.amount_usd || 0) <= 0 && (it.amount_cop || 0) <= 0)}
+                onClick={async () => {
+                  const valid = repartirItems.filter((it) => it.socio.trim() && ((it.amount_usd || 0) > 0 || (it.amount_cop || 0) > 0));
+                  if (valid.length === 0) return;
+                  setRepartirLoading(true);
+                  try {
+                    await contabilidadApi.repartir({
+                      date: new Date().toISOString().split('T')[0],
+                      items: valid.map((it) => ({ socio: it.socio.trim(), amount_usd: it.amount_usd || undefined, amount_cop: it.amount_cop || undefined })),
+                    }, currentUser?.id);
+                    toast.success('Repartición registrada');
+                    setShowRepartirModal(false);
+                    fetchBalance();
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Error al repartir');
+                  } finally {
+                    setRepartirLoading(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {repartirLoading ? 'Guardando…' : 'Confirmar repartición'}
               </button>
             </div>
           </div>

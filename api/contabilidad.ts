@@ -2982,6 +2982,196 @@ router.post('/liquidar', async (req: Request, res: Response) => {
   }
 });
 
+// --- Reponer AGENCIA X (traslado desde FONDO LIBRE para cubrir saldo negativo) ---
+router.post('/reponer', async (req: Request, res: Response) => {
+  try {
+    const { amount_usd, amount_cop, date } = req.body as { amount_usd?: number; amount_cop?: number; date?: string };
+    const created_by = req.body.created_by as string | undefined;
+    const amtUsd = Math.round((Number(amount_usd) || 0) * 100) / 100;
+    const amtCop = Math.round((Number(amount_cop) || 0) * 100) / 100;
+    if (amtUsd <= 0 && amtCop <= 0) {
+      res.status(400).json({ error: 'El monto debe ser positivo' });
+      return;
+    }
+    const agenciaX = await AcctEntity.findOne({ name: 'AGENCIA X' }).select('id').lean().exec();
+    const fondoLibre = await AcctEntity.findOne({ name: 'FONDO LIBRE' }).select('id').lean().exec();
+    if (!agenciaX || !fondoLibre) {
+      res.status(404).json({ error: 'Faltan entidades AGENCIA X o FONDO LIBRE' });
+      return;
+    }
+    const agenciaXId = (agenciaX as { id: string }).id;
+    const fondoLibreId = (fondoLibre as { id: string }).id;
+    const getOrCreateEquity = async (name: string): Promise<string> => {
+      const accName = `Utilidades ${name}`;
+      const existing = await AcctChartAccount.findOne({ name: accName, type: 'equity' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^3605-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^3605-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const code = `3605-${String(num).padStart(2, '0')}`;
+      const doc = await AcctChartAccount.create({ code, name: accName, type: 'equity', is_header: false, sort_order: num });
+      return doc.id;
+    };
+    const getOrCreateIncomeAccount = async (): Promise<string> => {
+      const existing = await AcctChartAccount.findOne({ name: 'CORTE UTILIDADES', type: 'income' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^4135-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^4135-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const doc = await AcctChartAccount.create({ code: `4135-${String(num).padStart(2, '0')}`, name: 'CORTE UTILIDADES', type: 'income', is_header: false, sort_order: num });
+      return doc.id;
+    };
+    const equityFondo = await getOrCreateEquity('FONDO LIBRE');
+    const incomeCorteId = await getOrCreateIncomeAccount();
+    const entryDate = date ? new Date(date) : new Date();
+    const lines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
+    if (amtUsd > 0) {
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtUsd, credit: 0, description: 'Reposición a AGENCIA X', currency: 'USD' });
+      lines.push({ account_id: incomeCorteId, entity_id: agenciaXId, debit: 0, credit: amtUsd, description: 'Reposición desde FONDO LIBRE', currency: 'USD' });
+    }
+    if (amtCop > 0) {
+      lines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: amtCop, credit: 0, description: 'Reposición a AGENCIA X', currency: 'COP' });
+      lines.push({ account_id: incomeCorteId, entity_id: agenciaXId, debit: 0, credit: amtCop, description: 'Reposición desde FONDO LIBRE', currency: 'COP' });
+    }
+    const entry = await AcctJournalEntry.create({
+      date: entryDate,
+      description: 'Reposición AGENCIA X desde FONDO LIBRE',
+      reference: 'Reposición desde plataforma',
+      created_by: created_by ?? null,
+    });
+    for (const line of lines) {
+      await AcctJournalEntryLine.create({
+        journal_entry_id: entry.id,
+        account_id: line.account_id,
+        entity_id: line.entity_id,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description,
+        currency: line.currency,
+      });
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: entry.id,
+        action: 'create',
+        summary: 'Reposición: FONDO LIBRE → AGENCIA X',
+      });
+    }
+    res.status(201).json({ id: entry.id, amount_usd: amtUsd, amount_cop: amtCop });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Repartir a socios (desde FONDO LIBRE) ---
+router.post('/repartir', async (req: Request, res: Response) => {
+  try {
+    const { date, items } = req.body as {
+      date?: string;
+      items?: Array<{ socio: string; amount_usd?: number; amount_cop?: number }>;
+    };
+    const created_by = req.body.created_by as string | undefined;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Faltan items con socio y montos' });
+      return;
+    }
+    const fondoLibre = await AcctEntity.findOne({ name: 'FONDO LIBRE' }).select('id').lean().exec();
+    if (!fondoLibre) {
+      res.status(404).json({ error: 'No existe entidad FONDO LIBRE' });
+      return;
+    }
+    const fondoLibreId = (fondoLibre as { id: string }).id;
+    const getOrCreateEquity = async (name: string): Promise<string> => {
+      const accName = `Utilidades ${name}`;
+      const existing = await AcctChartAccount.findOne({ name: accName, type: 'equity' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^3605-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^3605-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const code = `3605-${String(num).padStart(2, '0')}`;
+      const doc = await AcctChartAccount.create({ code, name: accName, type: 'equity', is_header: false, sort_order: num });
+      return doc.id;
+    };
+    const getOrCreateExpenseAccount = async (socio: string): Promise<string> => {
+      const catName = `REPARTICIÓN DE UTILIDADES SOCIOS - ${socio}`;
+      const existing = await AcctChartAccount.findOne({ name: catName, type: 'expense' }).select('id').lean().exec();
+      if (existing) return (existing as { id: string }).id;
+      const maxCode = await AcctChartAccount.find({ code: { $regex: /^5105-\d{2}$/ } }).select('code').lean().exec();
+      let num = 1;
+      for (const a of maxCode as { code: string }[]) {
+        const m = a.code.match(/^5105-(\d+)$/);
+        if (m) num = Math.max(num, parseInt(m[1], 10) + 1);
+      }
+      const doc = await AcctChartAccount.create({ code: `5105-${String(num).padStart(2, '0')}`, name: catName, type: 'expense', is_header: false, sort_order: num });
+      return doc.id;
+    };
+    const equityFondo = await getOrCreateEquity('FONDO LIBRE');
+    const entryDate = date ? new Date(date) : new Date();
+    const allLines: Array<{ account_id: string; entity_id: string; debit: number; credit: number; description: string; currency: string }> = [];
+    for (const it of items) {
+      const amtUsd = Math.round((Number(it.amount_usd) || 0) * 100) / 100;
+      const amtCop = Math.round((Number(it.amount_cop) || 0) * 100) / 100;
+      if (amtUsd <= 0 && amtCop <= 0) continue;
+      const socio = (it.socio || '').trim() || 'Socio';
+      const expenseId = await getOrCreateExpenseAccount(socio);
+      if (amtUsd > 0) {
+        allLines.push({ account_id: expenseId, entity_id: fondoLibreId, debit: amtUsd, credit: 0, description: `Repartición ${socio}`, currency: 'USD' });
+        allLines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: 0, credit: amtUsd, description: `Repartición ${socio}`, currency: 'USD' });
+      }
+      if (amtCop > 0) {
+        allLines.push({ account_id: expenseId, entity_id: fondoLibreId, debit: amtCop, credit: 0, description: `Repartición ${socio}`, currency: 'COP' });
+        allLines.push({ account_id: equityFondo, entity_id: fondoLibreId, debit: 0, credit: amtCop, description: `Repartición ${socio}`, currency: 'COP' });
+      }
+    }
+    if (allLines.length === 0) {
+      res.status(400).json({ error: 'No hay montos válidos para repartir' });
+      return;
+    }
+    const entry = await AcctJournalEntry.create({
+      date: entryDate,
+      description: `Repartición a socios: ${items.map((i) => i.socio).join(', ')}`,
+      reference: 'Repartición desde plataforma',
+      created_by: created_by ?? null,
+    });
+    for (const line of allLines) {
+      await AcctJournalEntryLine.create({
+        journal_entry_id: entry.id,
+        account_id: line.account_id,
+        entity_id: line.entity_id,
+        debit: line.debit,
+        credit: line.credit,
+        description: line.description,
+        currency: line.currency,
+      });
+    }
+    if (created_by) {
+      await AuditLog.create({
+        user_id: created_by,
+        entity_type: 'acct_journal_entry',
+        entity_id: entry.id,
+        action: 'create',
+        summary: 'Repartición a socios',
+      });
+    }
+    res.status(201).json({ id: entry.id, items: items.length });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.post('/journal-entries', async (req: Request, res: Response) => {
   try {
     const { date, description, reference, lines } = req.body as {

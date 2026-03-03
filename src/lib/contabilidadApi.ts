@@ -378,6 +378,20 @@ export const contabilidadApi = {
     });
   },
 
+  async reponer(params: { amount_usd?: number; amount_cop?: number; date?: string }, createdBy?: string): Promise<{ id: string; amount_usd: number; amount_cop: number }> {
+    return fetchJson(url('/reponer'), {
+      method: 'POST',
+      body: JSON.stringify({ ...params, created_by: createdBy }),
+    });
+  },
+
+  async repartir(params: { date?: string; items: Array<{ socio: string; amount_usd?: number; amount_cop?: number }> }, createdBy?: string): Promise<{ id: string; items: number }> {
+    return fetchJson(url('/repartir'), {
+      method: 'POST',
+      body: JSON.stringify({ ...params, created_by: createdBy }),
+    });
+  },
+
   async getPyg(params?: { start?: string; end?: string; projects_only?: boolean; client_id?: string }): Promise<PygResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
