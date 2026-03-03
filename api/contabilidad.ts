@@ -13,31 +13,10 @@ import {
   AcctImportBatch,
   AuditLog,
 } from '../models/index.js';
+import { pgPipeline, equityDistPipeline, buildBalanceRows } from '../lib/contabilidad/balanceService.js';
+import { parseSpanishDate, parseAmount } from '../lib/contabilidad/csvUtils.js';
 
 const router = Router();
-
-const SPANISH_MONTHS: Record<string, number> = {
-  enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
-  julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11,
-};
-
-function parseSpanishDate(str: string): Date | null {
-  const m = str.trim().match(/^(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})$/i);
-  if (!m) return null;
-  const month = SPANISH_MONTHS[m[2].toLowerCase()];
-  if (month == null) return null;
-  const d = new Date(parseInt(m[3], 10), month, parseInt(m[1], 10));
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function parseAmount(str: string): number | null {
-  const s = String(str || '').trim().replace(/\s/g, '').replace(/\$/g, '').replace(/,/g, '');
-  if (!s) return null;
-  const neg = /^-/.test(s) || s.startsWith('-$');
-  const num = parseFloat(s.replace(/^-\$?/, '').replace(/^\$?/, ''));
-  if (isNaN(num)) return null;
-  return neg ? -num : num;
-}
 
 // --- Clients ---
 router.get('/clients', async (_req: Request, res: Response) => {
@@ -898,7 +877,8 @@ function normCurrency(c: string): 'USD' | 'COP' {
 }
 
 // --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
-// Con ?liquidacion=1 resta las distribuciones (créditos a cuentas Utilidades por entidad) para mostrar saldo pendiente de liquidar
+// Con ?liquidacion=1 resta las distribuciones (Utilidades) para mostrar saldo pendiente de liquidar
+// Lógica centralizada en lib/contabilidad/balanceService.ts
 router.get('/balance', async (req: Request, res: Response) => {
   try {
     const { start, end, liquidacion } = req.query;
@@ -917,26 +897,8 @@ router.get('/balance', async (req: Request, res: Response) => {
       return res.json({ rows: [], total_usd: 0, total_cop: 0 });
     }
 
-    const pipeline = [
-      { $match: { journal_entry_id: { $in: entryIds } } },
-      { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
-      { $unwind: '$acc' },
-      { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
-      {
-        $addFields: {
-          amount: {
-            $cond: [
-              { $eq: ['$acc.type', 'income'] },
-              { $subtract: ['$credit', '$debit'] },
-              { $subtract: [0, { $subtract: ['$debit', '$credit'] }] },
-            ],
-          },
-        },
-      },
-      { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } },
-    ];
-    const results = await AcctJournalEntryLine.aggregate(pipeline).exec();
-    const entityIds = [...new Set((results as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
+    const pgResults = await AcctJournalEntryLine.aggregate(pgPipeline(entryIds)).exec();
+    const entityIds = [...new Set((pgResults as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()
       : [];
@@ -944,48 +906,16 @@ router.get('/balance', async (req: Request, res: Response) => {
       (entities as { id: string; name: string; type: string }[]).map((e) => [e.id, { name: e.name, type: e.type }])
     );
 
-    const rowMap = new Map<string, { entity_id: string | null; entity_name: string; entity_type: string | null; usd: number; cop: number }>();
-    for (const r of results as { _id: { entity_id: string | null; currency: string }; total_amount: number }[]) {
-      const eid = r._id.entity_id;
-      const key = eid ?? 'null';
-      const cur = normCurrency(r._id.currency || 'USD');
-      const amt = Math.round(r.total_amount * 100) / 100;
-      if (!rowMap.has(key)) {
-        rowMap.set(key, {
-          entity_id: eid,
-          entity_name: eid ? (entityMap.get(eid)?.name ?? 'Sin asignar') : 'Sin asignar',
-          entity_type: eid ? (entityMap.get(eid)?.type ?? null) : null,
-          usd: 0,
-          cop: 0,
-        });
-      }
-      const row = rowMap.get(key)!;
-      if (cur === 'COP') row.cop += amt;
-      else row.usd += amt;
-    }
+    let equityResults: { _id: { entity_id: string | null; currency: string }; credit: number; debitFromReparticion: number }[] = [];
     if (liquidacion === '1' || liquidacion === 'true') {
-      const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
+      const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id').lean().exec();
       const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
       if (equityIds.length > 0) {
-        const distPipeline = [
-          { $match: { journal_entry_id: { $in: entryIds }, account_id: { $in: equityIds } } },
-          { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' }, debit: { $sum: '$debit' } } },
-        ];
-        const distResults = await AcctJournalEntryLine.aggregate(distPipeline).exec();
-        for (const d of distResults as { _id: { entity_id: string | null; currency: string }; credit: number; debit: number }[]) {
-          const eid = d._id.entity_id;
-          const key = eid ?? 'null';
-          const cur = normCurrency(d._id.currency || 'USD');
-          const amt = Math.round(Math.max(d.credit, d.debit) * 100) / 100;
-          if (rowMap.has(key)) {
-            const row = rowMap.get(key)!;
-            if (cur === 'COP') row.cop -= amt;
-            else row.usd -= amt;
-          }
-        }
+        equityResults = await AcctJournalEntryLine.aggregate(equityDistPipeline(entryIds, equityIds)).exec();
       }
     }
-    const rows = Array.from(rowMap.values()).sort((a, b) => (b.usd + b.cop) - (a.usd + a.cop));
+
+    const rows = buildBalanceRows(pgResults as any, equityResults, entityMap, liquidacion === '1' || liquidacion === 'true');
     const totalUsd = rows.reduce((acc, r) => acc + r.usd, 0);
     const totalCop = rows.reduce((acc, r) => acc + r.cop, 0);
 
