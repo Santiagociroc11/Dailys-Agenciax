@@ -796,6 +796,7 @@ router.get('/transactions', async (_req: Request, res: Response) => {
   }
 });
 
+// --- Transacción rápida: crea asiento contable (ingreso/gasto simple) para que aparezca en balance y P&G ---
 router.post('/transactions', async (req: Request, res: Response) => {
   try {
     const { date, amount, currency, type, entity_id, category_id, payment_account_id, description } = req.body;
@@ -804,27 +805,197 @@ router.post('/transactions', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Faltan date, amount, type o payment_account_id' });
       return;
     }
-    const doc = await AcctTransaction.create({
+    if (type === 'transfer') {
+      res.status(400).json({ error: 'Las transferencias entre cuentas usa el botón "Nuevo asiento" o importa CSV' });
+      return;
+    }
+    if (type !== 'income' && type !== 'expense') {
+      res.status(400).json({ error: 'Tipo debe ser income o expense' });
+      return;
+    }
+    const amt = Math.round(Math.abs(Number(amount)) * 100) / 100;
+    const cur = (currency || 'USD').toString().toUpperCase() === 'COP' ? 'COP' : 'USD';
+
+    const paymentAccount = await AcctPaymentAccount.findOne({ id: payment_account_id }).select('name').lean().exec();
+    if (!paymentAccount) {
+      res.status(400).json({ error: 'Cuenta de pago no encontrada' });
+      return;
+    }
+    const bankChart = await AcctChartAccount.findOne({ name: (paymentAccount as { name: string }).name, type: 'asset' }).select('id').lean().exec();
+    if (!bankChart) {
+      res.status(400).json({ error: `No existe cuenta contable para "${(paymentAccount as { name: string }).name}". Importa un CSV primero o crea la cuenta en Asientos > Plan de cuentas.` });
+      return;
+    }
+    const bankChartId = (bankChart as { id: string }).id;
+
+    let categoryChartId: string | null = null;
+    if (category_id) {
+      const category = await AcctCategory.findOne({ id: category_id }).select('name type').lean().exec();
+      if (category) {
+        const cat = category as { name: string; type: string };
+        const catChart = await AcctChartAccount.findOne({ name: cat.name, type: cat.type, is_header: false }).select('id').lean().exec();
+        if (catChart) {
+          categoryChartId = (catChart as { id: string }).id;
+        } else {
+          const parentChart = await AcctChartAccount.findOne({ name: cat.name, type: cat.type, is_header: true }).select('id').lean().exec();
+          if (parentChart) {
+            const childChart = await AcctChartAccount.findOne({ parent_id: (parentChart as { id: string }).id, type: cat.type }).select('id').limit(1).lean().exec();
+            if (childChart) categoryChartId = (childChart as { id: string }).id;
+          }
+        }
+        if (!categoryChartId) {
+          const anyMatch = await AcctChartAccount.findOne({ type: cat.type, name: { $regex: new RegExp(cat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } }).select('id').lean().exec();
+          if (anyMatch) categoryChartId = (anyMatch as { id: string }).id;
+        }
+      }
+    }
+    if (!categoryChartId) {
+      const defaultType = type as string;
+      const defaultChart = await AcctChartAccount.findOne({ type: defaultType, code: { $regex: defaultType === 'income' ? /^4135/ : /^5195/ } }).sort({ code: 1 }).select('id').limit(1).lean().exec();
+      if (defaultChart) categoryChartId = (defaultChart as { id: string }).id;
+    }
+    if (!categoryChartId) {
+      res.status(400).json({ error: 'No se encontró cuenta contable. Importa un CSV primero para crear el plan de cuentas, o selecciona una categoría que ya exista.' });
+      return;
+    }
+
+    const entityId = entity_id && typeof entity_id === 'string' ? entity_id : null;
+    const desc = (description || '').toString().slice(0, 500);
+
+    const entry = await AcctJournalEntry.create({
       date: new Date(date),
-      amount: Number(amount),
-      currency: currency ?? 'USD',
-      type,
-      entity_id: entity_id ?? null,
-      category_id: category_id ?? null,
-      payment_account_id,
-      description: description ?? '',
+      description: desc || (type === 'income' ? 'Ingreso' : 'Gasto'),
+      reference: 'Transacción',
       created_by: created_by ?? null,
     });
+
+    if (type === 'income') {
+      await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: desc.slice(0, 200), currency: cur });
+      await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: desc.slice(0, 200), currency: cur });
+    } else {
+      await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: desc.slice(0, 200), currency: cur });
+      await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: desc.slice(0, 200), currency: cur });
+    }
+
     if (created_by) {
       await AuditLog.create({
         user_id: created_by,
-        entity_type: 'acct_transaction',
-        entity_id: doc.id,
+        entity_type: 'acct_journal_entry',
+        entity_id: entry.id,
         action: 'create',
-        summary: `Transacción creada: ${amount} ${currency ?? 'USD'}`,
+        summary: `Transacción: ${amt} ${cur} (${type})`,
       });
     }
-    res.status(201).json(doc.toObject ? doc.toObject() : doc);
+
+    res.status(201).json({
+      id: entry.id,
+      date: (entry as { date: Date }).date?.toISOString?.()?.slice(0, 10),
+      amount: type === 'income' ? amt : -amt,
+      currency: cur,
+      type,
+      entity_id: entityId,
+      category_id: category_id ?? null,
+      payment_account_id,
+      description: desc,
+      journal_entry_id: entry.id,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// --- Transacciones rápidas en lote (varias a la vez) ---
+router.post('/transactions/batch', async (req: Request, res: Response) => {
+  try {
+    const { transactions: txList, created_by } = req.body as {
+      transactions?: Array<{ date: string; amount: number; currency?: string; type: string; entity_id?: string | null; category_id?: string | null; payment_account_id: string; description?: string }>;
+      created_by?: string;
+    };
+    if (!txList || !Array.isArray(txList) || txList.length === 0) {
+      res.status(400).json({ error: 'Falta transactions (array con al menos 1 elemento)' });
+      return;
+    }
+    if (txList.length > 100) {
+      res.status(400).json({ error: 'Máximo 100 transacciones por lote' });
+      return;
+    }
+    const created: string[] = [];
+    const errors: { index: number; error: string }[] = [];
+    for (let i = 0; i < txList.length; i++) {
+      const t = txList[i];
+      try {
+        if (!t.date || t.amount == null || !t.type || !t.payment_account_id) {
+          errors.push({ index: i, error: 'Faltan date, amount, type o payment_account_id' });
+          continue;
+        }
+        if (t.type !== 'income' && t.type !== 'expense') {
+          errors.push({ index: i, error: 'Tipo debe ser income o expense' });
+          continue;
+        }
+        const amt = Math.round(Math.abs(Number(t.amount)) * 100) / 100;
+        const cur = (t.currency || 'USD').toString().toUpperCase() === 'COP' ? 'COP' : 'USD';
+        const paymentAccount = await AcctPaymentAccount.findOne({ id: t.payment_account_id }).select('name').lean().exec();
+        if (!paymentAccount) {
+          errors.push({ index: i, error: 'Cuenta de pago no encontrada' });
+          continue;
+        }
+        const bankChart = await AcctChartAccount.findOne({ name: (paymentAccount as { name: string }).name, type: 'asset' }).select('id').lean().exec();
+        if (!bankChart) {
+          errors.push({ index: i, error: `No existe cuenta contable para "${(paymentAccount as { name: string }).name}"` });
+          continue;
+        }
+        const bankChartId = (bankChart as { id: string }).id;
+        let categoryChartId: string | null = null;
+        if (t.category_id) {
+          const category = await AcctCategory.findOne({ id: t.category_id }).select('name type').lean().exec();
+          if (category) {
+            const cat = category as { name: string; type: string };
+            const catChart = await AcctChartAccount.findOne({ name: cat.name, type: cat.type, is_header: false }).select('id').lean().exec();
+            if (catChart) categoryChartId = (catChart as { id: string }).id;
+            else {
+              const parentChart = await AcctChartAccount.findOne({ name: cat.name, type: cat.type, is_header: true }).select('id').lean().exec();
+              if (parentChart) {
+                const childChart = await AcctChartAccount.findOne({ parent_id: (parentChart as { id: string }).id, type: cat.type }).select('id').limit(1).lean().exec();
+                if (childChart) categoryChartId = (childChart as { id: string }).id;
+              }
+            }
+            if (!categoryChartId) {
+              const anyMatch = await AcctChartAccount.findOne({ type: cat.type, name: { $regex: new RegExp(cat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } }).select('id').lean().exec();
+              if (anyMatch) categoryChartId = (anyMatch as { id: string }).id;
+            }
+          }
+        }
+        if (!categoryChartId) {
+          const defaultType = t.type;
+          const defaultChart = await AcctChartAccount.findOne({ type: defaultType, code: { $regex: defaultType === 'income' ? /^4135/ : /^5195/ } }).sort({ code: 1 }).select('id').limit(1).lean().exec();
+          if (defaultChart) categoryChartId = (defaultChart as { id: string }).id;
+        }
+        if (!categoryChartId) {
+          errors.push({ index: i, error: 'No se encontró cuenta contable para la categoría' });
+          continue;
+        }
+        const entityId = t.entity_id && typeof t.entity_id === 'string' ? t.entity_id : null;
+        const desc = (t.description || '').toString().slice(0, 500);
+        const entry = await AcctJournalEntry.create({
+          date: new Date(t.date),
+          description: desc || (t.type === 'income' ? 'Ingreso' : 'Gasto'),
+          reference: 'Transacción',
+          created_by: created_by ?? null,
+        });
+        if (t.type === 'income') {
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: amt, credit: 0, description: desc.slice(0, 200), currency: cur });
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: 0, credit: amt, description: desc.slice(0, 200), currency: cur });
+        } else {
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: categoryChartId, entity_id: entityId, debit: amt, credit: 0, description: desc.slice(0, 200), currency: cur });
+          await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: desc.slice(0, 200), currency: cur });
+        }
+        created.push(entry.id);
+      } catch (e) {
+        errors.push({ index: i, error: e instanceof Error ? e.message : 'Error' });
+      }
+    }
+    res.status(201).json({ created: created.length, total: txList.length, errors: errors.length > 0 ? errors : undefined });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
