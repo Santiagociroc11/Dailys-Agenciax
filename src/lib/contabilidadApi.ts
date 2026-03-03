@@ -76,6 +76,7 @@ export interface BalanceResponse {
   rows: BalanceRow[];
   total_usd: number;
   total_cop: number;
+  debug?: { balancePreEquity?: unknown; equityCredits?: unknown; balanceFinal?: unknown };
 }
 
 export interface PygRow {
@@ -363,11 +364,12 @@ export const contabilidadApi = {
     });
   },
 
-  async getBalance(params?: { start?: string; end?: string; liquidacion?: boolean }): Promise<BalanceResponse> {
+  async getBalance(params?: { start?: string; end?: string; liquidacion?: boolean; debug?: boolean }): Promise<BalanceResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
     if (params?.liquidacion) search.liquidacion = '1';
+    if (params?.debug) search.debug = '1';
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
   },
 

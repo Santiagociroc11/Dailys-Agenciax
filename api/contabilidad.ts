@@ -901,7 +901,8 @@ function normCurrency(c: string): 'USD' | 'COP' {
 // Con ?liquidacion=1 resta las distribuciones (créditos a cuentas Utilidades por entidad) para mostrar saldo pendiente de liquidar
 router.get('/balance', async (req: Request, res: Response) => {
   try {
-    const { start, end, liquidacion } = req.query;
+    const { start, end, liquidacion, debug } = req.query;
+    const includeDebug = debug === '1' || debug === 'true';
     const entryMatch: Record<string, unknown> = {};
     if (start && end) {
       entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
@@ -963,6 +964,11 @@ router.get('/balance', async (req: Request, res: Response) => {
       if (cur === 'COP') row.cop += amt;
       else row.usd += amt;
     }
+    // #region agent log
+    const fondoLibreRow = Array.from(rowMap.entries()).find(([, r]) => (r.entity_name || '').toUpperCase() === 'FONDO LIBRE');
+    const agenciaXRow = Array.from(rowMap.entries()).find(([, r]) => (r.entity_name || '').toUpperCase() === 'AGENCIA X');
+    const debugData: Record<string, unknown> = includeDebug ? { balancePreEquity: { fondoLibre: fondoLibreRow ? { key: fondoLibreRow[0], ...fondoLibreRow[1] } : null, agenciaX: agenciaXRow ? { key: agenciaXRow[0], ...agenciaXRow[1] } : null } } : {};
+    // #endregion
     if (liquidacion === '1' || liquidacion === 'true') {
       const equityAccounts = await AcctChartAccount.find({ type: 'equity', name: { $regex: /^Utilidades\s+/i } }).select('id name').lean().exec();
       const equityIds = (equityAccounts as { id: string }[]).map((a) => a.id);
@@ -972,6 +978,15 @@ router.get('/balance', async (req: Request, res: Response) => {
           { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, credit: { $sum: '$credit' } } },
         ];
         const distResults = await AcctJournalEntryLine.aggregate(distPipeline).exec();
+        // #region agent log
+        if (includeDebug) {
+          const flId = fondoLibreRow?.[1]?.entity_id;
+          const axId = agenciaXRow?.[1]?.entity_id;
+          const equityFondo = (distResults as { _id: { entity_id: string | null; currency: string }; credit: number }[]).filter((d) => d._id.entity_id === flId);
+          const equityAgencia = (distResults as { _id: { entity_id: string | null; currency: string }; credit: number }[]).filter((d) => d._id.entity_id === axId);
+          debugData.equityCredits = { fondoLibreId: flId, fondoLibreCredits: equityFondo, agenciaXId: axId, agenciaXCredits: equityAgencia };
+        }
+        // #endregion
         for (const d of distResults as { _id: { entity_id: string | null; currency: string }; credit: number }[]) {
           const eid = d._id.entity_id;
           const key = eid ?? 'null';
@@ -985,11 +1000,20 @@ router.get('/balance', async (req: Request, res: Response) => {
         }
       }
     }
+    // #region agent log
+    if (includeDebug) {
+      const fondoLibreAfter = Array.from(rowMap.entries()).find(([, r]) => (r.entity_name || '').toUpperCase() === 'FONDO LIBRE');
+      const agenciaXAfter = Array.from(rowMap.entries()).find(([, r]) => (r.entity_name || '').toUpperCase() === 'AGENCIA X');
+      debugData.balanceFinal = { fondoLibre: fondoLibreAfter ? fondoLibreAfter[1] : null, agenciaX: agenciaXAfter ? agenciaXAfter[1] : null };
+    }
+    // #endregion
     const rows = Array.from(rowMap.values()).sort((a, b) => (b.usd + b.cop) - (a.usd + a.cop));
     const totalUsd = rows.reduce((acc, r) => acc + r.usd, 0);
     const totalCop = rows.reduce((acc, r) => acc + r.cop, 0);
 
-    res.json({ rows, total_usd: Math.round(totalUsd * 100) / 100, total_cop: Math.round(totalCop * 100) / 100 });
+    const json: { rows: typeof rows; total_usd: number; total_cop: number; debug?: typeof debugData } = { rows, total_usd: Math.round(totalUsd * 100) / 100, total_cop: Math.round(totalCop * 100) / 100 };
+    if (includeDebug && Object.keys(debugData).length > 0) json.debug = debugData;
+    res.json(json);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error';
     res.status(500).json({ error: msg });
