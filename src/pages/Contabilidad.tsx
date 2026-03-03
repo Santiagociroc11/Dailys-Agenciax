@@ -952,6 +952,9 @@ export default function Contabilidad() {
     lines: [{ account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }, { account_id: '', entity_id: null, debit: 0, credit: 0, description: '' }],
   });
   const [liquidarEntity, setLiquidarEntity] = useState<BalanceRow | null>(null);
+  const [detalleLiquidacionEntity, setDetalleLiquidacionEntity] = useState<BalanceRow | null>(null);
+  const [detalleLiquidacionLines, setDetalleLiquidacionLines] = useState<LedgerLine[]>([]);
+  const [detalleLiquidacionLoading, setDetalleLiquidacionLoading] = useState(false);
   const [liquidarLoading, setLiquidarLoading] = useState(false);
 
   useEffect(() => {
@@ -1016,6 +1019,34 @@ export default function Contabilidad() {
       setNewCategoryName('');
     }
   }, [showModal]);
+
+  useEffect(() => {
+    if (!detalleLiquidacionEntity) {
+      setDetalleLiquidacionLines([]);
+      return;
+    }
+    let cancelled = false;
+    setDetalleLiquidacionLoading(true);
+    contabilidadApi
+      .getLedgerLines({
+        start: balanceStart,
+        end: balanceEnd,
+        entity_id: detalleLiquidacionEntity.entity_id == null ? '__null__' : detalleLiquidacionEntity.entity_id,
+      })
+      .then((data) => {
+        if (!cancelled) setDetalleLiquidacionLines(data);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          toast.error(e instanceof Error ? e.message : 'Error al cargar registros');
+          setDetalleLiquidacionLines([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetalleLiquidacionLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [detalleLiquidacionEntity, balanceStart, balanceEnd]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2798,6 +2829,15 @@ export default function Contabilidad() {
                             Liquidado
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setDetalleLiquidacionEntity(r)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg text-gray-600 hover:bg-gray-100 hover:text-indigo-600"
+                          title="Ver registros del saldo"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver detalle
+                        </button>
                       </td>
                       <td className={`px-6 py-3 text-right font-medium tabular-nums ${r.usd >= 0 && r.cop >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {totalDisplay(r)}
@@ -3523,6 +3563,31 @@ export default function Contabilidad() {
                     else { setCurrentTransaction(t); setModalMode('edit'); setModalForTransaction(true); setShowModal(true); }
                   }}
                 />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detalleLiquidacionEntity && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetalleLiquidacionEntity(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-4 border-b">
+              <h3 className="font-semibold text-lg">
+                Registros de <strong>{detalleLiquidacionEntity.entity_name}</strong>
+                <span className="ml-2 text-sm font-normal text-gray-500">
+                  ({balanceStart} — {balanceEnd})
+                </span>
+              </h3>
+              <button type="button" onClick={() => setDetalleLiquidacionEntity(null)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {detalleLiquidacionLoading ? (
+                <div className="py-12 text-center text-gray-500">Cargando registros…</div>
+              ) : detalleLiquidacionLines.length === 0 ? (
+                <div className="py-12 text-center text-gray-500">No hay registros en el período.</div>
+              ) : (
+                <LedgerLineTable lines={detalleLiquidacionLines} />
               )}
             </div>
           </div>
