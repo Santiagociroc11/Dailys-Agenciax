@@ -28,6 +28,7 @@ import {
   Info,
   History,
   RotateCcw,
+  Landmark,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -2804,30 +2805,66 @@ export default function Contabilidad() {
                 if (hasCopBalance && r.cop !== 0) return `${r.usd >= 0 ? '+' : ''}${r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD / ${r.cop >= 0 ? '+' : ''}${r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP`;
                 return `${r.usd >= 0 ? '+' : ''}${r.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
               };
+              const fondoLibreRow = balanceData.rows.find((r) => (r.entity_name || '').toUpperCase() === 'FONDO LIBRE');
+              const otherRows = balanceData.rows.filter((r) => (r.entity_name || '').toUpperCase() !== 'FONDO LIBRE');
               return (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-amber-800">
-                  <strong>Vista de liquidación:</strong> 1) <strong>Liquidar</strong> proyectos positivos → FONDO LIBRE. 2) <strong>Reponer</strong> AGENCIA X si está en negativo. 3) <strong>Repartir</strong> lo que queda a socios.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setRepartirItems([{ socio: '', amount_usd: 0, amount_cop: 0 }]); setShowRepartirModal(true); }}
-                  className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  Repartir a socios
-                </button>
-              </div>
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto</th>
-                    <th className="px-6 py-3 text-right font-medium text-gray-700">TOTALES</th>
-                    <th className="px-6 py-3 w-40"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {balanceData.rows.map((r) => {
+            <div className="space-y-4">
+              {/* Card FONDO LIBRE — hub central */}
+              {fondoLibreRow && (
+                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 shadow-xl border border-indigo-500/20">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(255,255,255,0.15)_0%,transparent_50%)]" />
+                  <div className="relative px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-white/15 backdrop-blur-sm">
+                        <Landmark className="w-7 h-7 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-white tracking-tight">FONDO LIBRE</h3>
+                        <p className="text-indigo-200 text-sm mt-0.5">
+                          Hub central • Los proyectos liquidan aquí • AGENCIA X se repone desde aquí
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className={`text-2xl sm:text-3xl font-bold tabular-nums ${(fondoLibreRow.usd >= 0 && fondoLibreRow.cop >= 0) ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {totalDisplay(fondoLibreRow)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDetalleLiquidacionEntity(fondoLibreRow)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-sm font-medium transition-colors"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Ver detalle
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-100 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-amber-800">
+                    <strong>Proyectos:</strong> Liquidar los positivos → FONDO LIBRE. Reponer AGENCIA X si está en negativo.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setRepartirItems([{ socio: '', amount_usd: 0, amount_cop: 0 }]); setShowRepartirModal(true); }}
+                    className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
+                  >
+                    Repartir a socios
+                  </button>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left font-medium text-gray-700">Proyecto</th>
+                      <th className="px-6 py-3 text-right font-medium text-gray-700">TOTALES</th>
+                      <th className="px-6 py-3 w-40"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  {otherRows.map((r) => {
                     const isLiquidado = Math.abs(r.usd) < 0.01 && Math.abs(r.cop) < 0.01;
                     const canLiquidar = (r.usd > 0 || r.cop > 0) && r.entity_id && r.entity_name !== 'Sin asignar';
                     const isAgenciaX = (r.entity_name || '').toUpperCase() === 'AGENCIA X';
@@ -2891,9 +2928,13 @@ export default function Contabilidad() {
                   </tr>
                 </tfoot>
               </table>
-              {balanceData.rows.length === 0 && (
+              {otherRows.length === 0 && !fondoLibreRow && (
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
               )}
+              {otherRows.length === 0 && fondoLibreRow && (
+                <div className="p-8 text-center text-gray-500">Solo FONDO LIBRE tiene saldo en este período.</div>
+              )}
+            </div>
             </div>
             );
             })()
