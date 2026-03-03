@@ -2954,6 +2954,7 @@ export default function Contabilidad() {
                     <th className="px-6 py-3 text-left font-medium text-gray-700">Entidad</th>
                     <th className="px-6 py-3 text-right font-medium text-gray-700">USD</th>
                     {hasCopBalance && <th className="px-6 py-3 text-right font-medium text-gray-700">COP</th>}
+                    <th className="px-6 py-3 w-24"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2968,6 +2969,17 @@ export default function Contabilidad() {
                           {r.cop >= 0 ? '+' : ''}{r.cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })}
                         </td>
                       )}
+                      <td className="px-6 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setDetalleLiquidacionEntity(r)}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg text-gray-600 hover:bg-gray-100 hover:text-indigo-600"
+                          title="Ver registros del saldo"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver detalle
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2982,6 +2994,7 @@ export default function Contabilidad() {
                         {totalCopSinFondo >= 0 ? '+' : ''}{totalCopSinFondo.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                       </td>
                     )}
+                    <td></td>
                   </tr>
                   <tr>
                     <td className="px-6 py-3 text-indigo-700">Utilidad distribuible</td>
@@ -2993,6 +3006,7 @@ export default function Contabilidad() {
                         {totalCopSinFondo >= 0 ? '+' : ''}{totalCopSinFondo.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                       </td>
                     )}
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>
