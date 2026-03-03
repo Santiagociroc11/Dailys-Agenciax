@@ -2430,12 +2430,17 @@ router.post('/import', async (req: Request, res: Response) => {
         const { accountName, amount } = accountAmounts[0];
         await getOrCreateAccount(accountName);
         const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
-        await getOrCreateCategory(catForAccount, detForAccount, isExpense && !isReparto);
+        const isFondoLibreReparto = isReparto && proyectoStr.toUpperCase() === 'FONDO LIBRE';
+        await getOrCreateCategory(
+          isFondoLibreReparto ? 'REPARTICIÓN DE UTILIDADES SOCIOS' : catForAccount,
+          isFondoLibreReparto ? (detForAccount || 'Repartición') : detForAccount,
+          (isExpense && !isReparto) || isFondoLibreReparto
+        );
         const amt = Math.abs(amount);
         const currency = detectCurrency(accountName, amt);
         const bankChartId = await getOrCreateChartAccountForBank(accountName);
 
-        if (isReparto) {
+        if (isReparto && !isFondoLibreReparto) {
           const equityChartId = await getOrCreateChartAccountForEquity(proyectoStr);
           const entry = await AcctJournalEntry.create({
             date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
@@ -2444,7 +2449,11 @@ router.post('/import', async (req: Request, res: Response) => {
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: equityChartId, entity_id: entityId, debit: amt, credit: 0, description: descripcion.slice(0, 200), currency });
           await AcctJournalEntryLine.create({ journal_entry_id: entry.id, account_id: bankChartId, entity_id: entityId, debit: 0, credit: amt, description: descripcion.slice(0, 200), currency });
         } else {
-          const categoryChartId = await getOrCreateChartAccountForCategory(catForAccount, detForAccount, isExpense);
+          const categoryChartId = await getOrCreateChartAccountForCategory(
+            isFondoLibreReparto ? 'REPARTICIÓN DE UTILIDADES SOCIOS' : catForAccount,
+            isFondoLibreReparto ? (detForAccount || 'Repartición') : detForAccount,
+            isExpense || isFondoLibreReparto
+          );
           const entry = await AcctJournalEntry.create({
             date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
           });
@@ -2461,16 +2470,25 @@ router.post('/import', async (req: Request, res: Response) => {
         created++;
         rowCreated++;
       } else if (accountAmounts.length > 1 && !isTrasladoBancos) {
+        const isFondoLibreReparto = isReparto && proyectoStr.toUpperCase() === 'FONDO LIBRE';
         for (const { accountName, amount } of accountAmounts) {
           await getOrCreateAccount(accountName);
           const isExpense = tipoForzado === 'gasto' || (tipoForzado == null && amount < 0);
-          await getOrCreateCategory(catForAccount, detForAccount, (isExpense && !isReparto));
+          await getOrCreateCategory(
+            isFondoLibreReparto ? 'REPARTICIÓN DE UTILIDADES SOCIOS' : catForAccount,
+            isFondoLibreReparto ? (detForAccount || 'Repartición') : detForAccount,
+            (isExpense && !isReparto) || isFondoLibreReparto
+          );
           const amt = Math.abs(amount);
           const currency = detectCurrency(accountName, amt);
           const bankChartId = await getOrCreateChartAccountForBank(accountName);
-          const categoryChartId = isReparto
+          const categoryChartId = (isReparto && !isFondoLibreReparto)
             ? await getOrCreateChartAccountForEquity(proyectoStr)
-            : await getOrCreateChartAccountForCategory(catForAccount, detForAccount, isExpense);
+            : await getOrCreateChartAccountForCategory(
+                isFondoLibreReparto ? 'REPARTICIÓN DE UTILIDADES SOCIOS' : catForAccount,
+                isFondoLibreReparto ? (detForAccount || 'Repartición') : detForAccount,
+                isExpense || isFondoLibreReparto
+              );
           const entry = await AcctJournalEntry.create({
             date, description: descripcion.slice(0, 500), reference: `Import ${i + 1}`, created_by: created_by ?? null,
           });
