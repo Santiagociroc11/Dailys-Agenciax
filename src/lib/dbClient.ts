@@ -168,6 +168,7 @@ class InsertBuilder {
 
 class UpdateBuilder {
   private filters: QueryFilter = {};
+  private wantSingle = false;
 
   constructor(
     private table: string,
@@ -191,6 +192,7 @@ class UpdateBuilder {
   }
 
   single() {
+    this.wantSingle = true;
     return this;
   }
 
@@ -203,6 +205,7 @@ class UpdateBuilder {
       operation: 'update',
       data: this.data,
       filters: Object.keys(this.filters).length > 0 ? this.filters : undefined,
+      single: this.wantSingle,
     };
     const result = await executeRequest<T>(request);
     if (onFulfilled) {

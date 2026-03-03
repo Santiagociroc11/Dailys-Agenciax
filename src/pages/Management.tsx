@@ -684,13 +684,16 @@ function Management() {
 
       if (error) throw error;
       
+      // MongoDB/Supabase legacy puede devolver array en update; normalizar a objeto único
+      const resolvedData = (Array.isArray(data) ? data[0] : data) as any;
+      
       // 2. Si se desbloquea una tarea (cambio de 'blocked' a 'pending'), eliminar task_work_assignments
-      if (previousStatus === 'blocked' && newStatus === 'pending') {
+        if (previousStatus === 'blocked' && newStatus === 'pending') {
         await removeTaskWorkAssignments(itemId, isSubtask ? 'subtask' : 'task');
         
         // 🔔 Notificar a usuarios que la tarea está disponible (desbloqueada)
         try {
-          const taskData = data as any;
+          const taskData = resolvedData;
           let usersToNotify: string[] = [];
           let taskTitle = taskData.title;
           let projectName = "Proyecto sin nombre";
@@ -813,7 +816,7 @@ function Management() {
         } else {
           // CASO NORMAL: Registrar el cambio de estado normalmente
           const historyRecord = {
-              task_id: isSubtask ? (data as Subtask).task_id : itemId,
+              task_id: isSubtask ? (resolvedData as Subtask).task_id : itemId,
               subtask_id: isSubtask ? itemId : null,
               changed_by: user.id,
               previous_status: previousStatus,
@@ -834,10 +837,9 @@ function Management() {
       }
 
             // 🔔 Enviar notificación a administradores para acciones administrativas
-      if (['in_review', 'approved', 'returned'].includes(newStatus) && data) {
+      if (['in_review', 'approved', 'returned'].includes(newStatus) && resolvedData) {
         try {
-          // Obtener información del item actualizado
-          const itemData = data as any;
+          const itemData = resolvedData;
           
           // Para subtareas, obtener información de la tarea padre
           let parentTaskTitle = undefined;
@@ -1059,13 +1061,13 @@ function Management() {
       
       // Si se aprobó una subtarea, verificar si la tarea padre debe ser aprobada y notificar dependencias
       if (isSubtask && newStatus === 'approved') {
-        const parentTaskId = (data as Subtask)?.task_id;
+        const parentTaskId = (resolvedData as Subtask)?.task_id;
         if (parentTaskId) {
           await checkAndApproveParentTask(parentTaskId);
           
           // 🔔 Verificar si hay dependencias secuenciales que ahora están disponibles
           try {
-            const subtaskData = data as Subtask;
+            const subtaskData = resolvedData as Subtask;
             await checkAndNotifySequentialDependencies(parentTaskId, subtaskData.sequence_order);
           } catch (error) {
             console.error('🚨 [NOTIFICATION] Error verificando dependencias secuenciales:', error);
@@ -1678,6 +1680,70 @@ function Management() {
                     ? { ...task, status: newStatus as any } 
                     : task
             ));
+
+            // 🔔 Enviar notificación de tarea padre aprobada (auto-aprobación)
+            try {
+              const { data: taskData } = await supabase
+                .from('tasks')
+                .select('title, project_id, assigned_users')
+                .eq('id', parentId)
+                .single();
+
+              if (taskData) {
+                let projectName = 'Proyecto sin nombre';
+                let assignedUserName = 'Usuario desconocido';
+                let assignedUserAreaName = 'Sin área';
+
+                if (taskData.project_id) {
+                  const { data: projectData } = await supabase
+                    .from('projects')
+                    .select('name')
+                    .eq('id', taskData.project_id)
+                    .single();
+                  if (projectData) projectName = projectData.name;
+                }
+
+                if (taskData.assigned_users && taskData.assigned_users.length > 0) {
+                  const { data: assignedUser } = await supabase
+                    .from('users')
+                    .select('name, email')
+                    .eq('id', taskData.assigned_users[0])
+                    .single();
+                  if (assignedUser) assignedUserName = assignedUser.name || assignedUser.email;
+                  try {
+                    const { data: userAreas } = await supabase
+                      .rpc('get_areas_by_user', { user_uuid: taskData.assigned_users[0] });
+                    if (userAreas?.[0]?.area_name) assignedUserAreaName = userAreas[0].area_name;
+                  } catch (_) {}
+                }
+
+                const adminName = user?.name || user?.email || 'Administrador';
+                fetch(apiUrl('/api/telegram/admin-notification'), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    taskTitle: taskData.title,
+                    userName: assignedUserName,
+                    projectName,
+                    areaName: assignedUserAreaName,
+                    status: 'approved',
+                    adminName,
+                    isSubtask: false,
+                    taskId: parentId
+                  })
+                }).then(response => {
+                  if (response.ok) {
+                    console.log(`✅ [NOTIFICATION] Notificación de tarea padre aprobada enviada`);
+                  } else {
+                    console.warn(`⚠️ [NOTIFICATION] Error al enviar notificación de tarea aprobada: ${response.status}`);
+                  }
+                }).catch(err => {
+                  console.error('🚨 [NOTIFICATION] Error enviando notificación de tarea aprobada:', err);
+                });
+              }
+            } catch (notifErr) {
+              console.error('🚨 [NOTIFICATION] Error preparando notificación de tarea aprobada:', notifErr);
+            }
         }
     } catch (e) {
         console.error(`Error checking and approving parent task ${parentId}:`, e);
