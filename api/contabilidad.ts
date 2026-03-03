@@ -898,8 +898,8 @@ function normCurrency(c: string): 'USD' | 'COP' {
 }
 
 // --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
-// Con ?liquidacion=1: balance = (income - expense) + (equity_credits - equity_debits).
-// Crédito a Utilidades = recibió; débito = distribuyó. Modelo ERP: todo equity 3605-xx.
+// Con ?liquidacion=1: balance = (income - expense) + (equity_debits - equity_credits).
+// Crédito a Utilidades = distribuyó (baja); débito = recibió (sube). Modelo ERP: todo equity 3605-xx.
 router.get('/balance', async (req: Request, res: Response) => {
   try {
     const { start, end, liquidacion } = req.query;
@@ -985,7 +985,7 @@ router.get('/balance', async (req: Request, res: Response) => {
           const eid = d._id.entity_id;
           const key = eid ?? 'null';
           const cur = normCurrency(d._id.currency || 'USD');
-          const net = Math.round((d.credit - d.debit) * 100) / 100;
+          const net = Math.round((d.debit - d.credit) * 100) / 100;
           if (!rowMap.has(key)) {
             rowMap.set(key, {
               entity_id: eid,
