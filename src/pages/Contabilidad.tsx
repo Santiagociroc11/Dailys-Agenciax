@@ -864,8 +864,8 @@ export default function Contabilidad() {
   const [filterAccount, setFilterAccount] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
 
-  const [balanceStart, setBalanceStart] = useState(() => '');
-  const [balanceEnd, setBalanceEnd] = useState(() => '');
+  const [balanceStart, setBalanceStart] = useState(() => '2025-01-01');
+  const [balanceEnd, setBalanceEnd] = useState(() => '2026-12-31');
 
   const [currentClient, setCurrentClient] = useState<Partial<AcctClient>>({ name: '', sort_order: 0 });
   const [currentEntity, setCurrentEntity] = useState<Partial<AcctEntity>>({ name: '', type: 'project', sort_order: 0 });
@@ -1150,10 +1150,12 @@ export default function Contabilidad() {
   async function fetchBalance() {
     setLoading(true);
     try {
-      const params: { start?: string; end?: string; liquidacion?: boolean } = {};
+      const params: { start?: string; end?: string; liquidacion?: boolean; excluir_contables?: boolean } = {};
       if (balanceStart) params.start = balanceStart;
       if (balanceEnd) params.end = balanceEnd;
       if (balanceView === 'liquidacion') params.liquidacion = true;
+      // Balance = movimientos no contables (excluir SALIDA/INGRESO CONTABLE). Liquidación los incluye.
+      if (balanceView === 'balance') params.excluir_contables = true;
       const data = await contabilidadApi.getBalance(params);
       setBalanceData(data);
     } catch (e) {
@@ -2940,7 +2942,10 @@ export default function Contabilidad() {
             })()
           ) : balanceData ? (
             (() => {
-              const hasCopBalance = balanceData.total_cop !== 0 || balanceData.rows.some((r) => r.cop !== 0);
+              const rowsSinFondo = balanceData.rows.filter((r) => (r.entity_name || '').toUpperCase() !== 'FONDO LIBRE');
+              const totalUsdSinFondo = rowsSinFondo.reduce((s, r) => s + r.usd, 0);
+              const totalCopSinFondo = rowsSinFondo.reduce((s, r) => s + r.cop, 0);
+              const hasCopBalance = totalCopSinFondo !== 0 || rowsSinFondo.some((r) => r.cop !== 0);
               return (
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <table className="w-full text-sm">
@@ -2952,7 +2957,7 @@ export default function Contabilidad() {
                   </tr>
                 </thead>
                 <tbody>
-                  {balanceData.rows.map((r) => (
+                  {rowsSinFondo.map((r) => (
                     <tr key={r.entity_id ?? 'sin-asignar'} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium">{r.entity_name}</td>
                       <td className={`px-6 py-3 text-right font-medium ${r.usd >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -2969,29 +2974,29 @@ export default function Contabilidad() {
                 <tfoot className="bg-gray-100 font-semibold">
                   <tr>
                     <td className="px-6 py-3">Total general</td>
-                    <td className={`px-6 py-3 text-right ${balanceData.total_usd >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                    <td className={`px-6 py-3 text-right ${totalUsdSinFondo >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {totalUsdSinFondo >= 0 ? '+' : ''}{totalUsdSinFondo.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
                     {hasCopBalance && (
-                      <td className={`px-6 py-3 text-right ${balanceData.total_cop >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                        {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                      <td className={`px-6 py-3 text-right ${totalCopSinFondo >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {totalCopSinFondo >= 0 ? '+' : ''}{totalCopSinFondo.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                       </td>
                     )}
                   </tr>
                   <tr>
                     <td className="px-6 py-3 text-indigo-700">Utilidad distribuible</td>
                     <td className="px-6 py-3 text-right text-indigo-700 font-bold">
-                      {balanceData.total_usd >= 0 ? '+' : ''}{balanceData.total_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                      {totalUsdSinFondo >= 0 ? '+' : ''}{totalUsdSinFondo.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
                     </td>
                     {hasCopBalance && (
                       <td className="px-6 py-3 text-right text-indigo-700 font-bold">
-                        {balanceData.total_cop >= 0 ? '+' : ''}{balanceData.total_cop.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
+                        {totalCopSinFondo >= 0 ? '+' : ''}{totalCopSinFondo.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP
                       </td>
                     )}
                   </tr>
                 </tfoot>
               </table>
-              {balanceData.rows.length === 0 && (
+              {rowsSinFondo.length === 0 && (
                 <div className="p-12 text-center text-gray-500">No hay movimientos en el período seleccionado.</div>
               )}
             </div>

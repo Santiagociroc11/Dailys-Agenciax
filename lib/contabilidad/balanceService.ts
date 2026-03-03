@@ -40,13 +40,15 @@ import type { PipelineStage } from 'mongoose';
 
 /**
  * Pipeline de agregación para P&L (income - expense) por entidad.
+ * @param excludedAccountIds - IDs de cuentas a excluir (ej. CORTE UTILIDADES para "movimientos no contables")
  */
-export function pgPipeline(entryIds: string[]): PipelineStage[] {
-  return [
+export function pgPipeline(entryIds: string[], excludedAccountIds: string[] = []): PipelineStage[] {
+  const stages: PipelineStage[] = [
     { $match: { journal_entry_id: { $in: entryIds } } },
     { $lookup: { from: 'acct_chart_accounts', localField: 'account_id', foreignField: 'id', as: 'acc' } },
     { $unwind: '$acc' },
     { $match: { 'acc.type': { $in: ['income', 'expense'] } } },
+    ...(excludedAccountIds.length > 0 ? [{ $match: { account_id: { $nin: excludedAccountIds } } }] : []),
     {
       $addFields: {
         amount: {
@@ -60,6 +62,7 @@ export function pgPipeline(entryIds: string[]): PipelineStage[] {
     },
     { $group: { _id: { entity_id: '$entity_id', currency: '$currency' }, total_amount: { $sum: '$amount' } } },
   ];
+  return stages;
 }
 
 /**

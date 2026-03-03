@@ -111,3 +111,14 @@ El total USD/COP debe coincidir con la suma de las columnas de cuentas en el Exc
 2. **Montos COP contados como USD** — Montos > 100.000 o en cuentas BANCOLOMBIA/DAVIVIENDA se clasifican como COP. Si un monto USD grande se clasificó como COP por error, el total USD sería menor (no mayor).
 
 3. **Script de verificación** — Ejecuta `npx tsx scripts/totales-cuentas-csv.ts "CUENTAS DINERO PRESUPUESTO final.csv"` para ver los totales esperados desde el CSV.
+
+---
+
+## Balance vs movimientos no contables
+
+La vista **Balance** excluye CORTE UTILIDADES (SALIDA/INGRESO CONTABLE) para coincidir con una tabla dinámica de "movimientos no contables". La vista **Liquidación** los incluye para mostrar el saldo pendiente correcto.
+
+- **Balance** (`excluir_contables=1`): ingresos − gastos, sin traslados contables.
+- **Liquidación** (`liquidacion=1`): balance − distribuciones (saldo pendiente de liquidar).
+
+Script de simulación: `npx tsx scripts/simular-movimientos-no-contables.ts "CUENTAS DINERO PRESUPUESTO final.csv"`

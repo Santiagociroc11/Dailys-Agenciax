@@ -878,10 +878,11 @@ function normCurrency(c: string): 'USD' | 'COP' {
 
 // --- Balance (desde asientos: resultado por entidad = ingresos - gastos) ---
 // Con ?liquidacion=1 resta las distribuciones (Utilidades) para mostrar saldo pendiente de liquidar
+// Con ?excluir_contables=1 excluye CORTE UTILIDADES (SALIDA/INGRESO CONTABLE) = "movimientos no contables"
 // Lógica centralizada en lib/contabilidad/balanceService.ts
 router.get('/balance', async (req: Request, res: Response) => {
   try {
-    const { start, end, liquidacion } = req.query;
+    const { start, end, liquidacion, excluir_contables } = req.query;
     const entryMatch: Record<string, unknown> = {};
     if (start && end) {
       entryMatch.date = { $gte: new Date(start as string), $lte: new Date(end as string) };
@@ -897,7 +898,13 @@ router.get('/balance', async (req: Request, res: Response) => {
       return res.json({ rows: [], total_usd: 0, total_cop: 0 });
     }
 
-    const pgResults = await AcctJournalEntryLine.aggregate(pgPipeline(entryIds)).exec();
+    let excludedAccountIds: string[] = [];
+    if (excluir_contables === '1' || excluir_contables === 'true') {
+      const corteAccounts = await AcctChartAccount.find({ name: /^CORTE\s+UTILIDADES/i, type: 'income' }).select('id').lean().exec();
+      excludedAccountIds = (corteAccounts as { id: string }[]).map((a) => a.id);
+    }
+
+    const pgResults = await AcctJournalEntryLine.aggregate(pgPipeline(entryIds, excludedAccountIds)).exec();
     const entityIds = [...new Set((pgResults as { _id: { entity_id: string | null } }[]).map((r) => r._id.entity_id).filter(Boolean))];
     const entities = entityIds.length > 0
       ? await AcctEntity.find({ id: { $in: entityIds } }).select('id name type').lean().exec()

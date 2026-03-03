@@ -363,11 +363,12 @@ export const contabilidadApi = {
     });
   },
 
-  async getBalance(params?: { start?: string; end?: string; liquidacion?: boolean }): Promise<BalanceResponse> {
+  async getBalance(params?: { start?: string; end?: string; liquidacion?: boolean; excluir_contables?: boolean }): Promise<BalanceResponse> {
     const search: Record<string, string> = {};
     if (params?.start) search.start = params.start;
     if (params?.end) search.end = params.end;
     if (params?.liquidacion) search.liquidacion = '1';
+    if (params?.excluir_contables) search.excluir_contables = '1';
     return fetchJson<BalanceResponse>(url('/balance', Object.keys(search).length > 0 ? search : undefined));
   },
 
