@@ -19,6 +19,7 @@ import {
   ArrowDown,
   ChevronDown,
   ChevronRight,
+  UserPlus,
   Calendar,
   Search,
   Users,
@@ -920,6 +921,9 @@ export default function Contabilidad() {
   const [categorySortOrder, setCategorySortOrder] = useState<'asc' | 'desc'>('desc');
   const [entitySortBy, setEntitySortBy] = useState<'name' | 'type'>('name');
   const [entitySortOrder, setEntitySortOrder] = useState<'asc' | 'desc'>('asc');
+  const [selectedEntityIds, setSelectedEntityIds] = useState<Set<string>>(new Set());
+  const [bulkAssignClientId, setBulkAssignClientId] = useState('');
+  const [bulkAssignLoading, setBulkAssignLoading] = useState(false);
   const [configDetailTransactions, setConfigDetailTransactions] = useState<AcctTransaction[]>([]);
   const [configDetailLedgerLines, setConfigDetailLedgerLines] = useState<LedgerLine[]>([]);
   const [configDetailLoading, setConfigDetailLoading] = useState(false);
@@ -994,6 +998,17 @@ export default function Contabilidad() {
     });
   }, [entities, clients, configSearch]);
 
+  const sortedEntities = React.useMemo(() => {
+    return [...filteredEntities].sort((a, b) => {
+      if (entitySortBy === 'name') {
+        const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
+        return entitySortOrder === 'asc' ? cmp : -cmp;
+      }
+      const cmp = (a.type ?? '').localeCompare(b.type ?? '', 'es');
+      return entitySortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [filteredEntities, entitySortBy, entitySortOrder]);
+
   const filteredCategories = React.useMemo(() => {
     if (!configSearch.trim()) return categories;
     const q = configSearch.trim().toLowerCase();
@@ -1022,6 +1037,10 @@ export default function Contabilidad() {
       setNewCategoryName('');
     }
   }, [showModal]);
+
+  useEffect(() => {
+    if (configTab !== 'entities') setSelectedEntityIds(new Set());
+  }, [configTab]);
 
   useEffect(() => {
     if (!detalleLiquidacionEntity) {
@@ -1492,6 +1511,30 @@ export default function Contabilidad() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error');
       toast.error(err instanceof Error ? err.message : 'Error');
+    }
+  }
+  async function handleBulkAssignClient() {
+    if (!bulkAssignClientId || selectedEntityIds.size === 0) return;
+    setBulkAssignLoading(true);
+    try {
+      const ids = Array.from(selectedEntityIds);
+      for (const id of ids) {
+        const ent = entities.find((e) => e.id === id);
+        if (!ent) continue;
+        await contabilidadApi.updateEntity(
+          id,
+          { name: ent.name ?? '', type: ent.type, client_id: bulkAssignClientId || null, sort_order: ent.sort_order },
+          currentUser?.id
+        );
+      }
+      toast.success(`${ids.length} entidad(es) actualizada(s)`);
+      setSelectedEntityIds(new Set());
+      setBulkAssignClientId('');
+      fetchEntities();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setBulkAssignLoading(false);
     }
   }
   async function handleSaveCategory(e: React.FormEvent) {
@@ -3105,17 +3148,80 @@ export default function Contabilidad() {
 
           {configTab === 'entities' && (
             <div>
-              <button
-                onClick={() => { setCurrentEntity({ name: '', type: 'project', sort_order: 0 }); setModalMode('create'); setShowModal(true); }}
-                className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                Nueva entidad
-              </button>
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => { setCurrentEntity({ name: '', type: 'project', sort_order: 0 }); setModalMode('create'); setShowModal(true); }}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                >
+                  <Plus className="w-5 h-5" />
+                  Nueva entidad
+                </button>
+                {selectedEntityIds.size > 0 && (
+                  <div className="flex items-center gap-3 flex-wrap bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2">
+                    <span className="text-sm font-medium text-indigo-800">{selectedEntityIds.size} seleccionada(s)</span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={bulkAssignClientId}
+                        onChange={(e) => setBulkAssignClientId(e.target.value)}
+                        className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white"
+                      >
+                        <option value="">Elegir cliente…</option>
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleBulkAssignClient}
+                        disabled={!bulkAssignClientId || bulkAssignLoading}
+                        className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5 text-sm"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        {bulkAssignLoading ? 'Asignando…' : 'Asignar cliente'}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setSelectedEntityIds(new Set())}
+                      className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                    >
+                      Deseleccionar
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
                 <table className="w-full text-sm min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-700 w-12">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allSelected = sortedEntities.length > 0 && sortedEntities.every((e) => selectedEntityIds.has(e.id!));
+                            if (allSelected) {
+                              setSelectedEntityIds((prev) => {
+                                const next = new Set(prev);
+                                sortedEntities.forEach((e) => next.delete(e.id!));
+                                return next;
+                              });
+                            } else {
+                              setSelectedEntityIds((prev) => {
+                                const next = new Set(prev);
+                                sortedEntities.forEach((e) => next.add(e.id!));
+                                return next;
+                              });
+                            }
+                          }}
+                          className="flex items-center gap-1 hover:text-indigo-600"
+                          title={sortedEntities.every((e) => selectedEntityIds.has(e.id!)) ? 'Deseleccionar todas' : 'Seleccionar todas visibles'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={sortedEntities.length > 0 && sortedEntities.every((e) => selectedEntityIds.has(e.id!))}
+                            readOnly
+                            className="rounded border-gray-300"
+                          />
+                        </button>
+                      </th>
                       <th className="px-6 py-3 text-left font-medium text-gray-700">
                         <button
                           type="button"
@@ -3149,21 +3255,28 @@ export default function Contabilidad() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...filteredEntities]
-                      .sort((a, b) => {
-                        if (entitySortBy === 'name') {
-                          const cmp = (a.name ?? '').localeCompare(b.name ?? '', 'es');
-                          return entitySortOrder === 'asc' ? cmp : -cmp;
-                        }
-                        const cmp = (a.type ?? '').localeCompare(b.type ?? '', 'es');
-                        return entitySortOrder === 'asc' ? cmp : -cmp;
-                      })
-                      .map((e) => (
+                    {sortedEntities.map((e) => (
                       <React.Fragment key={e.id}>
                         <tr
                           onClick={() => toggleConfigEntityExpand(e)}
                           className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer select-none"
                         >
+                          <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedEntityIds.has(e.id!)}
+                              onChange={(ev) => {
+                                ev.stopPropagation();
+                                setSelectedEntityIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(e.id!)) next.delete(e.id!);
+                                  else next.add(e.id!);
+                                  return next;
+                                });
+                              }}
+                              className="rounded border-gray-300"
+                            />
+                          </td>
                           <td className="px-6 py-3">
                             <span className="inline-flex items-center gap-1">
                               {configEntityExpanded === e.id ? (
@@ -3184,7 +3297,7 @@ export default function Contabilidad() {
                         </tr>
                         {configEntityExpanded === e.id && (
                           <tr className="border-t border-gray-100 bg-gray-50/80">
-                            <td colSpan={4} className="px-6 py-4">
+                            <td colSpan={5} className="px-6 py-4">
                               {configDetailLoading ? (
                                 <div className="text-sm text-gray-500 py-4">Cargando…</div>
                               ) : configDetailTransactions.length === 0 ? (
