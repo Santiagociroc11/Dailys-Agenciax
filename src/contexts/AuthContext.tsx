@@ -17,7 +17,7 @@ interface AuthContextType {
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => void;
   isAdmin: boolean;
-  impersonateUser: (user: User) => void;
+  impersonateUser: (user: User) => void | Promise<void>;
   stopImpersonating: () => void;
   isImpersonating: boolean;
 }
@@ -70,17 +70,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const impersonateUser = (targetUser: User) => {
+  const impersonateUser = async (targetUser: User) => {
     if (user?.role !== 'admin') {
       console.error('Only admins can impersonate users.');
       return;
     }
+    // Siempre refrescar assigned_projects desde la BD para que la vista del usuario impersonado coincida con su sesión real
+    const { data: freshUser } = await supabase
+      .from('users')
+      .select('id, name, email, role, assigned_projects')
+      .eq('id', targetUser.id)
+      .single();
+    const userToImpersonate: User = freshUser
+      ? { ...targetUser, assigned_projects: freshUser.assigned_projects ?? [] }
+      : targetUser;
     // Store the admin user before impersonating
     localStorage.setItem('admin_user', JSON.stringify(user));
     
     // Set the new user
-    setUser(targetUser);
-    localStorage.setItem('user', JSON.stringify(targetUser));
+    setUser(userToImpersonate);
+    localStorage.setItem('user', JSON.stringify(userToImpersonate));
     
     // Set impersonation flag
     setIsImpersonating(true);

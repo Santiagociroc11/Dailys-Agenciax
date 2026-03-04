@@ -15,6 +15,7 @@ interface User {
   monthly_salary?: number | null;
   currency?: string;
   payment_account?: string | null;
+  assigned_projects?: string[];
 }
 
 export default function Users() {
@@ -68,7 +69,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, monthly_salary, currency, payment_account');
+        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, monthly_salary, currency, payment_account, assigned_projects');
 
       if (error) throw error;
 
