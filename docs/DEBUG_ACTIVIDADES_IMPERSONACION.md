@@ -26,7 +26,13 @@ Al usar "Iniciar sesión como" desde la lista de usuarios, el objeto del usuario
 - `Users.tsx`: se incluye `assigned_projects` en el `select` al cargar usuarios
 - `AuthContext.tsx`: al impersonar, se refresca el usuario desde la BD para tener `assigned_projects` actualizado
 
-### 3. "Sin proyecto"
+### 3. Proyectos archivados no deben mostrarse
+
+**Problema:** Tareas de proyectos archivados aparecían (mostrando "Sin proyecto" porque projectMap los excluía).
+
+**Corrección:** `effectiveProjectIds` en UserProjectView ahora solo incluye proyectos con `is_archived = false`. Los proyectos archivados no aparecen en ninguna vista de usuario.
+
+### 4. "Sin proyecto"
 
 Aparece cuando `projectMap.get(project_id)` no encuentra el proyecto. Posibles causas:
 

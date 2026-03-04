@@ -17,6 +17,7 @@
     "migrate:add-restricted-access": "npx tsx scripts/add-restricted-access-to-projects.ts",
     "migrate:add-client-id": "npx tsx scripts/add-client-id-to-projects.ts",
     "listar:proyectos-cierre": "npx tsx scripts/listar-proyectos-cierre.ts",
+    "diagnostico:usuario": "npx tsx scripts/diagnostico-usuario.ts",
     "dev": "vite",
     "dev:server": "tsx watch server.ts",
     "build:frontend": "vite build",

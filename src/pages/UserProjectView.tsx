@@ -281,7 +281,7 @@ export default function UserProjectView() {
 
    const allowedProjectIds = !isAdmin ? effectiveProjectIds : null;
 
-   // Efecto: para no-admin, combinar assigned_projects con proyectos de asignaciones pendientes (para que Gestión coincida con Mi día)
+   // Efecto: para no-admin, combinar assigned_projects con proyectos de asignaciones pendientes, SOLO proyectos NO archivados
    useEffect(() => {
       if (!user || isAdmin) {
          setEffectiveProjectIds(null);
@@ -296,7 +296,18 @@ export default function UserProjectView() {
             .not("status", "in", "('completed','in_review','approved')");
          const fromAssignments = [...new Set((data || []).map((r) => r.project_id).filter(Boolean))] as string[];
          fromAssignments.forEach((id) => base.add(id));
-         setEffectiveProjectIds(Array.from(base));
+         const allIds = Array.from(base);
+         if (allIds.length === 0) {
+            setEffectiveProjectIds([]);
+            return;
+         }
+         const { data: activeProjects } = await supabase
+            .from("projects")
+            .select("id")
+            .in("id", allIds)
+            .eq("is_archived", false);
+         const activeIds = (activeProjects || []).map((p) => p.id);
+         setEffectiveProjectIds(activeIds.length > 0 ? activeIds : []);
       })();
    }, [user?.id, user?.assigned_projects, isAdmin]);
 
