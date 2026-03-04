@@ -10,7 +10,15 @@
 
 ## Causa raíz (corregida)
 
-### 1. Impersonación sin `assigned_projects`
+### 1. Gestión vacía pero Mi día con actividades
+
+**Problema:** El usuario ve tareas en Mi día pero no en Gestión de tareas.
+
+**Causa:** Gestión filtra por `user.assigned_projects`. Si el usuario tiene asignaciones en proyectos que no están en su `assigned_projects` (p. ej. le asignaron trabajo sin añadirlo al proyecto en la configuración), no ve nada en Gestión.
+
+**Corrección:** En `UserProjectView`, `effectiveProjectIds` ahora combina `assigned_projects` con los proyectos donde el usuario tiene asignaciones pendientes en `task_work_assignments`. Así Gestión muestra los mismos proyectos que Mi día.
+
+### 2. Impersonación sin `assigned_projects`
 
 Al usar "Iniciar sesión como" desde la lista de usuarios, el objeto del usuario no incluía `assigned_projects`. La vista de **Gestión de tareas** (`UserProjectView`) filtra las tareas por `user.assigned_projects` para usuarios no-admin. Sin ese campo, el filtro fallaba y no se mostraban tareas.
 
@@ -18,7 +26,7 @@ Al usar "Iniciar sesión como" desde la lista de usuarios, el objeto del usuario
 - `Users.tsx`: se incluye `assigned_projects` en el `select` al cargar usuarios
 - `AuthContext.tsx`: al impersonar, se refresca el usuario desde la BD para tener `assigned_projects` actualizado
 
-### 2. "Sin proyecto"
+### 3. "Sin proyecto"
 
 Aparece cuando `projectMap.get(project_id)` no encuentra el proyecto. Posibles causas:
 

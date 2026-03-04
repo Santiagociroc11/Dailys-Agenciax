@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, differenceInDays, startOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Sun, CheckSquare, FolderOpen, ArrowRight, Calendar } from 'lucide-react';
+import { Sun, CheckSquare, FolderOpen, ArrowRight, Calendar, AlertCircle } from 'lucide-react';
 import TaskStatusDisplay from '../components/TaskStatusDisplay';
 import PhaseBadge from '../components/PhaseBadge';
 import { SkeletonMiDia } from '../components/Skeleton';
@@ -16,6 +16,7 @@ interface TodayAssignment {
   subtask_id: string | null;
   status: string;
   project_id: string | null;
+  date: string;
   title: string;
   projectName: string;
   phaseName: string | null;
@@ -38,14 +39,13 @@ export default function MiDiaView() {
     if (!user) return;
     try {
       setLoading(true);
-      const today = format(new Date(), 'yyyy-MM-dd');
 
       const { data: rawAssignments, error } = await supabase
         .from('task_work_assignments')
-        .select('id, task_id, task_type, subtask_id, status, project_id')
+        .select('id, task_id, task_type, subtask_id, status, project_id, date')
         .eq('user_id', user.id)
-        .eq('date', today)
         .not('status', 'in', "('completed','in_review','approved')")
+        .order('date', { ascending: true })
         .order('created_at', { ascending: true });
 
       if (error) throw error;
@@ -118,6 +118,7 @@ export default function MiDiaView() {
       );
 
       const enriched: TodayAssignment[] = filteredAssignments.map((a) => {
+        const rawDate = (a as { date?: string }).date;
         if (a.task_type === 'subtask' && a.subtask_id) {
           const sub = subtaskMap.get(a.subtask_id);
           return {
@@ -127,6 +128,7 @@ export default function MiDiaView() {
             subtask_id: a.subtask_id,
             status: a.status,
             project_id: sub?.project_id || a.project_id,
+            date: rawDate || '',
             title: sub?.title || '—',
             projectName: sub?.projectName || projectMap.get(a.project_id || '') || 'Sin proyecto',
             phaseName: sub?.phaseName ?? null,
@@ -143,6 +145,7 @@ export default function MiDiaView() {
           subtask_id: null,
           status: a.status,
           project_id: a.project_id,
+          date: rawDate || '',
           title: task?.title || '—',
           projectName: projectMap.get(a.project_id || '') || 'Sin proyecto',
           phaseName: taskPhaseId ? phaseMap.get(taskPhaseId) || null : null,
@@ -160,12 +163,40 @@ export default function MiDiaView() {
     }
   }
 
-  const groupedByProject = assignments.reduce((acc, a) => {
-    const key = a.projectName;
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const todayObj = startOfDay(new Date());
+
+  const getDaysSinceAssigned = (dateStr: string) => {
+    const d = startOfDay(new Date(dateStr + 'T12:00:00'));
+    const days = differenceInDays(todayObj, d);
+    return Math.max(0, days);
+  };
+
+  type RangeKey = 'hoy' | '1-2' | '3-7' | '8-14' | '15+';
+  const RANGES: { key: RangeKey; label: string; minDays: number; maxDays: number }[] = [
+    { key: 'hoy', label: 'Hoy', minDays: 0, maxDays: 0 },
+    { key: '1-2', label: '1-2 días', minDays: 1, maxDays: 2 },
+    { key: '3-7', label: '3-7 días', minDays: 3, maxDays: 7 },
+    { key: '8-14', label: '8-14 días', minDays: 8, maxDays: 14 },
+    { key: '15+', label: '15+ días', minDays: 15, maxDays: 999 },
+  ];
+
+  const getRangeKey = (days: number): RangeKey => {
+    const r = RANGES.find((r) => days >= r.minDays && days <= r.maxDays);
+    return r?.key ?? '15+';
+  };
+
+  const isDelayed = (days: number) => days > 0;
+
+  const groupedByRange = assignments.reduce((acc, a) => {
+    const days = getDaysSinceAssigned(a.date || today);
+    const key = getRangeKey(days);
     if (!acc[key]) acc[key] = [];
-    acc[key].push(a);
+    acc[key].push({ ...a, daysSinceAssigned: days });
     return acc;
-  }, {} as Record<string, TodayAssignment[]>);
+  }, {} as Record<RangeKey, (TodayAssignment & { daysSinceAssigned: number })[]>);
+
+  const orderedRangeKeys: RangeKey[] = ['hoy', '1-2', '3-7', '8-14', '15+'];
 
   const todayStr = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
 
@@ -174,7 +205,7 @@ export default function MiDiaView() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
           <Sun className="w-8 h-8 text-amber-500" />
@@ -186,7 +217,7 @@ export default function MiDiaView() {
       {assignments.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
           <CheckSquare className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-600 mb-2">No tienes tareas asignadas para hoy</p>
+          <p className="text-gray-600 mb-2">No tienes tareas asignadas pendientes</p>
           <p className="text-sm text-gray-500 mb-6">
             Ve a la vista de proyectos para asignarte tareas o revisar tu trabajo.
           </p>
@@ -203,7 +234,7 @@ export default function MiDiaView() {
           <div className="mb-6 flex items-center justify-between">
             <p className="text-gray-600">
               <span className="font-semibold text-gray-800">{assignments.length}</span> tarea
-              {assignments.length !== 1 ? 's' : ''} asignada{assignments.length !== 1 ? 's' : ''} para hoy
+              {assignments.length !== 1 ? 's' : ''} pendiente{assignments.length !== 1 ? 's' : ''}
             </p>
             <Link
               to="/user/projects/all"
@@ -214,39 +245,82 @@ export default function MiDiaView() {
             </Link>
           </div>
 
-          <div className="space-y-6">
-            {Object.entries(groupedByProject).map(([projectName, items]) => (
-              <div key={projectName} className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="px-4 py-3 bg-gray-50 border-b flex items-center gap-2">
-                  <FolderOpen className="w-4 h-4 text-gray-500" />
-                  <span className="font-medium text-gray-800">{projectName}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {orderedRangeKeys.map((rangeKey) => {
+              const items = groupedByRange[rangeKey] || [];
+              const rangeInfo = RANGES.find((r) => r.key === rangeKey)!;
+              const hasDelayed = items.some((i) => isDelayed(i.daysSinceAssigned));
+              return (
+                <div
+                  key={rangeKey}
+                  className={`rounded-lg overflow-hidden flex flex-col min-h-[120px] ${
+                    hasDelayed ? 'ring-2 ring-red-300 bg-red-50/30' : 'bg-white shadow'
+                  }`}
+                >
+                  <div
+                    className={`px-3 py-2.5 border-b flex items-center justify-between gap-2 shrink-0 ${
+                      hasDelayed ? 'bg-red-100 border-red-200' : 'bg-gray-50'
+                    }`}
+                  >
+                    <span className={`text-xs font-semibold uppercase tracking-wide ${hasDelayed ? 'text-red-700' : 'text-gray-600'}`}>
+                      {rangeInfo.label}
+                    </span>
+                    <span className="text-xs font-medium text-gray-500">{items.length}</span>
+                  </div>
+                  <ul className="flex-1 divide-y divide-gray-100 overflow-y-auto max-h-[400px]">
+                    {items.length === 0 ? (
+                      <li className="px-3 py-4 text-center text-xs text-gray-400">—</li>
+                    ) : (
+                      items.map((item) => {
+                        const delayed = isDelayed(item.daysSinceAssigned);
+                        return (
+                          <li
+                            key={item.id}
+                            className={`px-3 py-2.5 flex flex-col gap-1 ${
+                              delayed ? 'bg-red-50 border-l-4 border-red-500' : ''
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium truncate ${delayed ? 'text-red-800' : 'text-gray-800'}`}>
+                                  {item.title}
+                                </p>
+                                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                  <PhaseBadge phaseName={item.phaseName} />
+                                  <span className={`text-xs ${delayed ? 'text-red-600' : 'text-gray-500'}`}>
+                                    {item.projectName}
+                                  </span>
+                                </div>
+                              </div>
+                              <TaskStatusDisplay status={item.status} className="text-xs shrink-0" />
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              {item.deadline && (
+                                <p className={`text-xs flex items-center gap-0.5 ${delayed ? 'text-red-600' : 'text-gray-500'}`}>
+                                  <Calendar className="w-3 h-3" />
+                                  {format(new Date(item.deadline), 'dd/MM')}
+                                </p>
+                              )}
+                              {item.estimated_duration > 0 && (
+                                <span className={`text-xs ${delayed ? 'text-red-600' : 'text-gray-500'}`}>
+                                  {item.estimated_duration} min
+                                </span>
+                              )}
+                            </div>
+                            {delayed && (
+                              <p className="text-xs font-medium text-red-600 flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                {item.daysSinceAssigned} día{item.daysSinceAssigned !== 1 ? 's' : ''} retrasada
+                              </p>
+                            )}
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
                 </div>
-                <ul className="divide-y divide-gray-100">
-                  {items.map((item) => (
-                    <li key={item.id} className="px-4 py-3 flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1">
-                          <p className="font-medium text-gray-800 truncate">{item.title}</p>
-                          <PhaseBadge phaseName={item.phaseName} />
-                        </div>
-                        {item.deadline && (
-                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            Vence: {format(new Date(item.deadline), 'dd/MM/yyyy')}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        {item.estimated_duration > 0 && (
-                          <span className="text-xs text-gray-500">{item.estimated_duration} min</span>
-                        )}
-                        <TaskStatusDisplay status={item.status} className="text-xs" />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-8 text-center">

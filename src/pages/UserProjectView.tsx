@@ -276,10 +276,29 @@ export default function UserProjectView() {
    const { projectId } = useParams();
    const navigate = useNavigate();
 
-   // Proyectos permitidos para usuarios no-admin (filtrar por assigned_projects)
-   const allowedProjectIds = !isAdmin && user?.assigned_projects?.length
-      ? user.assigned_projects
-      : null;
+   // Proyectos permitidos para usuarios no-admin: assigned_projects + proyectos donde tienen asignaciones pendientes (task_work_assignments)
+   const [effectiveProjectIds, setEffectiveProjectIds] = useState<string[] | null | undefined>(undefined);
+
+   const allowedProjectIds = !isAdmin ? effectiveProjectIds : null;
+
+   // Efecto: para no-admin, combinar assigned_projects con proyectos de asignaciones pendientes (para que Gestión coincida con Mi día)
+   useEffect(() => {
+      if (!user || isAdmin) {
+         setEffectiveProjectIds(null);
+         return;
+      }
+      const base = new Set<string>(user.assigned_projects ?? []);
+      (async () => {
+         const { data } = await supabase
+            .from("task_work_assignments")
+            .select("project_id")
+            .eq("user_id", user.id)
+            .not("status", "in", "('completed','in_review','approved')");
+         const fromAssignments = [...new Set((data || []).map((r) => r.project_id).filter(Boolean))] as string[];
+         fromAssignments.forEach((id) => base.add(id));
+         setEffectiveProjectIds(Array.from(base));
+      })();
+   }, [user?.id, user?.assigned_projects, isAdmin]);
 
    // Estados para datos principales
    const [project, setProject] = useState<Project | null>(null);
@@ -477,6 +496,10 @@ export default function UserProjectView() {
 
    useEffect(() => {
       if (projectId && dailyTasksIds !== undefined) {
+         // Para no-admin, esperar a que effectiveProjectIds esté listo (evita mostrar vacío cuando hay asignaciones)
+         if (!isAdmin && effectiveProjectIds === undefined && user) {
+            return; // El efecto de effectiveProjectIds aún no ha terminado
+         }
          // Activar explícitamente el estado de filtrado desde el inicio
          setIsFiltering(true);
 
@@ -488,7 +511,7 @@ export default function UserProjectView() {
             fetchCompletedTasks(); // Cargar también las completadas para verificar duplicados
          }, 50);
       }
-   }, [projectId, dailyTasksIds]);
+   }, [projectId, dailyTasksIds, isAdmin, effectiveProjectIds, user]);
 
    useEffect(() => {
       if (activeTab === "gestion" && ["entregadas", "en_revision", "aprobadas"].includes(activeGestionSubTab) && projectId && user) {
