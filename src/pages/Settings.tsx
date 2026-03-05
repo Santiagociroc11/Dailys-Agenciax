@@ -327,6 +327,18 @@ const Settings = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ threshold: 80 }),
       }).then((r) => r.json()),
+    'admin-morning-report': () =>
+      fetch(apiUrl('/api/telegram/admin-morning-report'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then((r) => r.json()),
+    'admin-evening-report': () =>
+      fetch(apiUrl('/api/telegram/admin-evening-report'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then((r) => r.json()),
   };
 
   const isTestDisabled = !telegramId || isLoading;
@@ -586,6 +598,8 @@ const Settings = () => {
                         { key: 'deadline-reminders', label: 'Recordatorios de vencimiento' },
                         { key: 'daily-summary', label: 'Resumen diario' },
                         { key: 'budget-check', label: 'Alerta de presupuesto' },
+                        { key: 'admin-morning-report', label: 'Panorama del día (10 AM)' },
+                        { key: 'admin-evening-report', label: 'Resumen de entregas (5 PM)' },
                       ]}
                       runTest={runTest}
                       testLoading={testLoading}
@@ -631,6 +645,8 @@ const Settings = () => {
                   <option value="deadline-reminder">deadline-reminder</option>
                   <option value="daily-summary">daily-summary</option>
                   <option value="budget-alert">budget-alert</option>
+                  <option value="admin-morning-report">admin-morning-report</option>
+                  <option value="admin-evening-report">admin-evening-report</option>
                 </select>
                 <select
                   value={logFilter.status || ''}

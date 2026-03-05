@@ -333,12 +333,15 @@ export async function getAdminTelegramId(): Promise<string | null> {
 }
 
 // Función para enviar notificaciones a administradores
-export async function sendAdminNotification(message: string): Promise<boolean> {
+export async function sendAdminNotification(
+  message: string,
+  logType: TelegramLogType = 'admin-notification'
+): Promise<boolean> {
   try {
     const adminChatId = await getAdminTelegramId();
-    
+
     if (!adminChatId) {
-      await logTelegramSend('admin-notification', 'admin', 'skipped', {
+      await logTelegramSend(logType, 'admin', 'skipped', {
         recipientLabel: 'admin',
         details: 'No hay ID de chat de admin configurado',
       });
@@ -346,12 +349,12 @@ export async function sendAdminNotification(message: string): Promise<boolean> {
     }
 
     return await sendTelegramMessage(adminChatId, message, {
-      type: 'admin-notification',
+      type: logType,
       recipientLabel: 'admin',
     });
   } catch (error) {
     console.error('Error al enviar notificación a admin:', error);
-    await logTelegramSend('admin-notification', 'admin', 'failed', {
+    await logTelegramSend(logType, 'admin', 'failed', {
       recipientLabel: 'admin',
       error: error instanceof Error ? error.message : String(error),
     });
@@ -965,6 +968,76 @@ export function createBudgetAlertMessage(
 📈 <b>Porcentaje:</b> ${percentConsumed}%
 
 El presupuesto de horas está ${status}.`;
+}
+
+export interface MorningReportUserRow {
+  userName: string;
+  assignedToday: number;
+  availableUnassigned: number;
+  overdue: number;
+}
+
+export interface MorningReportData {
+  dateStr: string;
+  userRows: MorningReportUserRow[];
+  totals: { assignedToday: number; availableUnassigned: number; overdue: number };
+  usersWithoutAssign: string[];
+}
+
+export function createMorningReportMessage(data: MorningReportData): string {
+  const { dateStr, userRows, totals, usersWithoutAssign } = data;
+  const lines: string[] = [`📊 <b>PANORAMA DEL DÍA</b> - ${escapeHtml(dateStr)}`, ''];
+
+  for (const row of userRows) {
+    const assignedIcon = row.assignedToday > 0 ? '✅' : '❌';
+    lines.push(`👤 ${escapeHtml(row.userName)}`);
+    lines.push(`  ${assignedIcon} ${row.assignedToday} asignadas hoy`);
+    lines.push(`  📋 ${row.availableUnassigned} disponibles sin asignar`);
+    lines.push(`  ⚠️ ${row.overdue} retrasada${row.overdue !== 1 ? 's' : ''}`);
+    lines.push('');
+  }
+
+  lines.push(`📈 <b>TOTALES:</b> ${totals.assignedToday} asignadas | ${totals.availableUnassigned} disponibles | ${totals.overdue} retrasadas`);
+  if (usersWithoutAssign.length > 0) {
+    lines.push(`\n⚠️ Usuarios sin asignar hoy: ${usersWithoutAssign.map((n) => escapeHtml(n)).join(', ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+export interface EveningReportUserRow {
+  userName: string;
+  delivered: number;
+  pending: number;
+  overdue: number;
+}
+
+export interface EveningReportData {
+  dateStr: string;
+  userRows: EveningReportUserRow[];
+  totals: { delivered: number; pending: number; overdue: number };
+  usersWithoutDelivery: string[];
+}
+
+export function createEveningReportMessage(data: EveningReportData): string {
+  const { dateStr, userRows, totals, usersWithoutDelivery } = data;
+  const lines: string[] = [`📋 <b>RESUMEN DE ENTREGAS</b> - ${escapeHtml(dateStr)}`, ''];
+
+  for (const row of userRows) {
+    const deliveredIcon = row.delivered > 0 ? '✅' : '❌';
+    lines.push(`👤 ${escapeHtml(row.userName)}`);
+    lines.push(`  ${deliveredIcon} ${row.delivered} entregada${row.delivered !== 1 ? 's' : ''}`);
+    lines.push(`  ⏳ ${row.pending} pendiente${row.pending !== 1 ? 's' : ''}`);
+    lines.push(`  ⚠️ ${row.overdue} retrasada${row.overdue !== 1 ? 's' : ''}`);
+    lines.push('');
+  }
+
+  lines.push(`📈 <b>TOTALES:</b> ${totals.delivered} entregadas | ${totals.pending} pendientes | ${totals.overdue} retrasadas`);
+  if (usersWithoutDelivery.length > 0) {
+    lines.push(`\n🚨 Sin entregas hoy: ${usersWithoutDelivery.map((n) => escapeHtml(n)).join(', ')}`);
+  }
+
+  return lines.join('\n');
 }
 
 // Función para enviar alerta de presupuesto a administradores

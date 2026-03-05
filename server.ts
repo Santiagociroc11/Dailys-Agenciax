@@ -12,6 +12,8 @@ import {
   sendTelegramMessage,
   createDeadlineReminderMessage,
   createDailySummaryMessage,
+  createMorningReportMessage,
+  createEveningReportMessage,
     createTaskCompletedMessage,
     createTaskBlockedMessage,
     createTaskInReviewMessage,
@@ -511,6 +513,151 @@ app.post('/api/telegram/budget-check', telegramCheck, async (req, res) => {
   }
 });
 
+// Endpoint para reporte matutino admin (10 AM - panorama del día) - para cron
+app.post('/api/telegram/admin-morning-report', telegramCheck, async (req, res) => {
+  try {
+    const { Project, Task, Subtask, TaskWorkAssignment, User } = await import('./models/index.js');
+    const today = new Date().toISOString().split('T')[0];
+    const dateStr = new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+
+    const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+    const activeTaskIds = await Task.find({ project_id: { $in: activeProjectIds } }).select('id').lean().exec().then((r) => r.map((t: { id: string }) => t.id));
+
+    const activeStatuses = ['pending', 'assigned', 'in_progress', 'in_review', 'returned'];
+
+    const userIdsFromAssignments = await TaskWorkAssignment.distinct('user_id', { date: today }).exec();
+    const userIdsFromOverdue = await TaskWorkAssignment.distinct('user_id', { date: { $lt: today }, status: { $nin: ['completed', 'in_review', 'approved'] } }).exec();
+    const userIdsFromSubtasks = await Subtask.distinct('assigned_to', { task_id: { $in: activeTaskIds } }).exec();
+    const allUserIds = [...new Set([...userIdsFromAssignments, ...userIdsFromOverdue, ...userIdsFromSubtasks])];
+
+    const users = await User.find({ id: { $in: allUserIds } }).select('id name').lean().exec();
+    const userMap = new Map(users.map((u: { id: string; name?: string }) => [u.id, u.name || u.id]));
+
+    const userRows: { userName: string; assignedToday: number; availableUnassigned: number; overdue: number }[] = [];
+    let totalsAssigned = 0;
+    let totalsAvailable = 0;
+    let totalsOverdue = 0;
+    const usersWithoutAssign: string[] = [];
+
+    for (const uid of allUserIds) {
+      const [assignedToday, overdue, assignedTodaySubtaskIds] = await Promise.all([
+        TaskWorkAssignment.countDocuments({ user_id: uid, date: today }).exec(),
+        TaskWorkAssignment.countDocuments({ user_id: uid, date: { $lt: today }, status: { $nin: ['completed', 'in_review', 'approved'] } }).exec(),
+        TaskWorkAssignment.find({ user_id: uid, date: today, task_type: 'subtask' }).select('subtask_id').lean().exec().then((r) => r.map((d: { subtask_id?: string }) => d.subtask_id).filter(Boolean)),
+      ]);
+
+      const assignedSubtaskIdsSet = new Set(assignedTodaySubtaskIds as string[]);
+      const availableSubtasksUnassigned = await Subtask.countDocuments({
+        assigned_to: uid,
+        task_id: { $in: activeTaskIds },
+        status: { $in: activeStatuses },
+        id: { $nin: Array.from(assignedSubtaskIdsSet) },
+      }).exec();
+
+      const userName = userMap.get(uid) || uid;
+      userRows.push({
+        userName,
+        assignedToday,
+        availableUnassigned: availableSubtasksUnassigned,
+        overdue,
+      });
+      totalsAssigned += assignedToday;
+      totalsAvailable += availableSubtasksUnassigned;
+      totalsOverdue += overdue;
+      if (assignedToday === 0) usersWithoutAssign.push(userName);
+    }
+
+    userRows.sort((a, b) => a.userName.localeCompare(b.userName));
+
+    const message = createMorningReportMessage({
+      dateStr,
+      userRows,
+      totals: { assignedToday: totalsAssigned, availableUnassigned: totalsAvailable, overdue: totalsOverdue },
+      usersWithoutAssign,
+    });
+
+    const ok = await sendAdminNotification(message, 'admin-morning-report');
+
+    return res.status(200).json({
+      success: true,
+      message: ok ? 'Reporte matutino enviado.' : 'No se pudo enviar (admin no configurado).',
+      sent: ok,
+      usersCount: userRows.length,
+    });
+  } catch (error) {
+    console.error('Error en admin-morning-report:', error);
+    return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  }
+});
+
+// Endpoint para reporte vespertino admin (5 PM - resumen de entregas) - para cron
+app.post('/api/telegram/admin-evening-report', telegramCheck, async (req, res) => {
+  try {
+    const { Project, TaskWorkAssignment, User } = await import('./models/index.js');
+    const today = new Date().toISOString().split('T')[0];
+    const dateStr = new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
+
+    const activeProjectIds = await Project.find({ is_archived: false }).select('id').lean().exec().then((r) => r.map((p: { id: string }) => p.id));
+    const projectFilter = activeProjectIds.length > 0 ? { project_id: { $in: activeProjectIds } } : {};
+
+    const completedStatuses = ['completed', 'in_review', 'approved'];
+
+    const userIdsFromToday = await TaskWorkAssignment.distinct('user_id', { date: today, ...projectFilter }).exec();
+    const userIdsFromOverdue = await TaskWorkAssignment.distinct('user_id', { date: { $lt: today }, status: { $nin: completedStatuses }, ...projectFilter }).exec();
+    const allUserIds = [...new Set([...userIdsFromToday, ...userIdsFromOverdue])];
+
+    const users = await User.find({ id: { $in: allUserIds } }).select('id name').lean().exec();
+    const userMap = new Map(users.map((u: { id: string; name?: string }) => [u.id, u.name || u.id]));
+
+    const userRows: { userName: string; delivered: number; pending: number; overdue: number }[] = [];
+    let totalsDelivered = 0;
+    let totalsPending = 0;
+    let totalsOverdue = 0;
+    const usersWithoutDelivery: string[] = [];
+
+    for (const uid of allUserIds) {
+      const [delivered, pending, overdue] = await Promise.all([
+        TaskWorkAssignment.countDocuments({ user_id: uid, date: today, status: { $in: completedStatuses }, ...projectFilter }).exec(),
+        TaskWorkAssignment.countDocuments({ user_id: uid, date: today, status: { $nin: completedStatuses }, ...projectFilter }).exec(),
+        TaskWorkAssignment.countDocuments({ user_id: uid, date: { $lt: today }, status: { $nin: completedStatuses }, ...projectFilter }).exec(),
+      ]);
+
+      const userName = userMap.get(uid) || uid;
+      userRows.push({
+        userName,
+        delivered,
+        pending,
+        overdue,
+      });
+      totalsDelivered += delivered;
+      totalsPending += pending;
+      totalsOverdue += overdue;
+      if (delivered === 0) usersWithoutDelivery.push(userName);
+    }
+
+    userRows.sort((a, b) => a.userName.localeCompare(b.userName));
+
+    const message = createEveningReportMessage({
+      dateStr,
+      userRows,
+      totals: { delivered: totalsDelivered, pending: totalsPending, overdue: totalsOverdue },
+      usersWithoutDelivery,
+    });
+
+    const ok = await sendAdminNotification(message, 'admin-evening-report');
+
+    return res.status(200).json({
+      success: true,
+      message: ok ? 'Reporte vespertino enviado.' : 'No se pudo enviar (admin no configurado).',
+      sent: ok,
+      usersCount: userRows.length,
+    });
+  } catch (error) {
+    console.error('Error en admin-evening-report:', error);
+    return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
+  }
+});
+
 // Endpoint para notificaciones de tareas disponibles
 app.post('/api/telegram/task-available', telegramCheck, async (req, res) => {
   try {
@@ -583,7 +730,7 @@ app.get('/api/telegram/log', async (req, res) => {
     const status = req.query.status as string | undefined;
     const since = req.query.since ? new Date(String(req.query.since)) : undefined;
 
-    const validTypes: TelegramLogType[] = ['test', 'admin-notification', 'task-available', 'user-task-in-review', 'deadline-reminder', 'daily-summary', 'budget-alert'];
+    const validTypes: TelegramLogType[] = ['test', 'admin-notification', 'task-available', 'user-task-in-review', 'deadline-reminder', 'daily-summary', 'budget-alert', 'admin-morning-report', 'admin-evening-report'];
     const validStatuses: TelegramLogStatus[] = ['success', 'failed', 'skipped'];
 
     const filters: { type?: TelegramLogType; status?: TelegramLogStatus } = {};

@@ -12,7 +12,9 @@ export type TelegramLogType =
   | 'user-task-in-review'
   | 'deadline-reminder'
   | 'daily-summary'
-  | 'budget-alert';
+  | 'budget-alert'
+  | 'admin-morning-report'
+  | 'admin-evening-report';
 
 export type TelegramLogStatus = 'success' | 'failed' | 'skipped';
 

@@ -1,15 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import DailyHoursControl from './DailyHoursControl';
 import { 
   Clock, 
   CheckCircle, 
   AlertCircle, 
   Target, 
   TrendingUp, 
-  Calendar,
-  BarChart3,
-  Users,
   Briefcase,
   DollarSign
 } from 'lucide-react';
@@ -37,12 +35,6 @@ interface PerformanceMetrics {
   upcomingDeadlines: number;
 }
 
-interface UserStats {
-  userId: string;
-  userName: string;
-  metrics: PerformanceMetrics;
-}
-
 interface BudgetAlert {
   projectId: string;
   projectName: string;
@@ -63,7 +55,6 @@ interface ActivePayrollSummary {
 const Dashboard = () => {
   const { user, isAdmin } = useAuth();
   const [userMetrics, setUserMetrics] = useState<PerformanceMetrics | null>(null);
-  const [teamMetrics, setTeamMetrics] = useState<UserStats[]>([]);
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
   const [activePayroll, setActivePayroll] = useState<ActivePayrollSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +66,8 @@ const Dashboard = () => {
   async function fetchMetrics() {
     try {
       if (isAdmin) {
-        await fetchTeamMetrics();
+        setLoading(true);
+        await Promise.all([fetchBudgetAlerts(), fetchActivePayroll()]);
       } else if (user?.id) {
         await fetchUserMetrics(user.id);
       }
@@ -186,176 +178,6 @@ const Dashboard = () => {
     } catch (e) {
       console.error('Error fetching active payroll:', e);
       setActivePayroll([]);
-    }
-  }
-
-  async function fetchTeamMetrics() {
-    setLoading(true);
-    try {
-      await Promise.all([fetchBudgetAlerts(), fetchActivePayroll()]);
-      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
-      const activeProjectIds = (activeProjects || []).map((p) => p.id);
-      if (activeProjectIds.length === 0) {
-        setTeamMetrics([]);
-        setLoading(false);
-        return;
-      }
-      const [
-        { data: allTasks, error: tasksError },
-        { data: allAssignments, error: assignmentsError },
-        { data: users, error: usersError }
-      ] = await Promise.all([
-        supabase.from('tasks').select('id, is_sequential, status, assigned_users, feedback').in('project_id', activeProjectIds),
-        supabase.from('task_work_assignments').select('user_id, date, status, updated_at').in('project_id', activeProjectIds),
-        supabase.from('users').select('id, name, email')
-      ]);
-      const taskIds = (allTasks || []).map((t) => t.id).filter(Boolean);
-      const { data: subtasksData } = taskIds.length > 0
-        ? await supabase.from('subtasks').select('id, task_id, assigned_to, status, sequence_order, feedback').in('task_id', taskIds)
-        : { data: [] };
-      const allSubtasks = subtasksData || [];
-
-      if (usersError || tasksError || assignmentsError) {
-        console.error("Error fetching batch data for metrics:", { usersError, tasksError, assignmentsError });
-        setTeamMetrics([]);
-        return;
-      }
-
-      // 2. Procesar datos para búsquedas eficientes
-      const allTasksMap = new Map(allTasks.map(task => [task.id, task]));
-      const allSubtasksByTaskMap = new Map<string, any[]>();
-      allSubtasks.forEach(subtask => {
-        if (!allSubtasksByTaskMap.has(subtask.task_id)) {
-          allSubtasksByTaskMap.set(subtask.task_id, []);
-        }
-        allSubtasksByTaskMap.get(subtask.task_id)!.push(subtask);
-      });
-
-      const todayStr = new Date().toISOString().split('T')[0];
-      const monthAgo = new Date();
-      monthAgo.setDate(monthAgo.getDate() - 30);
-
-      // 3. Calcular métricas para cada usuario
-      const teamStats = users.map(user => {
-        const userSubtasks = allSubtasks.filter(s => s.assigned_to === user.id);
-        const userAssignments = allAssignments.filter(a => a.user_id === user.id);
-        const userTasks = allTasks.filter(t => t.assigned_users?.includes(user.id));
-
-        // Métrica: Carga de Hoy
-        const todaysLoad = userAssignments.filter(a => a.date === todayStr && !['completed', 'approved'].includes(a.status)).length;
-        
-        // Métrica: Atrasadas
-        const overdueTasks = userAssignments.filter(a => a.date < todayStr && !['completed', 'approved'].includes(a.status)).length;
-        
-        // Métrica: En Revisión (considera tasks y subtasks)
-        const subtasksInReview = userSubtasks.filter(s => ['completed', 'in_review'].includes(s.status)).length;
-        const tasksInReview = userTasks.filter(t => ['completed', 'in_review'].includes(t.status)).length;
-        const totalTasksInReview = subtasksInReview + tasksInReview;
-        
-        // Métrica: Devueltas (considera tasks y subtasks)
-        const subtasksReturned = userSubtasks.filter(s => s.status === 'returned').length;
-        const tasksReturned = userTasks.filter(t => t.status === 'returned').length;
-        const totalTasksReturned = subtasksReturned + tasksReturned;
-        
-        // Métrica: Aprobadas (Mes) - Lógica corregida
-        const approvedSubtasks = userSubtasks.filter(subtask => {
-          if (subtask.status !== 'approved' || !subtask.feedback) return false;
-          
-          let feedbackData: any = {};
-          if (typeof subtask.feedback === 'string') {
-              try { feedbackData = JSON.parse(subtask.feedback); } catch { return false; }
-          } else if (typeof subtask.feedback === 'object' && subtask.feedback !== null) {
-              feedbackData = subtask.feedback;
-          }
-          
-          const approvalDateStr = feedbackData.reviewed_at || feedbackData.approved_at;
-          if (!approvalDateStr) return false;
-      
-          return new Date(approvalDateStr) >= monthAgo;
-        }).length;
-      
-        const approvedTasks = userTasks.filter(task => {
-            if (task.status !== 'approved' || !task.feedback) return false;
-        
-            let feedbackData: any = {};
-            if (typeof task.feedback === 'string') {
-                try { feedbackData = JSON.parse(task.feedback); } catch { return false; }
-            } else if (typeof task.feedback === 'object' && task.feedback !== null) {
-                feedbackData = task.feedback;
-            }
-        
-            const approvalDateStr = feedbackData.reviewed_at || feedbackData.approved_at;
-            if (!approvalDateStr) return false;
-        
-            return new Date(approvalDateStr) >= monthAgo;
-        }).length;
-      
-        const tasksApprovedThisMonth = approvedSubtasks + approvedTasks;
-
-        // Métrica: Pendientes (Disponibles) - La lógica compleja
-        let availableCount = 0;
-        const pendingSubtasks = userSubtasks.filter(s => s.status === 'pending');
-        const processedParentTasks = new Set();
-
-        for (const subtask of pendingSubtasks) {
-          const parentTask = allTasksMap.get(subtask.task_id);
-          if (!parentTask || !parentTask.is_sequential) {
-            availableCount++;
-            continue;
-          }
-          if (processedParentTasks.has(parentTask.id)) continue;
-          processedParentTasks.add(parentTask.id);
-
-          const allSubtasksForTask = allSubtasksByTaskMap.get(parentTask.id) || [];
-          const groupedByOrder = new Map<number, any[]>();
-          allSubtasksForTask.forEach(s => {
-            const order = s.sequence_order || 0;
-            if (!groupedByOrder.has(order)) groupedByOrder.set(order, []);
-            groupedByOrder.get(order)!.push(s);
-          });
-          const sortedOrders = Array.from(groupedByOrder.keys()).sort((a, b) => a - b);
-
-          for (const order of sortedOrders) {
-            const currentLevelSubtasks = groupedByOrder.get(order)!;
-            if (currentLevelSubtasks.every(s => s.status === 'approved')) continue;
-            
-            let allPreviousApproved = true;
-            for (const prevOrder of sortedOrders) {
-              if (prevOrder >= order) break;
-              if (!groupedByOrder.get(prevOrder)!.every(s => s.status === 'approved')) {
-                allPreviousApproved = false;
-                break;
-              }
-            }
-            if (allPreviousApproved) {
-              const userSubtasksInLevel = currentLevelSubtasks.filter(s => s.assigned_to === user.id && s.status === 'pending');
-              availableCount += userSubtasksInLevel.length;
-            }
-            break; 
-          }
-        }
-        const tasksPending = availableCount;
-
-        return {
-          userId: user.id,
-          userName: user.name || user.email,
-          metrics: {
-            tasksPending,
-            todaysLoad,
-            tasksInReview: totalTasksInReview,
-            tasksReturned: totalTasksReturned,
-            overdueTasks,
-            tasksApprovedThisMonth,
-          } as PerformanceMetrics,
-        };
-      });
-
-      setTeamMetrics(teamStats);
-    } catch (error) {
-      console.error("Error in fetchTeamMetrics:", error);
-      setTeamMetrics([]);
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -706,82 +528,8 @@ const Dashboard = () => {
       )}
 
       {isAdmin && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center">
-            <Users className="w-6 h-6 mr-2 text-gray-800" />
-            Métricas del Equipo
-          </h2>
-          {loading ? (
-             <div className="py-8 animate-pulse">
-                <div className="space-y-3">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="h-12 bg-gray-200 rounded w-full" />
-                  ))}
-                </div>
-              </div>
-          ) : teamMetrics.length > 0 ? (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left text-gray-500">
-                  <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-6 py-3">Usuario</th>
-                      <th scope="col" className="px-6 py-3 text-center">Carga Activa</th>
-                      <th scope="col" className="px-6 py-3 text-center">Pendientes</th>
-                      <th scope="col" className="px-6 py-3 text-center">En Revisión</th>
-                      <th scope="col" className="px-6 py-3 text-center">Devueltas</th>
-                      <th scope="col" className="px-6 py-3 text-center">Aprobadas (Mes)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamMetrics
-                      .sort((a, b) => (b.metrics.todaysLoad + b.metrics.overdueTasks) - (a.metrics.todaysLoad + a.metrics.overdueTasks))
-                      .map(({ userId, userName, metrics }) => (
-                      <tr key={userId} className="bg-white border-b hover:bg-gray-50">
-                        <th scope="row" className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
-                          {userName}
-                        </th>
-                        <td className="px-6 py-4 text-center">
-                          <div className="font-bold text-lg">{metrics.todaysLoad + metrics.overdueTasks}</div>
-                          {metrics.overdueTasks > 0 && (
-                            <div className="text-red-500 text-xs" title={`${metrics.overdueTasks} tareas atrasadas`}>
-                              {metrics.overdueTasks} atrasada{metrics.overdueTasks > 1 ? 's' : ''}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-center">{metrics.tasksPending}</td>
-                        <td className="px-6 py-4 text-center">
-                           {metrics.tasksInReview > 0 ? (
-                            <span className="inline-flex items-center justify-center px-2 py-1 text-sm font-bold leading-none text-blue-800 bg-blue-100 rounded-full">{metrics.tasksInReview}</span>
-                          ) : ( 0 )}
-                        </td>
-                         <td className="px-6 py-4 text-center">
-                          {metrics.tasksReturned > 0 ? (
-                            <span className="inline-flex items-center justify-center px-2 py-1 text-sm font-bold leading-none text-orange-800 bg-orange-100 rounded-full">{metrics.tasksReturned}</span>
-                          ) : (
-                            0
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-center font-bold text-green-600">{metrics.tasksApprovedThisMonth}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <h3 className="text-md font-semibold text-gray-800 mb-3">Leyenda de la Tabla</h3>
-                <ul className="space-y-2 text-sm text-gray-700 list-disc list-inside">
-                  <li><strong className="font-semibold text-gray-900">Carga Activa:</strong> Total de tareas asignadas al usuario. El texto rojo debajo indica cuántas de ellas están atrasadas.</li>
-                  <li><strong className="font-semibold text-gray-900">Pendientes:</strong> Tareas disponibles que el usuario podría auto-asignarse (su "backlog" personal).</li>
-                  <li><strong className="font-semibold text-gray-900">En Revisión:</strong> Tareas entregadas por el usuario que esperan tu aprobación.</li>
-                  <li><strong className="font-semibold text-gray-900">Devueltas:</strong> Tareas que devolviste para corrección. Es un indicador de calidad.</li>
-                  <li><strong className="font-semibold text-gray-900">Aprobadas (Mes):</strong> Total de tareas finalizadas y aprobadas en los últimos 30 días.</li>
-                </ul>
-              </div>
-            </>
-          ) : (
-            <p className="text-gray-600 italic">No hay datos de equipo para mostrar o se están cargando.</p>
-          )}
+        <div className="mt-6">
+          <DailyHoursControl />
         </div>
       )}
     </div>

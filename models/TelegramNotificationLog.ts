@@ -15,6 +15,8 @@ const telegramNotificationLogSchema = new mongoose.Schema(
         'deadline-reminder',
         'daily-summary',
         'budget-alert',
+        'admin-morning-report',
+        'admin-evening-report',
       ],
     },
     recipient: { type: String, required: true },

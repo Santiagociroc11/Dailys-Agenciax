@@ -10,6 +10,8 @@ Ya existe un sistema de recordatorios por Telegram:
 |----------|--------|-------------|
 | `/api/telegram/deadline-reminders` | POST | Envía recordatorios de tareas/subtareas que vencen en N días |
 | `/api/telegram/daily-summary` | POST | Envía resumen diario de tareas que vencen hoy a cada usuario |
+| `/api/telegram/admin-morning-report` | POST | Panorama del día (10 AM): asignadas hoy, disponibles sin asignar, retrasadas |
+| `/api/telegram/admin-evening-report` | POST | Resumen de entregas (5 PM): entregadas, pendientes, retrasadas |
 
 ### Cómo funciona `deadline-reminders`
 
@@ -39,6 +41,16 @@ Para resumen diario (tareas que vencen hoy):
 ```bash
 # Ejemplo: todos los días a las 7:00 AM
 0 7 * * * curl -X POST https://tu-dominio.com/api/telegram/daily-summary
+```
+
+Para reportes admin (hora Colombia UTC-5):
+
+```bash
+# Panorama del día: 10:00 AM COT = 15:00 UTC
+0 15 * * * curl -X POST https://tu-dominio.com/api/telegram/admin-morning-report -H "Content-Type: application/json" -d '{}'
+
+# Resumen de entregas: 5:00 PM COT = 22:00 UTC
+0 22 * * * curl -X POST https://tu-dominio.com/api/telegram/admin-evening-report -H "Content-Type: application/json" -d '{}'
 ```
 
 ---
