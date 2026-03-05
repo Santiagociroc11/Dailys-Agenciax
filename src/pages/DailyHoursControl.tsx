@@ -268,7 +268,7 @@ export default function DailyHoursControl() {
       const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
         userId: uid,
         userName: userList.find((u) => u.id === uid)?.name || userList.find((u) => u.id === uid)?.email || uid,
-        totalMinutes: data.total + data.extra + data.rework,
+        totalMinutes: data.total + data.extra + data.rework + data.overdueMinutes,
         assignedTodayMinutes: data.assignedToday,
         extraMinutes: data.extra,
         extraCount: data.extraCount,
@@ -476,12 +476,13 @@ export default function DailyHoursControl() {
               ) : (
                 sortedUsers.map((u) => {
                   const status = getUserStatus(u);
-                  const taskMinutes = u.totalMinutes - u.extraMinutes - u.reworkMinutes;
+                  const taskMinutes = u.totalMinutes - u.extraMinutes - u.reworkMinutes - u.overdueMinutes;
                   const pctTotal = Math.min(100, (u.totalMinutes / TARGET_MINUTES_PER_DAY) * 100);
                   const pctPrePlanned = Math.min(100, ((taskMinutes - u.assignedTodayMinutes) / TARGET_MINUTES_PER_DAY) * 100);
                   const pctAssignedToday = Math.min(100 - pctPrePlanned, (u.assignedTodayMinutes / TARGET_MINUTES_PER_DAY) * 100);
                   const pctExtra = Math.min(100 - pctPrePlanned - pctAssignedToday, (u.extraMinutes / TARGET_MINUTES_PER_DAY) * 100);
                   const pctRework = Math.min(100 - pctPrePlanned - pctAssignedToday - pctExtra, (u.reworkMinutes / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctOverdue = Math.min(100 - pctPrePlanned - pctAssignedToday - pctExtra - pctRework, (u.overdueMinutes / TARGET_MINUTES_PER_DAY) * 100);
                   const deficit = Math.max(0, TARGET_MINUTES_PER_DAY - u.totalMinutes);
 
                   return (
@@ -489,8 +490,11 @@ export default function DailyHoursControl() {
                       {/* Nombre */}
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900 text-sm">{u.userName}</div>
-                        <div className="text-xs text-gray-500">
-                          {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''}
+                          <div className="text-xs text-gray-500">
+                          {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''} hoy
+                          {u.overdueCount > 0 && (
+                            <span className="text-red-600"> + {u.overdueCount} retrasada{u.overdueCount !== 1 ? 's' : ''}</span>
+                          )}
                           {u.extraCount > 0 && (
                             <span className="text-purple-600"> + {u.extraCount} extra{u.extraCount !== 1 ? 's' : ''}</span>
                           )}
@@ -522,6 +526,10 @@ export default function DailyHoursControl() {
                               <div
                                 className="h-full bg-orange-400 transition-all"
                                 style={{ width: `${pctRework}%` }}
+                              />
+                              <div
+                                className="h-full bg-red-300 transition-all"
+                                style={{ width: `${pctOverdue}%` }}
                               />
                             </div>
                           </div>
@@ -612,6 +620,9 @@ export default function DailyHoursControl() {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-orange-400 inline-block" /> Retrabajos hechos hoy
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> Tareas retrasadas (pendientes de días anteriores)
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-gray-100 border border-gray-300 inline-block" /> Sin planificar
