@@ -18,6 +18,7 @@ interface DailyHoursUser {
   overdueCount: number;
   overdueMinutes: number;
   reworkCount: number;
+  availableCount: number; // Subtareas que puede trabajar ahora (no bloqueadas por secuencia)
 }
 
 type StatusFilter = 'all' | 'ok' | 'behind' | 'overdue';
@@ -139,16 +140,16 @@ export default function DailyHoursControl() {
                 !e.project_id || activeProjectIds.has(e.project_id)
             );
 
-      const byUser = new Map<string, { total: number; assignedToday: number; extra: number; extraCount: number; rework: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number; reworkCount: number }>();
+      const byUser = new Map<string, { total: number; assignedToday: number; extra: number; extraCount: number; rework: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number; reworkCount: number; availableCount: number }>();
 
       userList.forEach((u) => {
-        byUser.set(u.id, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+        byUser.set(u.id, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
       });
 
       filteredAssignments.forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
         }
         const row = byUser.get(uid)!;
         const est = a.estimated_duration ?? 0;
@@ -168,7 +169,7 @@ export default function DailyHoursControl() {
       filteredWorkEvents.forEach((e: { user_id: string; start_time: string; end_time: string }) => {
         const uid = e.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
         }
         const row = byUser.get(uid)!;
         const [sh, sm] = (e.start_time || '00:00').split(':').map(Number);
@@ -181,7 +182,7 @@ export default function DailyHoursControl() {
       filteredOverdue.forEach((a: { user_id: string; estimated_duration?: number }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
         }
         const row = byUser.get(uid)!;
         row.overdueCount += 1;
@@ -223,7 +224,7 @@ export default function DailyHoursControl() {
           const uid = r.changed_by;
           if (!uid) return;
           if (!byUser.has(uid)) {
-            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
           }
           byUser.get(uid)!.reworkCount += 1;
         });
@@ -232,7 +233,7 @@ export default function DailyHoursControl() {
           const uid = r.changed_by;
           if (!uid) return;
           if (!byUser.has(uid)) {
-            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
           }
           byUser.get(uid)!.reworkCount += 1;
         });
@@ -259,11 +260,69 @@ export default function DailyHoursControl() {
           const uid = validAssignmentUsers.get(s.assignment_id);
           if (!uid) return;
           if (!byUser.has(uid)) {
-            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0, availableCount: 0 });
           }
           byUser.get(uid)!.rework += s.duration_minutes ?? 0;
         });
       }
+
+      // Actividades disponibles: subtareas que el usuario puede trabajar ahora (no bloqueadas por secuencia)
+      const workableStatuses = ['pending', 'in_progress', 'in_review', 'returned', 'assigned'];
+      const { data: availableSubtasksData } = await supabase
+        .from('subtasks')
+        .select(`
+          id, task_id, assigned_to, status, sequence_order,
+          tasks!inner(id, is_sequential, project_id, projects!inner(is_archived))
+        `)
+        .in('assigned_to', userList.map((u) => u.id))
+        .in('status', workableStatuses);
+
+      const workableSubtasks = (availableSubtasksData || []).filter(
+        (s: { tasks?: { projects?: { is_archived?: boolean }; project_id?: string } }) => {
+          const t = s.tasks as { projects?: { is_archived?: boolean }; project_id?: string } | undefined;
+          if (t?.projects?.is_archived) return false;
+          if (activeProjectIds.size > 0 && t?.project_id && !activeProjectIds.has(t.project_id)) return false;
+          return true;
+        }
+      );
+
+      const taskIdsForSeq = [...new Set(workableSubtasks.map((s: { task_id: string }) => s.task_id))];
+      const { data: tasksSeqData } = await supabase.from('tasks').select('id, is_sequential').in('id', taskIdsForSeq);
+      const taskSeqMap = new Map((tasksSeqData || []).map((t: { id: string; is_sequential?: boolean }) => [t.id, t.is_sequential ?? false]));
+
+      // Obtener todas las subtareas de esos tasks para verificar dependencias secuenciales
+      const { data: allSubsData } = await supabase.from('subtasks').select('task_id, sequence_order, status').in('task_id', taskIdsForSeq);
+      const allSubsByTask = new Map<string, { sequence_order: number; status: string }[]>();
+      (allSubsData || []).forEach((st: { task_id: string; sequence_order?: number; status: string }) => {
+        const list = allSubsByTask.get(st.task_id) || [];
+        list.push({ sequence_order: st.sequence_order ?? 0, status: st.status });
+        allSubsByTask.set(st.task_id, list);
+      });
+
+      workableSubtasks.forEach((s: { assigned_to?: string; task_id: string; sequence_order?: number; tasks?: { is_sequential?: boolean } }) => {
+        const uid = s.assigned_to;
+        if (!uid || !byUser.has(uid)) return;
+        let isAvailable = true;
+        if (taskSeqMap.get(s.task_id) && (s.sequence_order ?? 0) > 1) {
+          const taskSubs = allSubsByTask.get(s.task_id) || [];
+          const groupedByOrder = new Map<number, typeof taskSubs>();
+          taskSubs.forEach((st) => {
+            const order = st.sequence_order;
+            if (!groupedByOrder.has(order)) groupedByOrder.set(order, []);
+            groupedByOrder.get(order)!.push(st);
+          });
+          const sortedOrders = Array.from(groupedByOrder.keys()).sort((a, b) => a - b);
+          for (const prevOrder of sortedOrders) {
+            if (prevOrder >= (s.sequence_order ?? 0)) break;
+            const prevLevel = groupedByOrder.get(prevOrder) || [];
+            if (!prevLevel.every((st) => st.status === 'approved')) {
+              isAvailable = false;
+              break;
+            }
+          }
+        }
+        if (isAvailable) byUser.get(uid)!.availableCount += 1;
+      });
 
       const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
         userId: uid,
@@ -279,6 +338,7 @@ export default function DailyHoursControl() {
         overdueCount: data.overdueCount,
         overdueMinutes: data.overdueMinutes,
         reworkCount: data.reworkCount,
+        availableCount: data.availableCount,
       }));
 
       setDailyHoursControl(result);
@@ -458,6 +518,9 @@ export default function DailyHoursControl() {
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Hoy
                 </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider" title="Subtareas que puede trabajar ahora (no bloqueadas). Si 0 = no tiene disponibles; si >0 y Hoy bajo = no se las han asignado">
+                  Actividades disponibles
+                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider" title="Reuniones, dailies, descansos, etc.">
                   Extras
                 </th>
@@ -472,7 +535,7 @@ export default function DailyHoursControl() {
             <tbody className="divide-y divide-gray-100">
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500 italic">
+                  <td colSpan={10} className="px-4 py-8 text-center text-gray-500 italic">
                     {filter !== 'all' ? 'Nadie en esta categoría.' : 'No hay usuarios en el equipo.'}
                   </td>
                 </tr>
@@ -574,6 +637,15 @@ export default function DailyHoursControl() {
                         )}
                       </td>
 
+                      {/* Actividades disponibles */}
+                      <td className="px-4 py-3 text-center">
+                        {u.availableCount > 0 ? (
+                          <span className="text-sm font-semibold text-sky-600" title="Puede trabajar en estas actividades ahora">{u.availableCount}</span>
+                        ) : (
+                          <span className="text-xs text-gray-400" title="No tiene subtareas pendientes disponibles">0</span>
+                        )}
+                      </td>
+
                       {/* Extras */}
                       <td className="px-4 py-3 text-center">
                         {u.extraCount > 0 ? (
@@ -641,6 +713,9 @@ export default function DailyHoursControl() {
           </span>
           <span className="flex items-center gap-1.5">
             <RotateCcw className="w-3 h-3 text-orange-500" /> Retrabajos = devueltas corregidas hoy
+          </span>
+          <span className="flex items-center gap-1.5">
+            Actividades disponibles = subtareas que puede trabajar ahora (no bloqueadas por secuencia)
           </span>
           <span className="ml-auto">
             Retrasos = tareas de días anteriores sin completar
