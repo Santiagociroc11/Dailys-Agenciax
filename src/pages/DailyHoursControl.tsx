@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
+import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -14,6 +14,7 @@ interface DailyHoursUser {
   actualMinutesToday: number;
   overdueCount: number;
   overdueMinutes: number;
+  reworkCount: number;
 }
 
 type StatusFilter = 'all' | 'ok' | 'behind' | 'overdue';
@@ -67,9 +68,13 @@ export default function DailyHoursControl() {
       const { data: users } = await supabase.from('users').select('id, name, email');
       const userList = users || [];
 
+      const todayStartISO = todayStart.toISOString();
+      const todayEndISO = todayEnd.toISOString();
+
       const [
         { data: todayAssignments, error },
         { data: overdueAssignments, error: overdueError },
+        { data: reworkRecords, error: reworkError },
       ] = await Promise.all([
         supabase
           .from('task_work_assignments')
@@ -80,10 +85,18 @@ export default function DailyHoursControl() {
           .select('user_id, date, project_id, estimated_duration')
           .lt('date', todayStr)
           .not('status', 'in', "('completed','in_review','approved')"),
+        supabase
+          .from('status_history')
+          .select('changed_by, task_id, subtask_id')
+          .eq('previous_status', 'returned')
+          .in('new_status', ['completed', 'in_review'])
+          .gte('changed_at', todayStartISO)
+          .lte('changed_at', todayEndISO),
       ]);
 
       if (error) throw error;
       if (overdueError) console.warn('Error cargando retrasadas:', overdueError);
+      if (reworkError) console.warn('Error cargando retrabajos:', reworkError);
 
       const filteredAssignments =
         activeProjectIds.size === 0
@@ -101,16 +114,16 @@ export default function DailyHoursControl() {
                 !a.project_id || activeProjectIds.has(a.project_id)
             );
 
-      const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number }>();
+      const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number; reworkCount: number }>();
 
       userList.forEach((u) => {
-        byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
+        byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
       });
 
       filteredAssignments.forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
         }
         const row = byUser.get(uid)!;
         const est = a.estimated_duration ?? 0;
@@ -130,12 +143,62 @@ export default function DailyHoursControl() {
       filteredOverdue.forEach((a: { user_id: string; estimated_duration?: number }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
         }
         const row = byUser.get(uid)!;
         row.overdueCount += 1;
         row.overdueMinutes += a.estimated_duration ?? 0;
       });
+
+      const reworkList = (reworkRecords || []) as { changed_by?: string | null; task_id?: string | null; subtask_id?: string | null }[];
+      if (reworkList.length > 0 && activeProjectIds.size > 0) {
+        const taskIds = [...new Set(reworkList.map((r) => r.task_id).filter(Boolean))] as string[];
+        const subtaskIds = [...new Set(reworkList.map((r) => r.subtask_id).filter(Boolean))] as string[];
+        const projectByTask = new Map<string, string>();
+        const projectBySubtask = new Map<string, string>();
+
+        if (taskIds.length > 0) {
+          const { data: tasksData } = await supabase.from('tasks').select('id, project_id').in('id', taskIds);
+          (tasksData || []).forEach((t: { id: string; project_id?: string | null }) => {
+            if (t.project_id) projectByTask.set(t.id, t.project_id);
+          });
+        }
+        if (subtaskIds.length > 0) {
+          const { data: subsData } = await supabase.from('subtasks').select('id, task_id').in('id', subtaskIds);
+          const parentTaskIds = [...new Set((subsData || []).map((s: { task_id: string }) => s.task_id).filter(Boolean))];
+          if (parentTaskIds.length > 0) {
+            const { data: parentTasks } = await supabase.from('tasks').select('id, project_id').in('id', parentTaskIds);
+            const taskToProject = new Map((parentTasks || []).map((t: { id: string; project_id?: string | null }) => [t.id, t.project_id]));
+            (subsData || []).forEach((s: { id: string; task_id: string }) => {
+              const pid = taskToProject.get(s.task_id);
+              if (pid) projectBySubtask.set(s.id, pid);
+            });
+          }
+        }
+
+        const filteredRework = reworkList.filter((r) => {
+          const pid = r.task_id ? projectByTask.get(r.task_id) : r.subtask_id ? projectBySubtask.get(r.subtask_id) : null;
+          return pid && activeProjectIds.has(pid);
+        });
+
+        filteredRework.forEach((r) => {
+          const uid = r.changed_by;
+          if (!uid) return;
+          if (!byUser.has(uid)) {
+            byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          }
+          byUser.get(uid)!.reworkCount += 1;
+        });
+      } else if (reworkList.length > 0 && activeProjectIds.size === 0) {
+        reworkList.forEach((r) => {
+          const uid = r.changed_by;
+          if (!uid) return;
+          if (!byUser.has(uid)) {
+            byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          }
+          byUser.get(uid)!.reworkCount += 1;
+        });
+      }
 
       const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
         userId: uid,
@@ -147,6 +210,7 @@ export default function DailyHoursControl() {
         actualMinutesToday: data.actual,
         overdueCount: data.overdueCount,
         overdueMinutes: data.overdueMinutes,
+        reworkCount: data.reworkCount,
       }));
 
       setDailyHoursControl(result);
@@ -163,6 +227,7 @@ export default function DailyHoursControl() {
   const countOverdue = dailyHoursControl.filter((u) => getUserStatus(u) === 'overdue').length;
   const totalPlanned = dailyHoursControl.reduce((s, u) => s + u.totalMinutes, 0);
   const totalOverdueItems = dailyHoursControl.reduce((s, u) => s + u.overdueCount, 0);
+  const totalReworkToday = dailyHoursControl.reduce((s, u) => s + u.reworkCount, 0);
 
   const statusPriority = { overdue: 0, idle: 1, behind: 2, ok: 3 };
 
@@ -206,8 +271,8 @@ export default function DailyHoursControl() {
       <div className="p-6">
         <div className="animate-pulse">
           <div className="h-8 bg-gray-300 rounded w-1/3 mb-6"></div>
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            {[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-gray-200 rounded-lg" />)}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            {[...Array(5)].map((_, i) => <div key={i} className="h-24 bg-gray-200 rounded-lg" />)}
           </div>
           <div className="h-64 bg-gray-200 rounded-lg"></div>
         </div>
@@ -233,7 +298,7 @@ export default function DailyHoursControl() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <button
           onClick={() => setFilter('all')}
           className={`bg-white rounded-lg shadow p-4 text-left transition-all hover:shadow-md ${filter === 'all' ? 'ring-2 ring-blue-400' : ''}`}
@@ -281,6 +346,15 @@ export default function DailyHoursControl() {
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Con Retrasos</p>
           <p className="text-sm text-red-600 mt-1">{totalOverdueItems} tarea{totalOverdueItems !== 1 ? 's' : ''} vencida{totalOverdueItems !== 1 ? 's' : ''}</p>
         </button>
+
+        <div className="bg-white rounded-lg shadow p-4 text-left border border-orange-200">
+          <div className="flex items-center justify-between mb-1">
+            <RotateCcw className="w-5 h-5 text-orange-500" />
+            <span className="text-2xl font-bold text-orange-600">{totalReworkToday}</span>
+          </div>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Retrabajos Hoy</p>
+          <p className="text-sm text-orange-600 mt-1">Devueltas corregidas hoy</p>
+        </div>
       </div>
 
       {/* Table */}
@@ -316,12 +390,15 @@ export default function DailyHoursControl() {
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Retrasos
                 </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider" title="Tareas devueltas que se corrigieron hoy">
+                  Retrabajos
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500 italic">
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500 italic">
                     {filter !== 'all' ? 'Nadie en esta categoría.' : 'No hay usuarios en el equipo.'}
                   </td>
                 </tr>
@@ -403,6 +480,15 @@ export default function DailyHoursControl() {
                           <span className="text-xs text-green-500">0</span>
                         )}
                       </td>
+
+                      {/* Retrabajos */}
+                      <td className="px-4 py-3 text-center">
+                        {u.reworkCount > 0 ? (
+                          <span className="text-sm font-bold text-orange-600" title="Tareas devueltas corregidas hoy">{u.reworkCount}</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">0</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -421,6 +507,9 @@ export default function DailyHoursControl() {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-gray-100 border border-gray-300 inline-block" /> Sin planificar
+          </span>
+          <span className="flex items-center gap-1.5">
+            <RotateCcw className="w-3 h-3 text-orange-500" /> Retrabajos = devueltas corregidas hoy
           </span>
           <span className="ml-auto">
             Retrasos = tareas de días anteriores sin completar
