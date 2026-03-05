@@ -30,15 +30,22 @@ function fmtH(minutes: number) {
   return (minutes / 60).toFixed(1);
 }
 
-function StatusBadge({ status }: { status: 'ok' | 'behind' | 'idle' | 'overdue' }) {
+function StatusBadge({ status, deficit, deficitHours }: { status: 'ok' | 'behind' | 'idle' | 'overdue'; deficit?: number; deficitHours?: string }) {
   const map = {
-    ok: { label: 'En meta', cls: 'bg-green-100 text-green-800' },
-    behind: { label: 'Por debajo', cls: 'bg-amber-100 text-amber-800' },
-    idle: { label: 'Sin planificar', cls: 'bg-gray-100 text-gray-600' },
-    overdue: { label: 'Con retrasos', cls: 'bg-red-100 text-red-800' },
+    ok: { label: 'En meta', cls: 'bg-green-50 text-green-700 border-green-200' },
+    behind: { label: 'Por debajo', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    idle: { label: 'Sin planificar', cls: 'bg-gray-50 text-gray-600 border-gray-200' },
+    overdue: { label: 'Con retrasos', cls: 'bg-red-50 text-red-700 border-red-200' },
   };
   const { label, cls } = map[status];
-  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>;
+  return (
+    <div className="inline-flex flex-col items-start gap-0.5">
+      <span className={`text-xs font-medium px-2.5 py-1 rounded-md border ${cls}`}>{label}</span>
+      {deficit !== undefined && deficit > 0 && deficitHours && (
+        <span className="text-[11px] text-gray-500 font-medium">Faltan {deficitHours}h</span>
+      )}
+    </div>
+  );
 }
 
 function getUserStatus(u: DailyHoursUser): 'ok' | 'behind' | 'idle' | 'overdue' {
@@ -409,7 +416,7 @@ export default function DailyHoursControl() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 w-full max-w-[1600px] mx-auto">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -488,7 +495,7 @@ export default function DailyHoursControl() {
       {/* Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[1100px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th
@@ -498,12 +505,12 @@ export default function DailyHoursControl() {
                   <span className="flex items-center gap-1">Persona <SortIcon col="name" /></span>
                 </th>
                 <th
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none min-w-[120px]"
                   onClick={() => handleSort('status')}
                 >
                   <span className="flex items-center gap-1">Estado <SortIcon col="status" /></span>
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider text-left w-[35%]">
+                <th className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider text-left min-w-[180px]">
                   Progreso Jornada
                 </th>
                 <th
@@ -553,8 +560,8 @@ export default function DailyHoursControl() {
 
                   return (
                     <tr key={u.userId} className="hover:bg-gray-50/50">
-                      {/* Nombre */}
-                      <td className="px-4 py-3">
+                      {/* Persona */}
+                      <td className="px-4 py-3 min-w-[160px]">
                         <div className="font-medium text-gray-900 text-sm">{u.userName}</div>
                           <div className="text-xs text-gray-500">
                           {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''} hoy
@@ -567,15 +574,15 @@ export default function DailyHoursControl() {
                         </div>
                       </td>
 
-                      {/* Badge Estado */}
-                      <td className="px-4 py-3">
-                        <StatusBadge status={status} />
+                      {/* Estado */}
+                      <td className="px-4 py-3 min-w-[120px]">
+                        <StatusBadge status={status} deficit={deficit} deficitHours={deficit > 0 ? fmtH(deficit) : undefined} />
                       </td>
 
-                      {/* Barra */}
-                      <td className="px-4 py-3">
+                      {/* Barra Progreso */}
+                      <td className="px-4 py-3 min-w-[180px]">
                         <div className="flex items-center gap-3">
-                          <div className="flex-1">
+                          <div className="flex-1 min-w-0">
                             <div className="h-4 bg-gray-100 rounded-full overflow-hidden flex">
                               <div
                                 className="h-full bg-emerald-600 transition-all"
@@ -603,11 +610,6 @@ export default function DailyHoursControl() {
                             {pctTotal.toFixed(0)}%
                           </span>
                         </div>
-                        {deficit > 0 && (
-                          <p className="text-xs text-amber-600 mt-0.5">
-                            Faltan {fmtH(deficit)}h
-                          </p>
-                        )}
                       </td>
 
                       {/* Horas planificadas */}
