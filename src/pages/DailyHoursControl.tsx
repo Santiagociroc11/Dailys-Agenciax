@@ -117,8 +117,8 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           .from('work_sessions')
           .select('assignment_id, duration_minutes')
           .eq('session_type', 'completion')
-          .gte('created_at', todayStartISO)
-          .lte('created_at', todayEndISO),
+          .gte('createdAt', todayStartISO)
+          .lte('createdAt', todayEndISO),
       ]);
 
       if (error) throw error;
