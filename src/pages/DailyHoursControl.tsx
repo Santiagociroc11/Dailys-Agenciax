@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Clock, AlertCircle } from 'lucide-react';
+import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 interface DailyHoursUser {
   userId: string;
@@ -14,12 +16,39 @@ interface DailyHoursUser {
   overdueMinutes: number;
 }
 
+type StatusFilter = 'all' | 'ok' | 'behind' | 'overdue';
+
 const TARGET_HOURS_PER_DAY = 8;
 const TARGET_MINUTES_PER_DAY = TARGET_HOURS_PER_DAY * 60;
+
+function fmtH(minutes: number) {
+  return (minutes / 60).toFixed(1);
+}
+
+function StatusBadge({ status }: { status: 'ok' | 'behind' | 'idle' | 'overdue' }) {
+  const map = {
+    ok: { label: 'En meta', cls: 'bg-green-100 text-green-800' },
+    behind: { label: 'Por debajo', cls: 'bg-amber-100 text-amber-800' },
+    idle: { label: 'Sin planificar', cls: 'bg-gray-100 text-gray-600' },
+    overdue: { label: 'Con retrasos', cls: 'bg-red-100 text-red-800' },
+  };
+  const { label, cls } = map[status];
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>;
+}
+
+function getUserStatus(u: DailyHoursUser): 'ok' | 'behind' | 'idle' | 'overdue' {
+  if (u.overdueCount > 0) return 'overdue';
+  if (u.totalMinutes >= TARGET_MINUTES_PER_DAY) return 'ok';
+  if (u.totalMinutes === 0) return 'idle';
+  return 'behind';
+}
 
 export default function DailyHoursControl() {
   const [dailyHoursControl, setDailyHoursControl] = useState<DailyHoursUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<StatusFilter>('all');
+  const [sortBy, setSortBy] = useState<'status' | 'name' | 'hours'>('status');
+  const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
     fetchDailyHoursControl();
@@ -120,12 +149,7 @@ export default function DailyHoursControl() {
         overdueMinutes: data.overdueMinutes,
       }));
 
-      setDailyHoursControl(
-        result.sort((a, b) => {
-          if (b.overdueCount !== a.overdueCount) return b.overdueCount - a.overdueCount;
-          return b.totalMinutes - a.totalMinutes;
-        })
-      );
+      setDailyHoursControl(result);
     } catch (e) {
       console.error('Error fetching daily hours control:', e);
       setDailyHoursControl([]);
@@ -134,115 +158,273 @@ export default function DailyHoursControl() {
     }
   }
 
+  const countOk = dailyHoursControl.filter((u) => getUserStatus(u) === 'ok').length;
+  const countBehind = dailyHoursControl.filter((u) => getUserStatus(u) === 'behind' || getUserStatus(u) === 'idle').length;
+  const countOverdue = dailyHoursControl.filter((u) => getUserStatus(u) === 'overdue').length;
+  const totalPlanned = dailyHoursControl.reduce((s, u) => s + u.totalMinutes, 0);
+  const totalOverdueItems = dailyHoursControl.reduce((s, u) => s + u.overdueCount, 0);
+
+  const statusPriority = { overdue: 0, idle: 1, behind: 2, ok: 3 };
+
+  const filteredUsers = dailyHoursControl.filter((u) => {
+    if (filter === 'all') return true;
+    const st = getUserStatus(u);
+    if (filter === 'ok') return st === 'ok';
+    if (filter === 'behind') return st === 'behind' || st === 'idle';
+    if (filter === 'overdue') return st === 'overdue';
+    return true;
+  });
+
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    let cmp = 0;
+    if (sortBy === 'status') {
+      cmp = statusPriority[getUserStatus(a)] - statusPriority[getUserStatus(b)];
+    } else if (sortBy === 'name') {
+      cmp = a.userName.localeCompare(b.userName);
+    } else if (sortBy === 'hours') {
+      cmp = b.totalMinutes - a.totalMinutes;
+    }
+    return sortAsc ? cmp : -cmp;
+  });
+
+  function handleSort(col: 'status' | 'name' | 'hours') {
+    if (sortBy === col) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortBy(col);
+      setSortAsc(true);
+    }
+  }
+
+  const SortIcon = ({ col }: { col: 'status' | 'name' | 'hours' }) => {
+    if (sortBy !== col) return null;
+    return sortAsc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />;
+  };
+
   if (loading) {
     return (
       <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 bg-gray-300 rounded w-1/4 mb-6"></div>
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-24 bg-gray-300 rounded"></div>
-            ))}
+          <div className="h-8 bg-gray-300 rounded w-1/3 mb-6"></div>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-gray-200 rounded-lg" />)}
           </div>
+          <div className="h-64 bg-gray-200 rounded-lg"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-2 flex items-center gap-2">
-          <Clock className="w-8 h-8 text-blue-600" />
-          Control de Horas Diarias
-        </h1>
-        <p className="text-gray-600">
-          Meta: {TARGET_HOURS_PER_DAY} horas/día por usuario. Verde oscuro = planificado antes. Verde claro = asignado hoy mismo.
-        </p>
-        {dailyHoursControl.some((u) => u.overdueCount > 0) && (
-          <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
-            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
-            <span className="text-red-800 font-medium">
-              {dailyHoursControl.filter((u) => u.overdueCount > 0).length} usuario
-              {dailyHoursControl.filter((u) => u.overdueCount > 0).length !== 1 ? 's' : ''} con tareas retrasadas
-              ({dailyHoursControl.reduce((s, u) => s + u.overdueCount, 0)} en total)
-            </span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Control de Jornada</h1>
+            <p className="text-sm text-gray-500 mt-1 capitalize">
+              {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
+            </p>
           </div>
-        )}
+          <div className="text-right text-sm text-gray-500">
+            Meta diaria: <span className="font-bold text-gray-900">{TARGET_HOURS_PER_DAY}h</span> por persona
+          </div>
+        </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="space-y-4">
-          {dailyHoursControl.length === 0 ? (
-            <p className="text-gray-600 italic">No hay usuarios en el equipo.</p>
-          ) : (
-            dailyHoursControl.map((u) => {
-              const meetsTarget = u.totalMinutes >= TARGET_MINUTES_PER_DAY;
-              const pctTotal = (u.totalMinutes / TARGET_MINUTES_PER_DAY) * 100;
-              const pctPrePlanned = ((u.totalMinutes - u.assignedTodayMinutes) / TARGET_MINUTES_PER_DAY) * 100;
-              const pctAssignedToday = (u.assignedTodayMinutes / TARGET_MINUTES_PER_DAY) * 100;
-              const barPrePlanned = Math.min(100, pctPrePlanned);
-              const barAssignedToday = Math.min(100 - barPrePlanned, pctAssignedToday);
-              const deficit = Math.max(0, TARGET_MINUTES_PER_DAY - u.totalMinutes);
-              const totalHours = (u.totalMinutes / 60).toFixed(1);
-              const assignedTodayHours = (u.assignedTodayMinutes / 60).toFixed(1);
-              const actualHours = (u.actualMinutesToday / 60).toFixed(1);
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <button
+          onClick={() => setFilter('all')}
+          className={`bg-white rounded-lg shadow p-4 text-left transition-all hover:shadow-md ${filter === 'all' ? 'ring-2 ring-blue-400' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <Users className="w-5 h-5 text-gray-400" />
+            <span className="text-2xl font-bold text-gray-900">{dailyHoursControl.length}</span>
+          </div>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Equipo Total</p>
+          <p className="text-sm text-gray-600 mt-1">{fmtH(totalPlanned)}h planificadas hoy</p>
+        </button>
 
-              return (
-                <div
-                  key={u.userId}
-                  className={`p-4 rounded-lg border ${
-                    meetsTarget ? 'bg-green-50/50 border-green-200' : 'bg-amber-50/50 border-amber-200'
-                  }`}
+        <button
+          onClick={() => setFilter('ok')}
+          className={`bg-white rounded-lg shadow p-4 text-left transition-all hover:shadow-md ${filter === 'ok' ? 'ring-2 ring-green-400' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <CheckCircle2 className="w-5 h-5 text-green-500" />
+            <span className="text-2xl font-bold text-green-600">{countOk}</span>
+          </div>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">En Meta</p>
+          <p className="text-sm text-green-600 mt-1">{TARGET_HOURS_PER_DAY}h+ planificadas</p>
+        </button>
+
+        <button
+          onClick={() => setFilter('behind')}
+          className={`bg-white rounded-lg shadow p-4 text-left transition-all hover:shadow-md ${filter === 'behind' ? 'ring-2 ring-amber-400' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <TrendingUp className="w-5 h-5 text-amber-500" />
+            <span className="text-2xl font-bold text-amber-600">{countBehind}</span>
+          </div>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Por Debajo</p>
+          <p className="text-sm text-amber-600 mt-1">No alcanzan las {TARGET_HOURS_PER_DAY}h</p>
+        </button>
+
+        <button
+          onClick={() => setFilter('overdue')}
+          className={`bg-white rounded-lg shadow p-4 text-left transition-all hover:shadow-md ${filter === 'overdue' ? 'ring-2 ring-red-400' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+            <span className="text-2xl font-bold text-red-600">{countOverdue}</span>
+          </div>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Con Retrasos</p>
+          <p className="text-sm text-red-600 mt-1">{totalOverdueItems} tarea{totalOverdueItems !== 1 ? 's' : ''} vencida{totalOverdueItems !== 1 ? 's' : ''}</p>
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('name')}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <span className="font-medium text-gray-900">{u.userName}</span>
-                    <div className="flex items-center gap-3 text-sm flex-wrap">
-                      <span className="text-gray-600">
-                        {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''} · {totalHours}h planificadas
-                      </span>
-                      {u.assignedTodayCount > 0 && (
-                        <span className="text-green-700 font-medium">
-                          {u.assignedTodayCount} asignada{u.assignedTodayCount !== 1 ? 's' : ''} hoy ({assignedTodayHours}h)
-                        </span>
-                      )}
-                      {u.actualMinutesToday > 0 && (
-                        <span className="text-blue-600">
-                          {actualHours}h imputadas
-                        </span>
-                      )}
-                      {u.overdueCount > 0 && (
-                        <span className="text-red-600 font-medium flex items-center gap-1" title="Tareas con date anterior a hoy, sin completar">
-                          <AlertCircle className="w-4 h-4" />
-                          {u.overdueCount} retrasada{u.overdueCount !== 1 ? 's' : ''} ({(u.overdueMinutes / 60).toFixed(1)}h)
-                        </span>
-                      )}
-                      {!meetsTarget && (
-                        <span className="text-amber-700 font-medium">
-                          Faltan {(deficit / 60).toFixed(1)}h
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="h-6 bg-gray-200 rounded-full overflow-hidden flex">
-                    <div
-                      className="h-full bg-emerald-700 transition-all"
-                      style={{ width: `${barPrePlanned}%` }}
-                      title="Planificado antes"
-                    />
-                    <div
-                      className="h-full bg-emerald-400 transition-all"
-                      style={{ width: `${barAssignedToday}%` }}
-                      title="Asignado hoy"
-                    />
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    {Math.min(100, pctTotal).toFixed(0)}% de la meta (8h)
-                  </div>
-                </div>
-              );
-            })
-          )}
+                  <span className="flex items-center gap-1">Persona <SortIcon col="name" /></span>
+                </th>
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('status')}
+                >
+                  <span className="flex items-center gap-1">Estado <SortIcon col="status" /></span>
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-600 uppercase tracking-wider text-left w-[35%]">
+                  Progreso Jornada
+                </th>
+                <th
+                  className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('hours')}
+                >
+                  <span className="flex items-center justify-center gap-1">Planificado <SortIcon col="hours" /></span>
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Hoy
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Retrasos
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sortedUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500 italic">
+                    {filter !== 'all' ? 'Nadie en esta categoría.' : 'No hay usuarios en el equipo.'}
+                  </td>
+                </tr>
+              ) : (
+                sortedUsers.map((u) => {
+                  const status = getUserStatus(u);
+                  const pctTotal = Math.min(100, (u.totalMinutes / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctPrePlanned = Math.min(100, ((u.totalMinutes - u.assignedTodayMinutes) / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctAssignedToday = Math.min(100 - pctPrePlanned, (u.assignedTodayMinutes / TARGET_MINUTES_PER_DAY) * 100);
+                  const deficit = Math.max(0, TARGET_MINUTES_PER_DAY - u.totalMinutes);
+
+                  return (
+                    <tr key={u.userId} className="hover:bg-gray-50/50">
+                      {/* Nombre */}
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900 text-sm">{u.userName}</div>
+                        <div className="text-xs text-gray-500">
+                          {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''}
+                        </div>
+                      </td>
+
+                      {/* Badge Estado */}
+                      <td className="px-4 py-3">
+                        <StatusBadge status={status} />
+                      </td>
+
+                      {/* Barra */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1">
+                            <div className="h-4 bg-gray-100 rounded-full overflow-hidden flex">
+                              <div
+                                className="h-full bg-emerald-600 transition-all"
+                                style={{ width: `${pctPrePlanned}%` }}
+                              />
+                              <div
+                                className="h-full bg-emerald-300 transition-all"
+                                style={{ width: `${pctAssignedToday}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-gray-700 w-10 text-right shrink-0">
+                            {pctTotal.toFixed(0)}%
+                          </span>
+                        </div>
+                        {deficit > 0 && (
+                          <p className="text-xs text-amber-600 mt-0.5">
+                            Faltan {fmtH(deficit)}h
+                          </p>
+                        )}
+                      </td>
+
+                      {/* Horas planificadas */}
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-sm font-bold text-gray-900">{fmtH(u.totalMinutes)}h</span>
+                        <span className="text-xs text-gray-400"> / {TARGET_HOURS_PER_DAY}h</span>
+                      </td>
+
+                      {/* Asignado hoy */}
+                      <td className="px-4 py-3 text-center">
+                        {u.assignedTodayCount > 0 ? (
+                          <div>
+                            <span className="text-sm font-semibold text-emerald-700">{fmtH(u.assignedTodayMinutes)}h</span>
+                            <div className="text-xs text-gray-500">{u.assignedTodayCount} tarea{u.assignedTodayCount !== 1 ? 's' : ''}</div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">--</span>
+                        )}
+                      </td>
+
+                      {/* Retrasos */}
+                      <td className="px-4 py-3 text-center">
+                        {u.overdueCount > 0 ? (
+                          <div>
+                            <span className="text-sm font-bold text-red-600">{u.overdueCount}</span>
+                            <div className="text-xs text-red-500">{fmtH(u.overdueMinutes)}h</div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-green-500">0</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Leyenda */}
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-emerald-600 inline-block" /> Planificado antes de hoy
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-emerald-300 inline-block" /> Asignado hoy mismo
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-gray-100 border border-gray-300 inline-block" /> Sin planificar
+          </span>
+          <span className="ml-auto">
+            Retrasos = tareas de días anteriores sin completar
+          </span>
         </div>
       </div>
     </div>
