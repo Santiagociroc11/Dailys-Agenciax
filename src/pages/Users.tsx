@@ -546,9 +546,18 @@ export default function Users() {
             {users.map((user) => (
               <tr key={user.id} className={user.is_active === false ? 'bg-gray-50' : ''}>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <UsersIcon className="h-5 w-5 text-gray-400 mr-3" />
+                  <div className="flex items-center gap-2">
+                    <UsersIcon className="h-5 w-5 text-gray-400 shrink-0" />
                     <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                    {isAdmin && currentUser?.id !== user.id && (
+                      <button
+                        onClick={() => impersonateUser(user)}
+                        className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        title="Ver como usuario"
+                      >
+                        <LogIn className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

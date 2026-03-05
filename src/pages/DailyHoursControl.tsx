@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw, LogIn } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 interface DailyHoursUser {
   userId: string;
   userName: string;
+  userEmail: string;
   totalMinutes: number;
   assignedTodayMinutes: number;
   extraMinutes: number;
@@ -60,6 +62,7 @@ interface DailyHoursControlProps {
 }
 
 export default function DailyHoursControl({ embedded }: DailyHoursControlProps) {
+  const { isAdmin, user: currentUser, impersonateUser } = useAuth();
   const [dailyHoursControl, setDailyHoursControl] = useState<DailyHoursUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>('all');
@@ -335,9 +338,12 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         if (isAvailable) byUser.get(uid)!.availableCount += 1;
       });
 
-      const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
+      const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => {
+        const u = userList.find((u) => u.id === uid);
+        return {
         userId: uid,
-        userName: userList.find((u) => u.id === uid)?.name || userList.find((u) => u.id === uid)?.email || uid,
+        userName: u?.name || u?.email || uid,
+        userEmail: u?.email || '',
         totalMinutes: data.total + data.extra + data.rework + data.overdueMinutes,
         assignedTodayMinutes: data.assignedToday,
         extraMinutes: data.extra,
@@ -350,7 +356,8 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         overdueMinutes: data.overdueMinutes,
         reworkCount: data.reworkCount,
         availableCount: data.availableCount,
-      }));
+      };
+      });
 
       setDailyHoursControl(result);
     } catch (e) {
@@ -566,7 +573,18 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
                     <tr key={u.userId} className="hover:bg-gray-50/50">
                       {/* Persona */}
                       <td className="px-4 py-3 min-w-[160px]">
-                        <div className="font-medium text-gray-900 text-sm">{u.userName}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 text-sm">{u.userName}</span>
+                          {isAdmin && currentUser?.id !== u.userId && (
+                            <button
+                              onClick={() => impersonateUser({ id: u.userId, name: u.userName, email: u.userEmail, role: 'user' })}
+                              className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                              title="Ver como usuario"
+                            >
+                              <LogIn className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                           <div className="text-xs text-gray-500">
                           {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''} hoy
                           {u.overdueCount > 0 && (
