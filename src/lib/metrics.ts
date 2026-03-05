@@ -1429,3 +1429,210 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
     return [];
   }
 }
+
+export interface ReviewBottleneckItem {
+  itemId: string;
+  itemType: 'task' | 'subtask';
+  title: string;
+  projectName: string;
+  projectId: string | null;
+  assignedTo: string;
+  assignedToName: string;
+  hoursWaiting: number;
+  enteredReviewAt: string;
+}
+
+export interface ReviewBottleneckSummary {
+  totalInReview: number;
+  avgHoursWaiting: number;
+  maxHoursWaiting: number;
+  affectedProjects: number;
+}
+
+export interface ReviewBottleneckResult {
+  items: ReviewBottleneckItem[];
+  summary: ReviewBottleneckSummary;
+}
+
+/** Análisis de cuello de botella de revisión: tareas esperando en cola de revisión */
+export async function getReviewBottleneckAnalysis(projectId?: string): Promise<ReviewBottleneckResult> {
+  try {
+    const now = new Date();
+
+    // Obtener tasks en revisión (standalone, sin subtasks)
+    const { data: tasksData, error: tasksError } = await supabase
+      .from('tasks')
+      .select('id, title, project_id, assigned_users, projects!left(id, name, is_archived)')
+      .eq('status', 'in_review');
+
+    if (tasksError) throw tasksError;
+
+    // Obtener subtasks en revisión
+    const { data: subtasksData, error: subtasksError } = await supabase
+      .from('subtasks')
+      .select(`
+        id, title, task_id, assigned_to,
+        tasks!inner(id, title, project_id, projects!left(id, name, is_archived))
+      `)
+      .eq('status', 'in_review');
+
+    if (subtasksError) throw subtasksError;
+
+    // Filtrar tasks que tienen subtasks (solo standalone)
+    const taskIdsWithSubtasks = new Set(
+      (subtasksData || []).map((s: { task_id: string }) => s.task_id)
+    );
+    const standaloneTasks = (tasksData || []).filter(
+      (t: { id: string; project_id?: string; projects?: { is_archived?: boolean } }) =>
+        !taskIdsWithSubtasks.has(t.id) &&
+        (!projectId || t.project_id === projectId) &&
+        t.projects?.is_archived !== true
+    );
+
+    const subtasks = (subtasksData || []).filter(
+      (s: { tasks?: { project_id?: string; projects?: { is_archived?: boolean } } }) => {
+        const proj = (s.tasks as { project_id?: string })?.project_id;
+        const archived = (s.tasks as { projects?: { is_archived?: boolean } })?.projects?.is_archived;
+        return (!projectId || proj === projectId) && archived !== true;
+      }
+    );
+
+    const items: ReviewBottleneckItem[] = [];
+    const userIds = new Set<string>();
+
+    // Obtener usuarios para nombres
+    for (const t of standaloneTasks) {
+      const users = (t as { assigned_users?: string[] }).assigned_users;
+      if (users?.length) userIds.add(users[0]);
+    }
+    for (const s of subtasks) {
+      const uid = (s as { assigned_to?: string }).assigned_to;
+      if (uid) userIds.add(uid);
+    }
+
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, name, email')
+      .in('id', [...userIds]);
+    const userMap = new Map(
+      (usersData || []).map((u: { id: string; name?: string; email?: string }) => [
+        u.id,
+        u.name || u.email || u.id,
+      ])
+    );
+
+    // Obtener fechas de entrada a revisión desde status_history
+    const taskIds = standaloneTasks.map((t: { id: string }) => t.id);
+    const subtaskIds = subtasks.map((s: { id: string }) => s.id);
+
+    const inReviewDates = new Map<string, string>();
+
+    if (taskIds.length > 0) {
+      const { data: taskHistory } = await supabase
+        .from('status_history')
+        .select('task_id, changed_at')
+        .in('task_id', taskIds)
+        .eq('new_status', 'in_review');
+      for (const h of taskHistory || []) {
+        const tid = (h as { task_id: string }).task_id;
+        const changedAt = (h as { changed_at: string }).changed_at;
+        const key = `task:${tid}`;
+        if (!inReviewDates.has(key) || changedAt > (inReviewDates.get(key) || '')) {
+          inReviewDates.set(key, changedAt);
+        }
+      }
+    }
+    if (subtaskIds.length > 0) {
+      const { data: subtaskHistory } = await supabase
+        .from('status_history')
+        .select('subtask_id, changed_at')
+        .in('subtask_id', subtaskIds)
+        .eq('new_status', 'in_review');
+      for (const h of subtaskHistory || []) {
+        const sid = (h as { subtask_id: string }).subtask_id;
+        const changedAt = (h as { changed_at: string }).changed_at;
+        const key = `subtask:${sid}`;
+        if (!inReviewDates.has(key) || changedAt > (inReviewDates.get(key) || '')) {
+          inReviewDates.set(key, changedAt);
+        }
+      }
+    }
+
+    const getEnteredReviewAt = (itemType: 'task' | 'subtask', itemId: string): string =>
+      inReviewDates.get(`${itemType}:${itemId}`) || now.toISOString();
+
+    for (const t of standaloneTasks) {
+      const tid = (t as { id: string }).id;
+      const enteredAt = getEnteredReviewAt('task', tid);
+      const enteredDate = new Date(enteredAt);
+      const hoursWaiting = (now.getTime() - enteredDate.getTime()) / 3600000;
+
+      const projectName =
+        ((t as { projects?: { name?: string } }).projects as { name?: string })?.name || 'Sin proyecto';
+      const projectIdVal = (t as { project_id?: string }).project_id || null;
+      const assignedUser = (t as { assigned_users?: string[] }).assigned_users?.[0] || '';
+      items.push({
+        itemId: tid,
+        itemType: 'task',
+        title: (t as { title?: string }).title || '',
+        projectName,
+        projectId: projectIdVal,
+        assignedTo: assignedUser,
+        assignedToName: userMap.get(assignedUser) || assignedUser || 'Sin asignar',
+        hoursWaiting,
+        enteredReviewAt: enteredAt,
+      });
+    }
+
+    for (const s of subtasks) {
+      const sid = (s as { id: string }).id;
+      const enteredAt = getEnteredReviewAt('subtask', sid);
+      const enteredDate = new Date(enteredAt);
+      const hoursWaiting = (now.getTime() - enteredDate.getTime()) / 3600000;
+
+      const taskInfo = (s as { tasks?: { title?: string; project_id?: string; projects?: { name?: string } } })
+        .tasks;
+      const projectName = taskInfo?.projects?.name || 'Sin proyecto';
+      const projectIdVal = taskInfo?.project_id || null;
+      const assignedTo = (s as { assigned_to?: string }).assigned_to || '';
+      items.push({
+        itemId: sid,
+        itemType: 'subtask',
+        title: (s as { title?: string }).title || '',
+        projectName,
+        projectId: projectIdVal,
+        assignedTo,
+        assignedToName: userMap.get(assignedTo) || assignedTo || 'Sin asignar',
+        hoursWaiting,
+        enteredReviewAt: enteredAt,
+      });
+    }
+
+    const totalInReview = items.length;
+    const avgHoursWaiting =
+      totalInReview > 0 ? items.reduce((a, i) => a + i.hoursWaiting, 0) / totalInReview : 0;
+    const maxHoursWaiting = totalInReview > 0 ? Math.max(...items.map((i) => i.hoursWaiting)) : 0;
+    const affectedProjects = new Set(items.map((i) => i.projectId).filter(Boolean)).size;
+
+    return {
+      items: items.sort((a, b) => b.hoursWaiting - a.hoursWaiting),
+      summary: {
+        totalInReview,
+        avgHoursWaiting,
+        maxHoursWaiting,
+        affectedProjects,
+      },
+    };
+  } catch (error) {
+    console.error('Error in getReviewBottleneckAnalysis:', error);
+    return {
+      items: [],
+      summary: {
+        totalInReview: 0,
+        avgHoursWaiting: 0,
+        maxHoursWaiting: 0,
+        affectedProjects: 0,
+      },
+    };
+  }
+}

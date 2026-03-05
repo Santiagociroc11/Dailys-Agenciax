@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { getBottleneckAnalysis, type BottleneckRow, type BottleneckBlockerSubtask } from '../lib/metrics';
+import { Link } from 'react-router-dom';
+import { getBottleneckAnalysis, getReviewBottleneckAnalysis, type BottleneckRow, type BottleneckBlockerSubtask, type ReviewBottleneckItem } from '../lib/metrics';
 import { supabase } from '../lib/supabase';
 import {
   AlertTriangle, Users, ChevronDown, ChevronRight, Download, HelpCircle,
-  Clock, CheckCircle2, RotateCcw, Eye, Zap, ArrowRight
+  Clock, CheckCircle2, RotateCcw, Eye, Zap, ArrowRight, FileSearch
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string; urgency: number }> = {
@@ -65,10 +66,33 @@ function exportToCSV(data: BottleneckRow[]) {
   URL.revokeObjectURL(url);
 }
 
+function exportReviewToCSV(items: ReviewBottleneckItem[]) {
+  const headers = ['Tipo', 'Tarea/Subtarea', 'Proyecto', 'Asignado a', 'Horas esperando', 'Entrada a revisión'];
+  const rows = items.map((i) => [
+    i.itemType === 'task' ? 'Tarea' : 'Subtarea',
+    i.title,
+    i.projectName,
+    i.assignedToName,
+    i.hoursWaiting.toFixed(1),
+    new Date(i.enteredReviewAt).toLocaleString('es'),
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cuello_revision_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 type ViewMode = 'blocked' | 'blockers';
+type BottleneckMode = 'sequence' | 'review';
 
 export default function BottleneckView() {
+  const [bottleneckMode, setBottleneckMode] = useState<BottleneckMode>('sequence');
   const [data, setData] = useState<BottleneckRow[]>([]);
+  const [reviewData, setReviewData] = useState<{ items: ReviewBottleneckItem[]; summary: { totalInReview: number; avgHoursWaiting: number; maxHoursWaiting: number; affectedProjects: number } } | null>(null);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -89,6 +113,7 @@ export default function BottleneckView() {
   }, []);
 
   useEffect(() => {
+    if (bottleneckMode !== 'sequence') return;
     async function load() {
       setLoading(true);
       const result = await getBottleneckAnalysis(projectId || undefined);
@@ -96,7 +121,18 @@ export default function BottleneckView() {
       setLoading(false);
     }
     load();
-  }, [projectId]);
+  }, [projectId, bottleneckMode]);
+
+  useEffect(() => {
+    if (bottleneckMode !== 'review') return;
+    async function load() {
+      setLoading(true);
+      const result = await getReviewBottleneckAnalysis(projectId || undefined);
+      setReviewData(result);
+      setLoading(false);
+    }
+    load();
+  }, [projectId, bottleneckMode]);
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -182,7 +218,9 @@ export default function BottleneckView() {
             </button>
           </h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Identifica quién bloquea a quién en tareas secuenciales y qué tan urgente es cada bloqueo.
+            {bottleneckMode === 'sequence'
+              ? 'Identifica quién bloquea a quién en tareas secuenciales y qué tan urgente es cada bloqueo.'
+              : 'Tareas en cola de revisión esperando aprobación del admin.'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -198,119 +236,259 @@ export default function BottleneckView() {
               </option>
             ))}
           </select>
-          <button
-            onClick={() => exportToCSV(data)}
-            disabled={data.length === 0}
-            className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 disabled:opacity-50 transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            CSV
-          </button>
+          {bottleneckMode === 'sequence' && (
+            <button
+              onClick={() => exportToCSV(data)}
+              disabled={data.length === 0}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 disabled:opacity-50 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              CSV
+            </button>
+          )}
+          {bottleneckMode === 'review' && reviewData && (
+            <>
+              <button
+                onClick={() => exportReviewToCSV(reviewData.items)}
+                disabled={reviewData.items.length === 0}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 disabled:opacity-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                CSV
+              </button>
+              <Link
+                to="/management"
+                className="flex items-center gap-2 px-3 py-2 bg-indigo-100 hover:bg-indigo-200 rounded-lg text-sm font-medium text-indigo-700 transition-colors"
+              >
+                <FileSearch className="w-4 h-4" />
+                Ir a revisión
+              </Link>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Help panel */}
-      {showHelp && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900 space-y-2">
-          <p className="font-semibold">¿Cómo leer esta vista?</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
-            <div className="flex gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-              <div><strong>Actividades esperando</strong>: subtareas pendientes cuyo nivel anterior en la secuencia aún no está aprobado.</div>
-            </div>
-            <div className="flex gap-2">
-              <Eye className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-              <div><strong>Estado del bloqueador</strong>: muestra si la subtarea que bloquea está pendiente (urgente), en progreso (esperando), o en revisión (a punto de resolverse).</div>
-            </div>
-            <div className="flex gap-2">
-              <Zap className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-              <div><strong>Urgencia</strong>: <span className="inline-block w-2 h-2 rounded-full bg-red-500 mx-0.5" /> Pendiente/devuelta (actuar ya), <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mx-0.5" /> Asignada (seguimiento), <span className="inline-block w-2 h-2 rounded-full bg-green-400 mx-0.5" /> En progreso/revisión (esperar).</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400">
-          <div className="flex items-center justify-between mb-1">
-            <AlertTriangle className="w-5 h-5 text-red-400" />
-            <span className="text-2xl font-bold text-gray-900">{totalBlockedActivities}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Actividades bloqueadas</p>
-          <p className="text-xs text-gray-400 mt-1">Subtareas esperando</p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-4 border-l-4 border-amber-400">
-          <div className="flex items-center justify-between mb-1">
-            <Users className="w-5 h-5 text-amber-400" />
-            <span className="text-2xl font-bold text-gray-900">{usersWithWaiting}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Personas bloqueadas</p>
-          <p className="text-xs text-gray-400 mt-1">Con trabajo detenido</p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-4 border-l-4 border-orange-400">
-          <div className="flex items-center justify-between mb-1">
-            <Zap className="w-5 h-5 text-orange-400" />
-            <span className="text-2xl font-bold text-gray-900">{usersBlocking}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Bloqueadores</p>
-          <p className="text-xs text-gray-400 mt-1">Personas que causan espera</p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-400">
-          <div className="flex items-center justify-between mb-1">
-            <Clock className="w-5 h-5 text-blue-400" />
-            <span className="text-2xl font-bold text-gray-900">{affectedProjects}</span>
-          </div>
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Proyectos afectados</p>
-          <p className="text-xs text-gray-400 mt-1">Con bloqueos activos</p>
-        </div>
-      </div>
-
-      {/* View mode tabs */}
+      {/* Modo: Secuencia | Revisión */}
       <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
         <button
-          onClick={() => setViewMode('blocked')}
+          onClick={() => setBottleneckMode('sequence')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            viewMode === 'blocked'
+            bottleneckMode === 'sequence'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700'
           }`}
         >
           <span className="flex items-center gap-1.5">
             <AlertTriangle className="w-4 h-4" />
-            Personas bloqueadas
+            Secuencia
           </span>
         </button>
         <button
-          onClick={() => setViewMode('blockers')}
+          onClick={() => setBottleneckMode('review')}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            viewMode === 'blockers'
+            bottleneckMode === 'review'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700'
           }`}
         >
           <span className="flex items-center gap-1.5">
-            <Zap className="w-4 h-4" />
-            Bloqueadores
+            <FileSearch className="w-4 h-4" />
+            Revisión
           </span>
         </button>
       </div>
 
-      {/* Main content */}
-      {data.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
-          <p className="text-gray-600 font-medium">Sin cuellos de botella</p>
-          <p className="text-gray-400 text-sm mt-1">Las tareas secuenciales no tienen actividades esperando por otros.</p>
+      {/* Help panel */}
+      {showHelp && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900 space-y-2">
+          <p className="font-semibold">¿Cómo leer esta vista?</p>
+          {bottleneckMode === 'sequence' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+              <div className="flex gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div><strong>Actividades esperando</strong>: subtareas pendientes cuyo nivel anterior en la secuencia aún no está aprobado.</div>
+              </div>
+              <div className="flex gap-2">
+                <Eye className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <div><strong>Estado del bloqueador</strong>: muestra si la subtarea que bloquea está pendiente (urgente), en progreso (esperando), o en revisión (a punto de resolverse).</div>
+              </div>
+              <div className="flex gap-2">
+                <Zap className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                <div><strong>Urgencia</strong>: <span className="inline-block w-2 h-2 rounded-full bg-red-500 mx-0.5" /> Pendiente/devuelta (actuar ya), <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mx-0.5" /> Asignada (seguimiento), <span className="inline-block w-2 h-2 rounded-full bg-green-400 mx-0.5" /> En progreso/revisión (esperar).</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2">
+              <p><strong>Revisión</strong>: tareas o subtareas entregadas que están en estado &quot;En revisión&quot; esperando que un admin las apruebe o devuelva. El tiempo de espera se calcula desde que entraron a revisión.</p>
+            </div>
+          )}
         </div>
-      ) : viewMode === 'blocked' ? (
-        <BlockedView rows={sortedBlocked} expandedIds={expandedIds} toggleExpanded={toggleExpanded} groupDetailsByProject={groupDetailsByProject} />
-      ) : (
-        <BlockersView rows={sortedBlockers} data={data} expandedIds={expandedIds} toggleExpanded={toggleExpanded} />
       )}
+
+      {/* KPI Cards */}
+      {bottleneckMode === 'sequence' ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400">
+            <div className="flex items-center justify-between mb-1">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <span className="text-2xl font-bold text-gray-900">{totalBlockedActivities}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Actividades bloqueadas</p>
+            <p className="text-xs text-gray-400 mt-1">Subtareas esperando</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-amber-400">
+            <div className="flex items-center justify-between mb-1">
+              <Users className="w-5 h-5 text-amber-400" />
+              <span className="text-2xl font-bold text-gray-900">{usersWithWaiting}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Personas bloqueadas</p>
+            <p className="text-xs text-gray-400 mt-1">Con trabajo detenido</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-orange-400">
+            <div className="flex items-center justify-between mb-1">
+              <Zap className="w-5 h-5 text-orange-400" />
+              <span className="text-2xl font-bold text-gray-900">{usersBlocking}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Bloqueadores</p>
+            <p className="text-xs text-gray-400 mt-1">Personas que causan espera</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-400">
+            <div className="flex items-center justify-between mb-1">
+              <Clock className="w-5 h-5 text-blue-400" />
+              <span className="text-2xl font-bold text-gray-900">{affectedProjects}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Proyectos afectados</p>
+            <p className="text-xs text-gray-400 mt-1">Con bloqueos activos</p>
+          </div>
+        </div>
+      ) : reviewData && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-amber-400">
+            <div className="flex items-center justify-between mb-1">
+              <FileSearch className="w-5 h-5 text-amber-400" />
+              <span className="text-2xl font-bold text-gray-900">{reviewData.summary.totalInReview}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">En cola de revisión</p>
+            <p className="text-xs text-gray-400 mt-1">Tareas esperando</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-400">
+            <div className="flex items-center justify-between mb-1">
+              <Clock className="w-5 h-5 text-blue-400" />
+              <span className="text-2xl font-bold text-gray-900">{reviewData.summary.avgHoursWaiting.toFixed(1)}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Tiempo promedio (h)</p>
+            <p className="text-xs text-gray-400 mt-1">Horas de espera</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-red-400">
+            <div className="flex items-center justify-between mb-1">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <span className="text-2xl font-bold text-gray-900">{reviewData.summary.maxHoursWaiting.toFixed(1)}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Tiempo máximo (h)</p>
+            <p className="text-xs text-gray-400 mt-1">La más antigua</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4 border-l-4 border-indigo-400">
+            <div className="flex items-center justify-between mb-1">
+              <Users className="w-5 h-5 text-indigo-400" />
+              <span className="text-2xl font-bold text-gray-900">{reviewData.summary.affectedProjects}</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Proyectos afectados</p>
+            <p className="text-xs text-gray-400 mt-1">Con tareas en revisión</p>
+          </div>
+        </div>
+      )}
+
+      {/* View mode tabs - solo para Secuencia */}
+      {bottleneckMode === 'sequence' && (
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setViewMode('blocked')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              viewMode === 'blocked'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <AlertTriangle className="w-4 h-4" />
+              Personas bloqueadas
+            </span>
+          </button>
+          <button
+            onClick={() => setViewMode('blockers')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              viewMode === 'blockers'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Zap className="w-4 h-4" />
+              Bloqueadores
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Main content */}
+      {bottleneckMode === 'sequence' ? (
+        data.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
+            <p className="text-gray-600 font-medium">Sin cuellos de botella</p>
+            <p className="text-gray-400 text-sm mt-1">Las tareas secuenciales no tienen actividades esperando por otros.</p>
+          </div>
+        ) : viewMode === 'blocked' ? (
+          <BlockedView rows={sortedBlocked} expandedIds={expandedIds} toggleExpanded={toggleExpanded} groupDetailsByProject={groupDetailsByProject} />
+        ) : (
+          <BlockersView rows={sortedBlockers} data={data} expandedIds={expandedIds} toggleExpanded={toggleExpanded} />
+        )
+      ) : reviewData ? (
+        reviewData.items.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
+            <p className="text-gray-600 font-medium">Sin tareas en revisión</p>
+            <p className="text-gray-400 text-sm mt-1">No hay tareas esperando aprobación del admin.</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tarea / Subtarea</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Proyecto</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asignado a</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tiempo esperando</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entrada a revisión</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {reviewData.items.map((item) => (
+                  <tr key={`${item.itemType}-${item.itemId}`} className="hover:bg-gray-50">
+                    <td className="px-5 py-3 text-sm text-gray-600">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${item.itemType === 'task' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'}`}>
+                        {item.itemType === 'task' ? 'Tarea' : 'Subtarea'}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-sm font-medium text-gray-900">{item.title}</td>
+                    <td className="px-5 py-3 text-sm text-gray-600">{item.projectName}</td>
+                    <td className="px-5 py-3 text-sm text-gray-600">{item.assignedToName}</td>
+                    <td className="px-5 py-3 text-sm font-medium text-amber-600">{item.hoursWaiting.toFixed(1)} h</td>
+                    <td className="px-5 py-3 text-sm text-gray-500">{new Date(item.enteredReviewAt).toLocaleString('es')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : null}
     </div>
   );
 }
