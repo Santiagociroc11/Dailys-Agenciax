@@ -316,6 +316,7 @@ function Management() {
   const [assignmentIdForTimeCorrection, setAssignmentIdForTimeCorrection] = useState<string | null>(null);
   const [reviewerEditDuration, setReviewerEditDuration] = useState<number | null>(null);
   const [isSavingTimeCorrection, setIsSavingTimeCorrection] = useState(false);
+  const [workSessionsForReview, setWorkSessionsForReview] = useState<Array<{ id: string; duration_minutes: number; session_type: string; createdAt?: string; created_at?: string }>>([]);
 
   // Agregar estos estados nuevos después de los estados existentes
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -2962,9 +2963,19 @@ function Management() {
           setAssignmentIdForTimeCorrection(assignment.id);
           const dur = (assignment as { actual_duration?: number }).actual_duration;
           setReviewerEditDuration(dur != null && dur > 0 ? dur : (details.realDuration ?? null));
+          // Cargar sesiones de trabajo (bloques de horas) para que el revisor las vea
+          const { data: sessions } = await supabase
+            .from('work_sessions')
+            .select('id, duration_minutes, session_type, created_at')
+            .eq('assignment_id', assignment.id)
+            .order('created_at', { ascending: true });
+          setWorkSessionsForReview(Array.isArray(sessions) ? sessions : []);
         } else {
           setReviewerEditDuration(details.realDuration ?? null);
+          setWorkSessionsForReview([]);
         }
+      } else {
+        setWorkSessionsForReview([]);
       }
 
     } catch (error: any) {
@@ -4792,6 +4803,28 @@ function Management() {
                             </div>
                             {assignmentIdForTimeCorrection && (
                               <p className="text-xs text-gray-500">Puedes corregir el tiempo si acordaste con el usuario (ej. error al reportar).</p>
+                            )}
+                            {workSessionsForReview.length > 0 && (
+                              <div className="bg-slate-50 border border-slate-200 rounded-md p-2 mt-2">
+                                <div className="text-xs font-medium text-slate-700 mb-1.5">Sesiones trabajadas (bloques de horas)</div>
+                                <div className="space-y-1 max-h-32 overflow-y-auto">
+                                  {workSessionsForReview.map((s) => {
+                                    const ts = s.created_at || s.createdAt || '';
+                                    const fecha = ts ? new Date(ts).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+                                    const tipo = s.session_type === 'completion' ? 'Entrega' : s.session_type === 'progress' ? 'Avance' : s.session_type || 'Sesión';
+                                    return (
+                                      <div key={s.id} className="flex justify-between text-xs text-slate-600 py-0.5">
+                                        <span>{fecha}</span>
+                                        <span className="font-medium">{s.duration_minutes} min</span>
+                                        <span className="text-slate-500">{tipo}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="text-xs text-slate-600 mt-1 pt-1 border-t border-slate-200">
+                                  Total: {workSessionsForReview.reduce((a, s) => a + s.duration_minutes, 0)} min
+                                </div>
+                              </div>
                             )}
                             {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
                               <div className="bg-orange-50 border border-orange-200 rounded-md p-2 mt-1">
