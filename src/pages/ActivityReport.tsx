@@ -48,7 +48,7 @@ export default function ActivityReport() {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
-    supabase.from('users').select('id, name').order('name').then((res) => {
+    supabase.from('users').select('id, name').not('is_active', 'eq', false).order('name').then((res) => {
       const { data } = res as { data: UserOption[] | null };
       setUsers(data || []);
     });

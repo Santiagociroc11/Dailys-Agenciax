@@ -89,7 +89,8 @@ export default function Areas() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email');
+        .select('id, name, email')
+        .not('is_active', 'eq', false);
 
       if (error) throw error;
 

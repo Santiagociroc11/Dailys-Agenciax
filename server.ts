@@ -352,7 +352,7 @@ app.post('/api/telegram/deadline-reminders', telegramCheck, async (req, res) => 
       const deadlineStr = new Date(t.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
       const msg = createDeadlineReminderMessage(t.title, projectName, deadlineStr, days, false);
       for (const uid of userIds) {
-        const u = await User.findOne({ id: uid, telegram_chat_id: { $ne: null } }).select('telegram_chat_id name email').lean().exec();
+        const u = await User.findOne({ id: uid, telegram_chat_id: { $ne: null }, is_active: { $ne: false } }).select('telegram_chat_id name email').lean().exec();
         if (u?.telegram_chat_id) {
           const ok = await sendTelegramMessage(u.telegram_chat_id, msg, {
             type: 'deadline-reminder',
@@ -369,7 +369,7 @@ app.post('/api/telegram/deadline-reminders', telegramCheck, async (req, res) => 
       const projectName = parentTask?.project_id ? projectMap.get(parentTask.project_id) || 'Sin proyecto' : 'Sin proyecto';
       const deadlineStr = new Date(s.deadline).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
       const msg = createDeadlineReminderMessage(s.title, projectName, deadlineStr, days, true, parentTask?.title);
-      const u = await User.findOne({ id: userId, telegram_chat_id: { $ne: null } }).select('telegram_chat_id name email').lean().exec();
+      const u = await User.findOne({ id: userId, telegram_chat_id: { $ne: null }, is_active: { $ne: false } }).select('telegram_chat_id name email').lean().exec();
       if (u?.telegram_chat_id) {
         const ok = await sendTelegramMessage(u.telegram_chat_id, msg, {
           type: 'deadline-reminder',
@@ -399,7 +399,10 @@ app.post('/api/telegram/daily-summary', telegramCheck, async (req, res) => {
     const todayStart = new Date(today + 'T00:00:00');
     const todayEnd = new Date(today + 'T23:59:59');
 
-    const usersWithTelegram = await User.find({ telegram_chat_id: { $ne: null } })
+    const usersWithTelegram = await User.find({
+      telegram_chat_id: { $ne: null },
+      is_active: { $ne: false },
+    })
       .select('id name telegram_chat_id')
       .lean()
       .exec();
@@ -530,8 +533,9 @@ app.post('/api/telegram/admin-morning-report', telegramCheck, async (req, res) =
     const userIdsFromSubtasks = await Subtask.distinct('assigned_to', { task_id: { $in: activeTaskIds } }).exec();
     const allUserIds = [...new Set([...userIdsFromAssignments, ...userIdsFromOverdue, ...userIdsFromSubtasks])];
 
-    const users = await User.find({ id: { $in: allUserIds } }).select('id name').lean().exec();
+    const users = await User.find({ id: { $in: allUserIds }, is_active: { $ne: false } }).select('id name').lean().exec();
     const userMap = new Map(users.map((u: { id: string; name?: string }) => [u.id, u.name || u.id]));
+    const activeUserIds = users.map((u: { id: string }) => u.id);
 
     const userRows: { userName: string; assignedToday: number; availableUnassigned: number; overdue: number }[] = [];
     let totalsAssigned = 0;
@@ -539,7 +543,7 @@ app.post('/api/telegram/admin-morning-report', telegramCheck, async (req, res) =
     let totalsOverdue = 0;
     const usersWithoutAssign: string[] = [];
 
-    for (const uid of allUserIds) {
+    for (const uid of activeUserIds) {
       const [assignedToday, overdue, assignedTodaySubtaskIds] = await Promise.all([
         TaskWorkAssignment.countDocuments({ user_id: uid, date: today }).exec(),
         TaskWorkAssignment.countDocuments({ user_id: uid, date: { $lt: today }, status: { $nin: ['completed', 'in_review', 'approved'] } }).exec(),
@@ -606,8 +610,9 @@ app.post('/api/telegram/admin-evening-report', telegramCheck, async (req, res) =
     const userIdsFromOverdue = await TaskWorkAssignment.distinct('user_id', { date: { $lt: today }, status: { $nin: completedStatuses }, ...projectFilter }).exec();
     const allUserIds = [...new Set([...userIdsFromToday, ...userIdsFromOverdue])];
 
-    const users = await User.find({ id: { $in: allUserIds } }).select('id name').lean().exec();
+    const users = await User.find({ id: { $in: allUserIds }, is_active: { $ne: false } }).select('id name').lean().exec();
     const userMap = new Map(users.map((u: { id: string; name?: string }) => [u.id, u.name || u.id]));
+    const activeUserIds = users.map((u: { id: string }) => u.id);
 
     const userRows: { userName: string; delivered: number; pending: number; overdue: number }[] = [];
     let totalsDelivered = 0;
@@ -615,7 +620,7 @@ app.post('/api/telegram/admin-evening-report', telegramCheck, async (req, res) =
     let totalsOverdue = 0;
     const usersWithoutDelivery: string[] = [];
 
-    for (const uid of allUserIds) {
+    for (const uid of activeUserIds) {
       const [delivered, pending, overdue] = await Promise.all([
         TaskWorkAssignment.countDocuments({ user_id: uid, date: today, status: { $in: completedStatuses }, ...projectFilter }).exec(),
         TaskWorkAssignment.countDocuments({ user_id: uid, date: today, status: { $nin: completedStatuses }, ...projectFilter }).exec(),

@@ -707,7 +707,8 @@ export async function notifyUsersTaskInReview(
       .from('users')
       .select('id, telegram_chat_id, name, email')
       .in('id', userIds)
-      .not('telegram_chat_id', 'is', null);
+      .not('telegram_chat_id', 'is', null)
+      .not('is_active', 'eq', false);
 
     if (usersError || !usersRaw) {
       console.error('Error obteniendo usuarios para notificación de revisión:', usersError);
@@ -763,6 +764,7 @@ export async function notifyTaskAvailable(
       .from('users')
       .select('telegram_chat_id, name, email')
       .eq('id', userId)
+      .not('is_active', 'eq', false)
       .single();
 
     if (userError || !userDataRaw) {

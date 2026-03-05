@@ -39,7 +39,8 @@ export default function Timeline() {
     try {
       const { data: users, error } = await supabase
         .from('users')
-        .select('id, monthly_salary, hourly_rate, currency');
+        .select('id, monthly_salary, hourly_rate, currency')
+        .not('is_active', 'eq', false);
       if (error) throw error;
       const byCurrency: Record<string, { total: number; count: number }> = {};
       (users || []).forEach((u: { monthly_salary?: number | null; hourly_rate?: number | null; currency?: string }) => {

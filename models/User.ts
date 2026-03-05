@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema(
     monthly_salary: { type: Number, default: null }, // Sueldo mensual fijo (empleados). Base para costes si no hay hourly_rate
     currency: { type: String, default: 'COP' }, // Moneda (COP, USD, etc.)
     payment_account: { type: String, default: null }, // Cuenta bancaria para pagos de nómina
+    is_active: { type: Boolean, default: true }, // Usuario activo (trabajando) o inactivo (ya no trabaja)
   },
   {
     timestamps: true,

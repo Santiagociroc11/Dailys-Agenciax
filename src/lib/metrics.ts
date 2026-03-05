@@ -312,6 +312,7 @@ export async function getAllUsersInfo() {
     const { data: users } = await supabase
       .from('users')
       .select('id, name, email, role, created_at')
+      .not('is_active', 'eq', false)
       .order('created_at', { ascending: false });
 
     return users || [];

@@ -74,6 +74,7 @@ export default function Payroll() {
       const { data, error } = await supabase
         .from('users')
         .select('id, name, monthly_salary, currency')
+        .not('is_active', 'eq', false)
         .not('monthly_salary', 'is', null)
         .gt('monthly_salary', 0);
       if (error) throw error;
@@ -108,7 +109,8 @@ export default function Payroll() {
     try {
       const { data: users, error } = await supabase
         .from('users')
-        .select('id, monthly_salary, hourly_rate, currency');
+        .select('id, monthly_salary, hourly_rate, currency')
+        .not('is_active', 'eq', false);
       if (error) throw error;
       const byCurrency: Record<string, { total: number; count: number }> = {};
       (users || []).forEach((u: { monthly_salary?: number | null; hourly_rate?: number | null; currency?: string }) => {

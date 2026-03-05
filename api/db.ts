@@ -51,7 +51,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const areaId = params.area_uuid as string;
       const assignments = await AreaUserAssignment.find({ area_id: areaId }).lean().exec();
       const userIds = assignments.map((a: { user_id: string }) => a.user_id);
-      const users = await User.find({ id: { $in: userIds } }).select('id name email').lean().exec();
+      const users = await User.find({ id: { $in: userIds }, is_active: { $ne: false } }).select('id name email').lean().exec();
       const userMap = new Map(users.map((u) => [u.id, u]));
       data = assignments.map((a: { user_id: string }) => {
         const user = userMap.get(a.user_id);
@@ -332,7 +332,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           },
         },
       ]).exec();
-      const users = await User.find({}).select('id name email').lean().exec();
+      const users = await User.find({ is_active: { $ne: false } }).select('id name email').lean().exec();
       const userMap = new Map(users.map((u: { id: string; name: string; email: string }) => [u.id, u]));
       const merged = new Map<string, { tasksAssigned: number; tasksApproved: number; tasksReturned: number; tasksDelivered: number }>();
       for (const u of users) {
@@ -499,7 +499,10 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         },
       ];
       const results = await TaskWorkAssignment.aggregate(pipeline).exec();
-      const usersWithProjects = await User.find({ assigned_projects: { $exists: true, $ne: [] } })
+      const usersWithProjects = await User.find({
+        assigned_projects: { $exists: true, $ne: [] },
+        is_active: { $ne: false },
+      })
         .select('id')
         .lean()
         .exec();
@@ -957,6 +960,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       }
       const users = await User.find({
         $or: [{ monthly_salary: { $gt: 0 } }, { hourly_rate: { $gt: 0 } }],
+        is_active: { $ne: false },
       })
         .select('id name email monthly_salary hourly_rate payment_account currency')
         .lean()
@@ -1078,7 +1082,10 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         .exec()
         .then((r) => r.map((p: { id: string }) => p.id));
 
-      const users = await User.find({ assigned_projects: { $exists: true, $ne: [] } })
+      const users = await User.find({
+        assigned_projects: { $exists: true, $ne: [] },
+        is_active: { $ne: false },
+      })
         .select('id name email')
         .lean()
         .exec();

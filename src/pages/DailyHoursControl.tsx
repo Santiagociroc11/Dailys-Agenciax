@@ -80,7 +80,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
       const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
 
-      const { data: users } = await supabase.from('users').select('id, name, email');
+      const { data: users } = await supabase.from('users').select('id, name, email').not('is_active', 'eq', false);
       const userList = users || [];
 
       const todayStartISO = todayStart.toISOString();

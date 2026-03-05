@@ -391,7 +391,8 @@ function Tasks() {
       try {
         const { data: usersData, error: usersError } = await supabase
           .from('users')
-          .select('id, email, assigned_projects, name');
+          .select('id, email, assigned_projects, name')
+          .not('is_active', 'eq', false);
 
         if (usersError) throw usersError;
         setUsers(usersData || []);

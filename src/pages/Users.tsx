@@ -16,6 +16,7 @@ interface User {
   currency?: string;
   payment_account?: string | null;
   assigned_projects?: string[];
+  is_active?: boolean;
 }
 
 export default function Users() {
@@ -54,7 +55,9 @@ export default function Users() {
     monthly_salary: '' as string | number,
     currency: 'COP',
     payment_account: '',
+    is_active: true,
   });
+  const [togglingActive, setTogglingActive] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState('');
   const [editError, setEditError] = useState('');
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
@@ -69,7 +72,7 @@ export default function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, monthly_salary, currency, payment_account, assigned_projects');
+        .select('id, name, email, role, phone, password, telegram_chat_id, hourly_rate, monthly_salary, currency, payment_account, assigned_projects, is_active');
 
       if (error) throw error;
 
@@ -132,6 +135,32 @@ export default function Users() {
     } catch (error) {
       console.error('Error al crear usuario:', error);
       setError('Error al crear el usuario. Por favor, inténtalo de nuevo.');
+    }
+  }
+
+  async function handleToggleActive(userId: string, currentActive: boolean) {
+    setTogglingActive(userId);
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ is_active: !currentActive })
+        .eq('id', userId);
+
+      if (error) throw error;
+      if (currentUser?.id) {
+        await logAudit({
+          user_id: currentUser.id,
+          entity_type: 'user',
+          entity_id: userId,
+          action: 'update',
+          summary: `Usuario marcado como ${!currentActive ? 'activo' : 'inactivo'}`,
+        });
+      }
+      await fetchUsers();
+    } catch (error) {
+      console.error('Error al actualizar estado activo:', error);
+    } finally {
+      setTogglingActive(null);
     }
   }
 
@@ -218,6 +247,7 @@ export default function Users() {
         phone: fullPhone,
         role: editUser.role,
         telegram_chat_id: editUser.telegram_chat_id || null,
+        is_active: editUser.is_active,
       };
       const hourlyRate = editUser.hourly_rate === '' || editUser.hourly_rate === null ? null : Number(editUser.hourly_rate);
       const monthlySalary = editUser.monthly_salary === '' || editUser.monthly_salary === null ? null : Number(editUser.monthly_salary);
@@ -303,6 +333,7 @@ export default function Users() {
       monthly_salary: user.monthly_salary ?? '',
       currency: user.currency || 'COP',
       payment_account: user.payment_account || '',
+      is_active: user.is_active !== false,
     });
     
     setShowEditUserModal(true);
@@ -504,13 +535,16 @@ export default function Users() {
                 Rol
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Activo
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Acciones
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {users.map((user) => (
-              <tr key={user.id}>
+              <tr key={user.id} className={user.is_active === false ? 'bg-gray-50' : ''}>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
                     <UsersIcon className="h-5 w-5 text-gray-400 mr-3" />
@@ -562,6 +596,26 @@ export default function Users() {
                       : 'bg-green-100 text-green-800'
                   }`}>
                     {user.role === 'admin' ? 'Administrador' : 'Usuario'}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleActive(user.id, user.is_active !== false)}
+                    disabled={togglingActive === user.id || currentUser?.id === user.id}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      user.is_active !== false ? 'bg-indigo-600' : 'bg-gray-200'
+                    }`}
+                    title={user.is_active !== false ? 'Activo (clic para desactivar)' : 'Inactivo (clic para activar)'}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        user.is_active !== false ? 'translate-x-5' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <span className="ml-2 text-xs text-gray-500">
+                    {user.is_active !== false ? 'Activo' : 'Inactivo'}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -914,6 +968,28 @@ export default function Users() {
                         <option value="user">Usuario</option>
                         <option value="admin">Administrador</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Estado</label>
+                      <div className="flex items-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditUser({ ...editUser, is_active: !editUser.is_active })}
+                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                            editUser.is_active ? 'bg-indigo-600' : 'bg-gray-200'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              editUser.is_active ? 'translate-x-5' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                        <span className="text-sm text-gray-600">
+                          {editUser.is_active ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">Inactivo = ya no trabaja en el equipo</p>
                     </div>
                   </div>
                   <div>

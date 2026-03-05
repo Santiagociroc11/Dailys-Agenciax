@@ -459,6 +459,7 @@ function Management() {
       const { data, error } = await supabase
         .from('users')
         .select('id, email, name')
+        .not('is_active', 'eq', false)
         .order('name');
 
       if (error) throw error;
