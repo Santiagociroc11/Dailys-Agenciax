@@ -25,39 +25,31 @@ export default function DailyHoursControl() {
 
   async function fetchDailyHoursControl() {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const todayStart = new Date(todayStr + 'T00:00:00');
       const todayEnd = new Date(todayStr + 'T23:59:59.999');
 
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
-      const activeProjectIds = (activeProjects || []).map((p) => p.id);
+      const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
 
       const { data: users } = await supabase.from('users').select('id, name, email');
       const userList = users || [];
 
-      if (activeProjectIds.length === 0) {
-        setDailyHoursControl(
-          userList.map((u) => ({
-            userId: u.id,
-            userName: u.name || u.email,
-            totalMinutes: 0,
-            assignedTodayMinutes: 0,
-            taskCount: 0,
-            assignedTodayCount: 0,
-            actualMinutesToday: 0,
-          }))
-        );
-        setLoading(false);
-        return;
-      }
-
       const { data: todayAssignments, error } = await supabase
         .from('task_work_assignments')
-        .select('id, user_id, date, estimated_duration, actual_duration, created_at')
-        .eq('date', todayStr)
-        .in('project_id', activeProjectIds);
+        .select('id, user_id, date, project_id, estimated_duration, actual_duration, created_at')
+        .eq('date', todayStr);
 
       if (error) throw error;
+
+      const filteredAssignments =
+        activeProjectIds.size === 0
+          ? (todayAssignments || [])
+          : (todayAssignments || []).filter(
+              (a: { project_id?: string | null }) =>
+                !a.project_id || activeProjectIds.has(a.project_id)
+            );
 
       const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number }>();
 
@@ -65,7 +57,7 @@ export default function DailyHoursControl() {
         byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0 });
       });
 
-      (todayAssignments || []).forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
+      filteredAssignments.forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
           byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0 });
