@@ -26,6 +26,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/activity': 'Reporte de actividad',
   '/daily-hours': 'Control de Horas',
   '/bottlenecks': 'Cuellos de botella',
+  '/supervision-log': 'Bitácora supervisión',
   '/payroll': 'Nómina',
   '/timeline': 'Timeline',
   '/settings': 'Configuración',

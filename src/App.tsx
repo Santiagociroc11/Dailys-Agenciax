@@ -20,6 +20,7 @@ const Audits = lazy(() => import('./pages/Audits'));
 const ActivityReport = lazy(() => import('./pages/ActivityReport'));
 const DailyHoursControl = lazy(() => import('./pages/DailyHoursControl'));
 const BottleneckView = lazy(() => import('./pages/BottleneckView'));
+const SupervisionLog = lazy(() => import('./pages/SupervisionLog'));
 const Payroll = lazy(() => import('./pages/Payroll'));
 const Timeline = lazy(() => import('./pages/Timeline'));
 const Contabilidad = lazy(() => import('./pages/Contabilidad'));
@@ -101,6 +102,7 @@ function App() {
               <Route path="activity" element={<ActivityReport />} />
               <Route path="daily-hours" element={<DailyHoursControl />} />
               <Route path="bottlenecks" element={<BottleneckView />} />
+              <Route path="supervision-log" element={<SupervisionLog />} />
               <Route path="payroll" element={<Payroll />} />
               <Route path="timeline" element={<Timeline />} />
               <Route path="contabilidad" element={<Contabilidad />} />

@@ -19,6 +19,7 @@
     "listar:proyectos-cierre": "npx tsx scripts/listar-proyectos-cierre.ts",
     "diagnostico:usuario": "npx tsx scripts/diagnostico-usuario.ts",
     "limpiar:assignments-archivados": "npx tsx scripts/limpiar-assignments-proyectos-archivados.ts",
+    "marcar:supervision-secuencial": "npx tsx scripts/marcar-supervision-secuencial.ts",
     "verificar:control-horas": "npx tsx scripts/verificar-control-horas.ts",
     "verificar:tareas-retrasadas": "npx tsx scripts/verificar-tareas-retrasadas.ts",
     "dev": "vite",

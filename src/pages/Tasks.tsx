@@ -1016,11 +1016,12 @@ function Tasks() {
           deadline: endDateTime,
           estimated_duration: duration * dates.length,
           priority: 'medium',
-          is_sequential: false,
+          is_sequential: true,
           created_by: user.id,
           assigned_users: assignee ? [assignee] : [user.id],
           project_id,
           status: 'pending',
+          notes: JSON.stringify({ is_supervision: true }),
         }])
         .select()
         .single();

@@ -456,6 +456,9 @@ export default function UserProjectView() {
    const [nextWorkEndTime, setNextWorkEndTime] = useState("");
    const [nextWorkDuration, setNextWorkDuration] = useState<number>(0);
 
+   // Tarea de supervisión: exige reporte detallado
+   const [isSupervisionTask, setIsSupervisionTask] = useState(false);
+
    // Estado para guardar
    const [saving, setSaving] = useState(false);
    const [error, setError] = useState<string | null>(null);
@@ -2329,7 +2332,7 @@ export default function UserProjectView() {
 
    // Añadir función para manejar el modal de estado antes de la función fetchAssignedTasks()
    // Función para abrir el modal de actualización de estado
-   function handleOpenStatusModal(taskId: string, action: "complete" | "progress" | "block" = "complete") {
+   async function handleOpenStatusModal(taskId: string, action: "complete" | "progress" | "block" = "complete") {
       // Encontrar la tarea seleccionada para obtener la duración estimada y estado actual
       let selectedTask;
       let isEditing = false;
@@ -2382,9 +2385,26 @@ export default function UserProjectView() {
       setNextWorkDuration(0);
       
       setShowStatusModal(true);
-      
-      // Cerrar el dropdown
       setShowActionsDropdown({});
+
+      // Detectar si es tarea de supervisión (para exigir reporte)
+      if (taskId.startsWith("subtask-")) {
+         const subtaskId = taskId.replace("subtask-", "");
+         const { data: sub } = await supabase.from("subtasks").select("task_id").eq("id", subtaskId).single();
+         if (sub?.task_id) {
+            const { data: parent } = await supabase.from("tasks").select("notes").eq("id", sub.task_id).single();
+            try {
+               const notes = parent?.notes ? (typeof parent.notes === "string" ? JSON.parse(parent.notes) : parent.notes) : {};
+               setIsSupervisionTask(!!notes?.is_supervision);
+            } catch {
+               setIsSupervisionTask(false);
+            }
+         } else {
+            setIsSupervisionTask(false);
+         }
+      } else {
+         setIsSupervisionTask(false);
+      }
    }
 
    // Función para manejar el envío del formulario de estado
@@ -2457,6 +2477,7 @@ export default function UserProjectView() {
       // Validaciones específicas según el tipo de acción
       if (actionType === "complete" || selectedStatus === "completed") {
          if (!statusDetails.trim()) return setStatusError("Por favor, detalla los entregables o resultados");
+         if (isSupervisionTask && statusDetails.trim().length < 15) return setStatusError("El reporte de supervisión debe describir qué supervisaste y los hallazgos (mínimo 15 caracteres)");
          if (actualDuration <= 0) return setStatusError("Por favor, indica el tiempo real que trabajaste");
              } else if (actionType === "progress" || selectedStatus === "in_progress") {
           if (!statusDetails.trim()) return setStatusError("Por favor, describe el avance realizado");
@@ -6573,8 +6594,23 @@ export default function UserProjectView() {
                      {selectedStatus === "completed" || actionType === "complete" ? (
                         <div>
                            <div className="mb-4">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">{completedTaskItems.some((t) => t.id === selectedTaskId) ? "Editar entregables o resultados:" : "Detalla los entregables o resultados:"}</label>
-                              <textarea className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500" rows={3} value={statusDetails} onChange={(e) => setStatusDetails(e.target.value)} placeholder="Ejemplos: Terminé la implementación del módulo X, Corregí el error en Y, etc." />
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                 {isSupervisionTask
+                                    ? "Reporte de supervisión (obligatorio):"
+                                    : completedTaskItems.some((t) => t.id === selectedTaskId)
+                                       ? "Editar entregables o resultados:"
+                                       : "Detalla los entregables o resultados:"}
+                                 <span className="text-red-500"> *</span>
+                              </label>
+                              <textarea
+                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-yellow-500 focus:border-yellow-500"
+                                 rows={isSupervisionTask ? 4 : 3}
+                                 value={statusDetails}
+                                 onChange={(e) => setStatusDetails(e.target.value)}
+                                 placeholder={isSupervisionTask
+                                    ? "Qué supervisaste, hallazgos, observaciones, incidencias detectadas, acciones tomadas..."
+                                    : "Ejemplos: Terminé la implementación del módulo X, Corregí el error en Y, etc."}
+                              />
                            </div>
 
                            <div className="mb-4">
