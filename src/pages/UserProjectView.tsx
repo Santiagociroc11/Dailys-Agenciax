@@ -3624,8 +3624,8 @@ export default function UserProjectView() {
                )
             `)
             .eq("task_work_assignments.user_id", user!.id)
-            .gte("createdAt", `${startDate} 00:00:00`)
-            .lte("createdAt", `${endDate} 23:59:59`)
+            .gte("createdAt", new Date(`${startDate}T00:00:00`).toISOString())
+            .lte("createdAt", new Date(`${endDate}T23:59:59.999`).toISOString())
             .order("createdAt", { ascending: true });
 
          if (error) {
@@ -3633,8 +3633,6 @@ export default function UserProjectView() {
             return {};
          }
 
-         console.log("✅ Work sessions obtenidas:", workSessions);
-         
          // Agrupar sesiones por assignment y por fecha REAL de la sesión (cuándo se hizo el trabajo),
          // no por assignment.date, para evitar atribuir trabajo al día equivocado y doble conteo con offSchedule.
          const sessionsByAssignment: Record<string, Record<string, any[]>> = {};

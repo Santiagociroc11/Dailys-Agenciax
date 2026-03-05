@@ -75,4 +75,21 @@ npx tsx scripts/diagnostico-gantt-56h.ts Angelrudas15@gmail.com "VSL CERO DOLOR"
 
 2. **Agrupar work_sessions por fecha real**: En lugar de `assignment.date`, se usa la fecha de la sesión (`createdAt` o `created_at`) para asignar las horas al día en que realmente se hizo el trabajo. Así las 24h de completion van al jueves (día de finalización) y no al martes.
 
-3. **Filtro work_sessions**: Se usa `createdAt` (Mongoose) en lugar de `created_at` para el filtro por rango de fechas.
+3. **Filtro work_sessions**: Se usa `createdAt` con formato ISO. En `lib/db/queryExecutor.ts` se añadió soporte para `$or` con `createdAt` y `created_at` para compatibilidad con MongoDB (Mongoose usa createdAt).
+
+4. **API work_sessions**: El queryExecutor aplica fechas como objetos Date para comparación correcta en MongoDB.
+
+---
+
+## Otros lugares que podrían tener el mismo patrón
+
+| Lugar | Archivo | Riesgo | Notas |
+|-------|---------|--------|-------|
+| **Control de Jornada** | `DailyHoursControl.tsx` | Bajo | Usa `actual_duration` + `reworkSessions` (completion hoy). No agrupa por día de asignación; suma todo para "hoy". |
+| **Métricas usuario** | `lib/metrics.ts` | Bajo | Usa `actual_duration` de assignments. No combina status_history con work_sessions. |
+| **Dashboard** | `Dashboard.tsx` | Bajo | Usa `actual_duration` para promedios. No tiene lógica de offSchedule. |
+| **SupervisionLog** | `SupervisionLog.tsx` | Medio | Usa `duracion_real` de notes. Podría haber duplicación si se cruza con work_sessions. |
+| **ActivityReport** | `ActivityReport.tsx` | Por revisar | Depende de la RPC `get_activity_log`. |
+| **Management** | `Management.tsx` | Bajo | Muestra `duracion_real` de notes; no suma horas ejecutadas por día. |
+
+**Recomendación**: Si aparece doble conteo en otro reporte, aplicar la misma lógica: priorizar `work_sessions` y no sumar `status_history.duracion_real` cuando ya existan sesiones.

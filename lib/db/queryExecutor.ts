@@ -30,6 +30,26 @@ export async function executeQuery<T = unknown>(
     const filtersWithoutJoins = request.filters ? stripJoinFilters(request.filters) : undefined;
     let filters = filtersWithoutJoins ? buildMongoFilter(filtersWithoutJoins) : {};
 
+    // work_sessions: Mongoose usa createdAt; soportar ambos para compatibilidad
+    if (request.table === 'work_sessions' && filters && typeof filters === 'object') {
+      const f = filters as Record<string, unknown>;
+      const gteVal = (request.filters?.gte as Record<string, unknown>)?.['createdAt'] ?? (request.filters?.gte as Record<string, unknown>)?.['created_at'];
+      const lteVal = (request.filters?.lte as Record<string, unknown>)?.['createdAt'] ?? (request.filters?.lte as Record<string, unknown>)?.['created_at'];
+      if (gteVal != null || lteVal != null) {
+        const dateRange: Record<string, unknown> = {};
+        if (gteVal != null) dateRange.$gte = new Date(gteVal as string);
+        if (lteVal != null) dateRange.$lte = new Date(lteVal as string);
+        if (Object.keys(dateRange).length > 0) {
+          delete f.createdAt;
+          delete f.created_at;
+          (filters as Record<string, unknown>).$or = [
+            { createdAt: { ...dateRange } },
+            { created_at: { ...dateRange } },
+          ];
+        }
+      }
+    }
+
     if (request.filters?.eq) {
       const resolved = await resolveJoinFilters(
         request.table,
