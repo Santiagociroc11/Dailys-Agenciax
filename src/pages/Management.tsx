@@ -2790,17 +2790,35 @@ function Management() {
 
       const currentTotal = sessions.reduce((sum: number, s: { duration_minutes?: number }) => sum + (s.duration_minutes || 0), 0);
       if (currentTotal === newTotalMinutes) return true;
-      const othersSum = currentTotal - (lastSession.duration_minutes || 0);
-      const newLastDuration = Math.max(0, newTotalMinutes - othersSum);
 
-      const { error: updateError } = await supabase
-        .from('work_sessions')
-        .update({ duration_minutes: newLastDuration })
-        .eq('id', lastSession.id);
-
-      if (updateError) {
-        console.error('Error corrigiendo work_session:', updateError);
-        return false;
+      // Si la corrección es menor al total actual, iterar desde la última sesión hacia atrás y restar el excedente
+      let remainingToReduce = currentTotal - newTotalMinutes;
+      if (remainingToReduce > 0) {
+         for (let i = sorted.length - 1; i >= 0; i--) {
+            if (remainingToReduce <= 0) break;
+            const session = sorted[i] as { id: string; duration_minutes?: number };
+            if (!session.id || !session.duration_minutes || session.duration_minutes <= 0) continue;
+            
+            const amountToReduce = Math.min(session.duration_minutes, remainingToReduce);
+            const newSessionDuration = session.duration_minutes - amountToReduce;
+            
+            await supabase
+               .from("work_sessions")
+               .update({ duration_minutes: newSessionDuration })
+               .eq("id", session.id);
+               
+            remainingToReduce -= amountToReduce;
+         }
+      } else {
+         // Si la corrección es mayor (sumar tiempo), simplemente sumarlo a la última sesión
+         const lastSession = sorted[sorted.length - 1] as { id: string; duration_minutes?: number };
+         if (!lastSession?.id) return false;
+         
+         const newLastDuration = (lastSession.duration_minutes || 0) + (newTotalMinutes - currentTotal);
+         await supabase
+            .from("work_sessions")
+            .update({ duration_minutes: newLastDuration })
+            .eq("id", lastSession.id);
       }
 
       await supabase

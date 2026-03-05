@@ -2276,17 +2276,35 @@ export default function UserProjectView() {
 
          const currentTotal = sessions.reduce((sum: number, s: { duration_minutes?: number }) => sum + (s.duration_minutes || 0), 0);
          if (currentTotal === newTotalMinutes) return true; // Sin cambios
-         const othersSum = currentTotal - (lastSession.duration_minutes || 0);
-         const newLastDuration = Math.max(0, newTotalMinutes - othersSum);
 
-         const { error: updateError } = await supabase
-            .from("work_sessions")
-            .update({ duration_minutes: newLastDuration })
-            .eq("id", lastSession.id);
-
-         if (updateError) {
-            console.error("Error corrigiendo work_session:", updateError);
-            return false;
+         // Si la corrección es menor al total actual, iterar desde la última sesión hacia atrás y restar el excedente
+         let remainingToReduce = currentTotal - newTotalMinutes;
+         if (remainingToReduce > 0) {
+            for (let i = sorted.length - 1; i >= 0; i--) {
+               if (remainingToReduce <= 0) break;
+               const session = sorted[i] as { id: string; duration_minutes?: number };
+               if (!session.id || !session.duration_minutes || session.duration_minutes <= 0) continue;
+               
+               const amountToReduce = Math.min(session.duration_minutes, remainingToReduce);
+               const newSessionDuration = session.duration_minutes - amountToReduce;
+               
+               await supabase
+                  .from("work_sessions")
+                  .update({ duration_minutes: newSessionDuration })
+                  .eq("id", session.id);
+                  
+               remainingToReduce -= amountToReduce;
+            }
+         } else {
+            // Si la corrección es mayor (sumar tiempo), simplemente sumarlo a la última sesión
+            const lastSession = sorted[sorted.length - 1] as { id: string; duration_minutes?: number };
+            if (!lastSession?.id) return false;
+            
+            const newLastDuration = (lastSession.duration_minutes || 0) + (newTotalMinutes - currentTotal);
+            await supabase
+               .from("work_sessions")
+               .update({ duration_minutes: newLastDuration })
+               .eq("id", lastSession.id);
          }
 
          await supabase
@@ -2685,20 +2703,18 @@ export default function UserProjectView() {
 
                   await createWorkSession(assignmentId, durationMin, statusDetails, sessionType);
                   
-                  // Actualizar actual_duration cuando entrega (completed o in_review)
-                  if (selectedStatus === "completed" || selectedStatus === "in_review") {
-                     const { data: sessions, error: sessionsError } = await supabase
-                        .from("work_sessions")
-                        .select("duration_minutes")
-                        .eq("assignment_id", assignmentId);
+                  // Actualizar actual_duration sumando todas las sesiones, independientemente del estado (para que Control de Horas refleje avances)
+                  const { data: sessions, error: sessionsError } = await supabase
+                     .from("work_sessions")
+                     .select("duration_minutes")
+                     .eq("assignment_id", assignmentId);
 
-                     if (!sessionsError && sessions) {
-                        const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
-                        await supabase
-                           .from("task_work_assignments")
-                           .update({ actual_duration: totalDuration })
-                           .eq("id", assignmentId);
-                     }
+                  if (!sessionsError && sessions) {
+                     const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
+                     await supabase
+                        .from("task_work_assignments")
+                        .update({ actual_duration: totalDuration })
+                        .eq("id", assignmentId);
                   }
                }
             } else if (selectedStatus === "completed" || selectedStatus === "in_progress") {
@@ -4943,13 +4959,22 @@ export default function UserProjectView() {
                                                    </button>
                                                 )}
                                              </div>
-                              </div>
-                                          <button
-                                             onClick={() => handleViewTaskDetails(task)}
-                                             className="ml-2 text-xs bg-gray-600 text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
-                                          >
-                                             Ver
-                                          </button>
+                                          </div>
+                                          <div className="flex gap-1 ml-2">
+                                             <button
+                                                onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                                className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition-colors"
+                                                title="Editar entregables o corregir tiempo reportado"
+                                             >
+                                                Editar
+                                             </button>
+                                             <button
+                                                onClick={() => handleViewTaskDetails(task)}
+                                                className="text-xs bg-gray-600 text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+                                             >
+                                                Ver
+                                             </button>
+                                          </div>
                            </div>
                         </div>
                                  );
@@ -5609,7 +5634,7 @@ export default function UserProjectView() {
                               <h3 className="text-lg font-semibold text-green-700">Aprobadas ({filteredApprovedTaskItems.length})</h3>
                            </div>
                            <div className="bg-green-50 rounded-md shadow-sm border border-green-200 overflow-hidden">
-                              <div className="grid grid-cols-8 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
+                              <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
                                  <div>PROYECTO</div>
                                  <div>ACTIVIDAD</div>
                                  <div>DESCRIPCION</div>
@@ -5618,10 +5643,11 @@ export default function UserProjectView() {
                                  <div>DURACIÓN REAL</div>
                                  <div>RESULTADO</div>
                                  <div>ESTADO</div>
+                                 <div>ACCIONES</div>
                               </div>
                               <div className="divide-y divide-green-200">
                                  {filteredApprovedTaskItems.map((task) => (
-                                    <div key={task.id} className="grid grid-cols-8 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
+                                    <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
                                        <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {
                                              const { bg, text } = getProjectColor(task.projectName || "Sin proyecto", task.project_id);
@@ -5639,6 +5665,15 @@ export default function UserProjectView() {
                                        <div className="text-sm text-gray-700 max-h-16 overflow-y-auto">{(task.notes as TaskNotes)?.entregables ?? (typeof task.notes === "string" ? task.notes : "-")}</div>
                                        <div>
                                           <TaskStatusDisplay status={task.status} />
+                                       </div>
+                                       <div>
+                                          <button
+                                             onClick={() => handleOpenStatusModal(task.id, "complete")}
+                                             className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition-colors"
+                                             title="Editar entregables o corregir tiempo reportado"
+                                          >
+                                             Editar
+                                          </button>
                                        </div>
                                     </div>
                                  ))}
