@@ -1192,10 +1192,18 @@ export async function getDailyWorkStatistics(userId?: string, days: number = 30)
   }
 }
 
+export interface BottleneckBlockerSubtask {
+  subtaskId: string;
+  subtaskTitle: string;
+  status: string;
+  sequenceOrder: number;
+}
+
 export interface BottleneckBlockedBy {
   userId: string;
   userName: string;
   pendingCount: number;
+  subtasks: BottleneckBlockerSubtask[];
 }
 
 export interface BottleneckBlockedUser {
@@ -1208,10 +1216,12 @@ export interface BottleneckDetail {
   subtaskId: string;
   subtaskTitle: string;
   taskTitle: string;
+  taskId: string;
   projectName: string;
+  projectId: string;
   sequenceOrder: number;
   assignedTo: string;
-  blockedByUsers: { userId: string; userName: string; subtaskIds: string[] }[];
+  blockedByUsers: { userId: string; userName: string; subtasks: BottleneckBlockerSubtask[] }[];
 }
 
 export interface BottleneckRow {
@@ -1251,11 +1261,14 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
 
     const { data: subtasksData, error: subtasksError } = await supabase
       .from('subtasks')
-      .select('id, task_id, sequence_order, assigned_to, status, title')
+      .select('id, task_id, sequence_order, assigned_to, status, title, estimated_duration')
       .in('task_id', taskIds);
 
     if (subtasksError) throw subtasksError;
     const subtasks = subtasksData || [];
+    const subtaskMap = new Map(subtasks.map((s: { id: string; title?: string; status: string; sequence_order?: number }) =>
+      [s.id, { title: s.title || '', status: s.status, sequenceOrder: s.sequence_order ?? 0 }]
+    ));
 
     const userIds = [...new Set(subtasks.map((s: { assigned_to: string }) => s.assigned_to).filter(Boolean))];
     const { data: usersData } = await supabase.from('users').select('id, name, email').in('id', userIds);
@@ -1265,7 +1278,7 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
 
     const byUser = new Map<string, {
       waitingCount: number;
-      blockedBy: Map<string, { userName: string; pendingCount: number }>;
+      blockedBy: Map<string, { userName: string; pendingCount: number; subtasks: Map<string, BottleneckBlockerSubtask> }>;
       blockedUsers: Map<string, { userName: string; waitingCount: number }>;
       details: BottleneckDetail[];
     }>();
@@ -1300,7 +1313,7 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
         const pendingInLevel = currentLevel.filter((s: { status: string }) => s.status === 'pending');
 
         let allPreviousApproved = true;
-        const blockerUsers = new Map<string, string[]>();
+        const blockerUsers = new Map<string, { subtaskId: string; title: string; status: string; sequenceOrder: number }[]>();
 
         for (const prevOrder of sortedOrders) {
           if (prevOrder >= currentOrder) break;
@@ -1308,17 +1321,21 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
           const allPrevApproved = prevLevel.every((s: { status: string }) => s.status === 'approved');
           if (!allPrevApproved) {
             allPreviousApproved = false;
-            prevLevel.forEach((s: { assigned_to?: string; id: string; status: string }) => {
+            prevLevel.forEach((s: { assigned_to?: string; id: string; status: string; title?: string; sequence_order?: number }) => {
               if (s.assigned_to && s.status !== 'approved') {
                 if (!blockerUsers.has(s.assigned_to)) blockerUsers.set(s.assigned_to, []);
-                blockerUsers.get(s.assigned_to)!.push(s.id);
+                blockerUsers.get(s.assigned_to)!.push({
+                  subtaskId: s.id,
+                  title: s.title || '',
+                  status: s.status,
+                  sequenceOrder: s.sequence_order ?? prevOrder,
+                });
               }
             });
           }
         }
 
         if (!allPreviousApproved && pendingInLevel.length > 0) {
-
           pendingInLevel.forEach((subtask: { id: string; title?: string; assigned_to?: string }) => {
             const uid = subtask.assigned_to;
             if (!uid) return;
@@ -1327,17 +1344,24 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
             if (!row) return;
 
             row.waitingCount += 1;
-            const blockedByUsers = Array.from(blockerUsers.entries()).map(([bid, subIds]) => ({
+            const blockedByUsers = Array.from(blockerUsers.entries()).map(([bid, subs]) => ({
               userId: bid,
               userName: userMap.get(bid)?.name || bid,
-              subtaskIds: subIds,
+              subtasks: subs.map((sub) => ({
+                subtaskId: sub.subtaskId,
+                subtaskTitle: sub.title,
+                status: sub.status,
+                sequenceOrder: sub.sequenceOrder,
+              })),
             }));
 
             row.details.push({
               subtaskId: subtask.id,
               subtaskTitle: subtask.title || '',
               taskTitle: taskInfo.title || '',
+              taskId: taskId,
               projectName: taskInfo.projectName || '',
+              projectId: taskInfo.projectId || '',
               sequenceOrder: currentOrder,
               assignedTo: uid,
               blockedByUsers,
@@ -1346,7 +1370,18 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
             blockedByUsers.forEach((b) => {
               const existing = row.blockedBy.get(b.userId);
               if (!existing) {
-                row.blockedBy.set(b.userId, { userName: b.userName, pendingCount: b.subtaskIds.length });
+                row.blockedBy.set(b.userId, {
+                  userName: b.userName,
+                  pendingCount: b.subtasks.length,
+                  subtasks: new Map(b.subtasks.map((st) => [st.subtaskId, st])),
+                });
+              } else {
+                b.subtasks.forEach((st) => {
+                  if (!existing.subtasks.has(st.subtaskId)) {
+                    existing.subtasks.set(st.subtaskId, st);
+                    existing.pendingCount = existing.subtasks.size;
+                  }
+                });
               }
 
               const blockerRow = byUser.get(b.userId);
@@ -1378,6 +1413,7 @@ export async function getBottleneckAnalysis(projectId?: string): Promise<Bottlen
           userId: bid,
           userName: v.userName,
           pendingCount: v.pendingCount,
+          subtasks: Array.from(v.subtasks.values()),
         })),
         blockingCount: data.blockedUsers.size,
         blockedUsers: Array.from(data.blockedUsers.entries()).map(([bid, v]) => ({
