@@ -9,6 +9,9 @@ interface DailyHoursUser {
   userName: string;
   totalMinutes: number;
   assignedTodayMinutes: number;
+  extraMinutes: number;
+  extraCount: number;
+  reworkMinutes: number;
   taskCount: number;
   assignedTodayCount: number;
   actualMinutesToday: number;
@@ -75,6 +78,8 @@ export default function DailyHoursControl() {
         { data: todayAssignments, error },
         { data: overdueAssignments, error: overdueError },
         { data: reworkRecords, error: reworkError },
+        { data: workEvents, error: workEventsError },
+        { data: reworkSessions, error: reworkSessionsError },
       ] = await Promise.all([
         supabase
           .from('task_work_assignments')
@@ -92,11 +97,23 @@ export default function DailyHoursControl() {
           .in('new_status', ['completed', 'in_review'])
           .gte('changed_at', todayStartISO)
           .lte('changed_at', todayEndISO),
+        supabase
+          .from('work_events')
+          .select('user_id, date, project_id, start_time, end_time')
+          .eq('date', todayStr),
+        supabase
+          .from('work_sessions')
+          .select('assignment_id, duration_minutes')
+          .eq('session_type', 'completion')
+          .gte('created_at', todayStartISO)
+          .lte('created_at', todayEndISO),
       ]);
 
       if (error) throw error;
       if (overdueError) console.warn('Error cargando retrasadas:', overdueError);
       if (reworkError) console.warn('Error cargando retrabajos:', reworkError);
+      if (workEventsError) console.warn('Error cargando actividades extras:', workEventsError);
+      if (reworkSessionsError) console.warn('Error cargando tiempo de retrabajos:', reworkSessionsError);
 
       const filteredAssignments =
         activeProjectIds.size === 0
@@ -114,16 +131,24 @@ export default function DailyHoursControl() {
                 !a.project_id || activeProjectIds.has(a.project_id)
             );
 
-      const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number; reworkCount: number }>();
+      const filteredWorkEvents =
+        activeProjectIds.size === 0
+          ? (workEvents || [])
+          : (workEvents || []).filter(
+              (e: { project_id?: string | null }) =>
+                !e.project_id || activeProjectIds.has(e.project_id)
+            );
+
+      const byUser = new Map<string, { total: number; assignedToday: number; extra: number; extraCount: number; rework: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number; reworkCount: number }>();
 
       userList.forEach((u) => {
-        byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+        byUser.set(u.id, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
       });
 
       filteredAssignments.forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
         }
         const row = byUser.get(uid)!;
         const est = a.estimated_duration ?? 0;
@@ -140,10 +165,23 @@ export default function DailyHoursControl() {
         }
       });
 
+      filteredWorkEvents.forEach((e: { user_id: string; start_time: string; end_time: string }) => {
+        const uid = e.user_id;
+        if (!byUser.has(uid)) {
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+        }
+        const row = byUser.get(uid)!;
+        const [sh, sm] = (e.start_time || '00:00').split(':').map(Number);
+        const [eh, em] = (e.end_time || '00:00').split(':').map(Number);
+        const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
+        row.extra += Math.max(0, durationMinutes);
+        row.extraCount += 1;
+      });
+
       filteredOverdue.forEach((a: { user_id: string; estimated_duration?: number }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
         }
         const row = byUser.get(uid)!;
         row.overdueCount += 1;
@@ -185,7 +223,7 @@ export default function DailyHoursControl() {
           const uid = r.changed_by;
           if (!uid) return;
           if (!byUser.has(uid)) {
-            byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
           }
           byUser.get(uid)!.reworkCount += 1;
         });
@@ -194,17 +232,47 @@ export default function DailyHoursControl() {
           const uid = r.changed_by;
           if (!uid) return;
           if (!byUser.has(uid)) {
-            byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
           }
           byUser.get(uid)!.reworkCount += 1;
+        });
+      }
+
+      // Sumar tiempo de retrabajos hechos hoy (work_sessions completion para asignaciones de días anteriores)
+      const sessionsList = (reworkSessions || []) as { assignment_id: string; duration_minutes?: number }[];
+      if (sessionsList.length > 0) {
+        const assignmentIds = [...new Set(sessionsList.map((s) => s.assignment_id))];
+        const { data: reworkAssignments } = await supabase
+          .from('task_work_assignments')
+          .select('id, user_id, date, project_id')
+          .in('id', assignmentIds)
+          .lt('date', todayStr);
+
+        const validAssignmentUsers = new Map<string, string>();
+        (reworkAssignments || []).forEach((a: { id: string; user_id: string; project_id?: string | null }) => {
+          if (activeProjectIds.size === 0 || !a.project_id || activeProjectIds.has(a.project_id)) {
+            validAssignmentUsers.set(a.id, a.user_id);
+          }
+        });
+
+        sessionsList.forEach((s) => {
+          const uid = validAssignmentUsers.get(s.assignment_id);
+          if (!uid) return;
+          if (!byUser.has(uid)) {
+            byUser.set(uid, { total: 0, assignedToday: 0, extra: 0, extraCount: 0, rework: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0, reworkCount: 0 });
+          }
+          byUser.get(uid)!.rework += s.duration_minutes ?? 0;
         });
       }
 
       const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
         userId: uid,
         userName: userList.find((u) => u.id === uid)?.name || userList.find((u) => u.id === uid)?.email || uid,
-        totalMinutes: data.total,
+        totalMinutes: data.total + data.extra + data.rework,
         assignedTodayMinutes: data.assignedToday,
+        extraMinutes: data.extra,
+        extraCount: data.extraCount,
+        reworkMinutes: data.rework,
         taskCount: data.count,
         assignedTodayCount: data.assignedTodayCount,
         actualMinutesToday: data.actual,
@@ -387,6 +455,9 @@ export default function DailyHoursControl() {
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Hoy
                 </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider" title="Reuniones, dailies, descansos, etc.">
+                  Extras
+                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Retrasos
                 </th>
@@ -398,16 +469,19 @@ export default function DailyHoursControl() {
             <tbody className="divide-y divide-gray-100">
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500 italic">
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500 italic">
                     {filter !== 'all' ? 'Nadie en esta categoría.' : 'No hay usuarios en el equipo.'}
                   </td>
                 </tr>
               ) : (
                 sortedUsers.map((u) => {
                   const status = getUserStatus(u);
+                  const taskMinutes = u.totalMinutes - u.extraMinutes - u.reworkMinutes;
                   const pctTotal = Math.min(100, (u.totalMinutes / TARGET_MINUTES_PER_DAY) * 100);
-                  const pctPrePlanned = Math.min(100, ((u.totalMinutes - u.assignedTodayMinutes) / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctPrePlanned = Math.min(100, ((taskMinutes - u.assignedTodayMinutes) / TARGET_MINUTES_PER_DAY) * 100);
                   const pctAssignedToday = Math.min(100 - pctPrePlanned, (u.assignedTodayMinutes / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctExtra = Math.min(100 - pctPrePlanned - pctAssignedToday, (u.extraMinutes / TARGET_MINUTES_PER_DAY) * 100);
+                  const pctRework = Math.min(100 - pctPrePlanned - pctAssignedToday - pctExtra, (u.reworkMinutes / TARGET_MINUTES_PER_DAY) * 100);
                   const deficit = Math.max(0, TARGET_MINUTES_PER_DAY - u.totalMinutes);
 
                   return (
@@ -417,6 +491,9 @@ export default function DailyHoursControl() {
                         <div className="font-medium text-gray-900 text-sm">{u.userName}</div>
                         <div className="text-xs text-gray-500">
                           {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''}
+                          {u.extraCount > 0 && (
+                            <span className="text-purple-600"> + {u.extraCount} extra{u.extraCount !== 1 ? 's' : ''}</span>
+                          )}
                         </div>
                       </td>
 
@@ -437,6 +514,14 @@ export default function DailyHoursControl() {
                               <div
                                 className="h-full bg-emerald-300 transition-all"
                                 style={{ width: `${pctAssignedToday}%` }}
+                              />
+                              <div
+                                className="h-full bg-purple-400 transition-all"
+                                style={{ width: `${pctExtra}%` }}
+                              />
+                              <div
+                                className="h-full bg-orange-400 transition-all"
+                                style={{ width: `${pctRework}%` }}
                               />
                             </div>
                           </div>
@@ -469,6 +554,18 @@ export default function DailyHoursControl() {
                         )}
                       </td>
 
+                      {/* Extras */}
+                      <td className="px-4 py-3 text-center">
+                        {u.extraCount > 0 ? (
+                          <div>
+                            <span className="text-sm font-semibold text-purple-600">{fmtH(u.extraMinutes)}h</span>
+                            <div className="text-xs text-purple-500">{u.extraCount} actividad{u.extraCount !== 1 ? 'es' : ''}</div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">--</span>
+                        )}
+                      </td>
+
                       {/* Retrasos */}
                       <td className="px-4 py-3 text-center">
                         {u.overdueCount > 0 ? (
@@ -484,7 +581,12 @@ export default function DailyHoursControl() {
                       {/* Retrabajos */}
                       <td className="px-4 py-3 text-center">
                         {u.reworkCount > 0 ? (
-                          <span className="text-sm font-bold text-orange-600" title="Tareas devueltas corregidas hoy">{u.reworkCount}</span>
+                          <div>
+                            <span className="text-sm font-bold text-orange-600" title="Tareas devueltas corregidas hoy">{u.reworkCount}</span>
+                            {u.reworkMinutes > 0 && (
+                              <div className="text-xs text-orange-500">{fmtH(u.reworkMinutes)}h</div>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">0</span>
                         )}
@@ -504,6 +606,12 @@ export default function DailyHoursControl() {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-emerald-300 inline-block" /> Asignado hoy mismo
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-purple-400 inline-block" /> Actividades extras (reuniones, dailies, etc.)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-orange-400 inline-block" /> Retrabajos hechos hoy
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-gray-100 border border-gray-300 inline-block" /> Sin planificar
