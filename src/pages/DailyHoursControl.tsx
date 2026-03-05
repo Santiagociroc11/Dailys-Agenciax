@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Clock } from 'lucide-react';
+import { Clock, AlertCircle } from 'lucide-react';
 
 interface DailyHoursUser {
   userId: string;
@@ -10,6 +10,8 @@ interface DailyHoursUser {
   taskCount: number;
   assignedTodayCount: number;
   actualMinutesToday: number;
+  overdueCount: number;
+  overdueMinutes: number;
 }
 
 const TARGET_HOURS_PER_DAY = 8;
@@ -36,12 +38,23 @@ export default function DailyHoursControl() {
       const { data: users } = await supabase.from('users').select('id, name, email');
       const userList = users || [];
 
-      const { data: todayAssignments, error } = await supabase
-        .from('task_work_assignments')
-        .select('id, user_id, date, project_id, estimated_duration, actual_duration, created_at')
-        .eq('date', todayStr);
+      const [
+        { data: todayAssignments, error },
+        { data: overdueAssignments, error: overdueError },
+      ] = await Promise.all([
+        supabase
+          .from('task_work_assignments')
+          .select('id, user_id, date, project_id, estimated_duration, actual_duration, created_at')
+          .eq('date', todayStr),
+        supabase
+          .from('task_work_assignments')
+          .select('user_id, date, project_id, estimated_duration')
+          .lt('date', todayStr)
+          .not('status', 'in', "('completed','in_review','approved')"),
+      ]);
 
       if (error) throw error;
+      if (overdueError) console.warn('Error cargando retrasadas:', overdueError);
 
       const filteredAssignments =
         activeProjectIds.size === 0
@@ -51,16 +64,24 @@ export default function DailyHoursControl() {
                 !a.project_id || activeProjectIds.has(a.project_id)
             );
 
-      const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number }>();
+      const filteredOverdue =
+        activeProjectIds.size === 0
+          ? (overdueAssignments || [])
+          : (overdueAssignments || []).filter(
+              (a: { project_id?: string | null }) =>
+                !a.project_id || activeProjectIds.has(a.project_id)
+            );
+
+      const byUser = new Map<string, { total: number; assignedToday: number; count: number; assignedTodayCount: number; actual: number; overdueCount: number; overdueMinutes: number }>();
 
       userList.forEach((u) => {
-        byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0 });
+        byUser.set(u.id, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
       });
 
       filteredAssignments.forEach((a: { user_id: string; estimated_duration?: number; actual_duration?: number | null; created_at?: string }) => {
         const uid = a.user_id;
         if (!byUser.has(uid)) {
-          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0 });
+          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
         }
         const row = byUser.get(uid)!;
         const est = a.estimated_duration ?? 0;
@@ -77,6 +98,16 @@ export default function DailyHoursControl() {
         }
       });
 
+      filteredOverdue.forEach((a: { user_id: string; estimated_duration?: number }) => {
+        const uid = a.user_id;
+        if (!byUser.has(uid)) {
+          byUser.set(uid, { total: 0, assignedToday: 0, count: 0, assignedTodayCount: 0, actual: 0, overdueCount: 0, overdueMinutes: 0 });
+        }
+        const row = byUser.get(uid)!;
+        row.overdueCount += 1;
+        row.overdueMinutes += a.estimated_duration ?? 0;
+      });
+
       const result: DailyHoursUser[] = Array.from(byUser.entries()).map(([uid, data]) => ({
         userId: uid,
         userName: userList.find((u) => u.id === uid)?.name || userList.find((u) => u.id === uid)?.email || uid,
@@ -85,9 +116,16 @@ export default function DailyHoursControl() {
         taskCount: data.count,
         assignedTodayCount: data.assignedTodayCount,
         actualMinutesToday: data.actual,
+        overdueCount: data.overdueCount,
+        overdueMinutes: data.overdueMinutes,
       }));
 
-      setDailyHoursControl(result.sort((a, b) => b.totalMinutes - a.totalMinutes));
+      setDailyHoursControl(
+        result.sort((a, b) => {
+          if (b.overdueCount !== a.overdueCount) return b.overdueCount - a.overdueCount;
+          return b.totalMinutes - a.totalMinutes;
+        })
+      );
     } catch (e) {
       console.error('Error fetching daily hours control:', e);
       setDailyHoursControl([]);
@@ -121,6 +159,16 @@ export default function DailyHoursControl() {
         <p className="text-gray-600">
           Meta: {TARGET_HOURS_PER_DAY} horas/día por usuario. Verde oscuro = planificado antes. Verde claro = asignado hoy mismo.
         </p>
+        {dailyHoursControl.some((u) => u.overdueCount > 0) && (
+          <div className="mt-3 flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+            <span className="text-red-800 font-medium">
+              {dailyHoursControl.filter((u) => u.overdueCount > 0).length} usuario
+              {dailyHoursControl.filter((u) => u.overdueCount > 0).length !== 1 ? 's' : ''} con tareas retrasadas
+              ({dailyHoursControl.reduce((s, u) => s + u.overdueCount, 0)} en total)
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-lg shadow p-6">
@@ -149,7 +197,7 @@ export default function DailyHoursControl() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <span className="font-medium text-gray-900">{u.userName}</span>
-                    <div className="flex items-center gap-3 text-sm">
+                    <div className="flex items-center gap-3 text-sm flex-wrap">
                       <span className="text-gray-600">
                         {u.taskCount} tarea{u.taskCount !== 1 ? 's' : ''} · {totalHours}h planificadas
                       </span>
@@ -161,6 +209,12 @@ export default function DailyHoursControl() {
                       {u.actualMinutesToday > 0 && (
                         <span className="text-blue-600">
                           {actualHours}h imputadas
+                        </span>
+                      )}
+                      {u.overdueCount > 0 && (
+                        <span className="text-red-600 font-medium flex items-center gap-1" title="Tareas con date anterior a hoy, sin completar">
+                          <AlertCircle className="w-4 h-4" />
+                          {u.overdueCount} retrasada{u.overdueCount !== 1 ? 's' : ''} ({(u.overdueMinutes / 60).toFixed(1)}h)
                         </span>
                       )}
                       {!meetsTarget && (
