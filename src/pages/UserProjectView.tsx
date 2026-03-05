@@ -2283,32 +2283,44 @@ export default function UserProjectView() {
    }
 
    // Función para obtener el assignment_id de una tarea/subtarea específica
-   async function getAssignmentId(taskId: string, taskType: string, date: string): Promise<string | null> {
+   // Para tareas devueltas/retrasadas, la asignación tiene date=assignment_date (fecha original), no hoy
+   async function getAssignmentId(taskId: string, taskType: string, date: string, fallbackDate?: string): Promise<string | null> {
       try {
          const isSubtask = taskId.startsWith("subtask-");
          const originalId = isSubtask ? taskId.replace("subtask-", "") : taskId;
-         
-         let query = supabase
-            .from("task_work_assignments")
-            .select("id")
-            .eq("user_id", user!.id)
-            .eq("date", date)
-            .eq("task_type", taskType);
-            
-         if (isSubtask) {
-            query = query.eq("subtask_id", originalId);
-         } else {
-            query = query.eq("task_id", originalId);
+
+         const tryDate = async (d: string) => {
+            let query = supabase
+               .from("task_work_assignments")
+               .select("id")
+               .eq("user_id", user!.id)
+               .eq("date", d)
+               .eq("task_type", taskType);
+            if (isSubtask) query = query.eq("subtask_id", originalId);
+            else query = query.eq("task_id", originalId);
+            const { data, error } = await query.single();
+            return error || !data ? null : data.id;
+         };
+
+         let assignmentId = await tryDate(date);
+         if (!assignmentId && fallbackDate && fallbackDate !== date) {
+            assignmentId = await tryDate(fallbackDate);
          }
-         
-         const { data, error } = await query.single();
-         
-         if (error || !data) {
-            console.error("Error obteniendo assignment_id:", error);
-            return null;
+         if (!assignmentId) {
+            // Último intento: buscar sin filtrar por fecha (tareas devueltas/retrasadas)
+            let query = supabase
+               .from("task_work_assignments")
+               .select("id")
+               .eq("user_id", user!.id)
+               .eq("task_type", taskType)
+               .not("status", "in", "('completed','in_review','approved')");
+            if (isSubtask) query = query.eq("subtask_id", originalId);
+            else query = query.eq("task_id", originalId);
+            const { data } = await query.order("date", { ascending: false }).limit(1).maybeSingle();
+            assignmentId = data?.id ?? null;
          }
-         
-         return data.id;
+
+         return assignmentId;
       } catch (error) {
          console.error("Error en getAssignmentId:", error);
          return null;
@@ -2530,8 +2542,10 @@ export default function UserProjectView() {
          }
 
          // ✅ NUEVO: Crear sesión de trabajo en work_sessions
+         // Para tareas devueltas/retrasadas, usar assignment_date (la asignación tiene fecha original, no hoy)
          try {
-            const assignmentId = await getAssignmentId(selectedTaskId, taskType, today);
+            const assignmentDate = taskForStatusUpdate?.assignment_date || today;
+            const assignmentId = await getAssignmentId(selectedTaskId, taskType, today, assignmentDate);
             if (assignmentId) {
                let sessionType: 'progress' | 'completion' | 'block';
                if (selectedStatus === "completed") {
