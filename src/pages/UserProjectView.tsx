@@ -2255,6 +2255,52 @@ export default function UserProjectView() {
    }
 
    // ✅ NUEVAS FUNCIONES PARA WORK_SESSIONS
+   // Corregir tiempo reportado en tarea ya entregada: actualiza la última work_session
+   async function correctWorkSessionDuration(assignmentId: string, newTotalMinutes: number): Promise<boolean> {
+      try {
+         const { data: sessionsRaw, error: fetchError } = await supabase
+            .from("work_sessions")
+            .select("id, duration_minutes, createdAt, created_at")
+            .eq("assignment_id", assignmentId);
+
+         const sessions = Array.isArray(sessionsRaw) ? sessionsRaw : sessionsRaw ? [sessionsRaw] : [];
+         if (fetchError || sessions.length === 0) return false;
+
+         const sorted = [...sessions].sort((a: { createdAt?: string; created_at?: string }, b: { createdAt?: string; created_at?: string }) => {
+            const da = a.createdAt ?? a.created_at ?? "";
+            const db = b.createdAt ?? b.created_at ?? "";
+            return new Date(da).getTime() - new Date(db).getTime();
+         });
+         const lastSession = sorted[sorted.length - 1] as { id: string; duration_minutes?: number };
+         if (!lastSession?.id) return false;
+
+         const currentTotal = sessions.reduce((sum: number, s: { duration_minutes?: number }) => sum + (s.duration_minutes || 0), 0);
+         if (currentTotal === newTotalMinutes) return true; // Sin cambios
+         const othersSum = currentTotal - (lastSession.duration_minutes || 0);
+         const newLastDuration = Math.max(0, newTotalMinutes - othersSum);
+
+         const { error: updateError } = await supabase
+            .from("work_sessions")
+            .update({ duration_minutes: newLastDuration })
+            .eq("id", lastSession.id);
+
+         if (updateError) {
+            console.error("Error corrigiendo work_session:", updateError);
+            return false;
+         }
+
+         await supabase
+            .from("task_work_assignments")
+            .update({ actual_duration: newTotalMinutes })
+            .eq("id", assignmentId);
+
+         return true;
+      } catch (err) {
+         console.error("Error en correctWorkSessionDuration:", err);
+         return false;
+      }
+   }
+
    // Función para crear sesiones de trabajo en la nueva tabla work_sessions
    async function createWorkSession(assignmentId: string, durationMinutes: number, notes: string, sessionType: 'progress' | 'completion' | 'block') {
       try {
@@ -2340,23 +2386,45 @@ export default function UserProjectView() {
       // Buscar primero en tareas pendientes
       selectedTask = [...assignedTaskItems, ...delayedTaskItems, ...returnedTaskItems].find((task) => task.id === taskId);
 
-      // Si no está en las tareas pendientes, buscar en las completadas
+      // Si no está en las tareas pendientes, buscar en entregadas (completadas, en revisión, aprobadas)
       if (!selectedTask) {
-         selectedTask = completedTaskItems.find((task) => task.id === taskId);
-         isEditing = selectedTask?.status === "completed";
+         selectedTask = completedTaskItems.find((t) => t.id === taskId)
+            || inReviewTaskItems.find((t) => t.id === taskId)
+            || approvedTaskItems.find((t) => t.id === taskId);
+         isEditing = !!selectedTask && ["completed", "in_review", "approved"].includes(selectedTask.status || "");
       }
 
       setTaskForStatusUpdate(selectedTask || null);
       setActionType(action);
 
-      // Si estamos editando una tarea completada, extraer los datos de las notas
+      // Si estamos editando una tarea entregada, extraer los datos de las notas
       let details = "";
       let durReason = "";
+      let prefillDuration = 0;
 
       if (isEditing && selectedTask?.notes) {
          const metadata = typeof selectedTask.notes === "object" ? selectedTask.notes : {};
          details = metadata.entregables || metadata.notes || "";
          durReason = metadata.razon_duracion || "";
+      }
+
+      // Pre-llenar duración reportada para que el usuario pueda corregirla
+      if (isEditing && selectedTask && action === "complete") {
+         const taskType = taskId.startsWith("subtask-") ? "subtask" : "task";
+         const assignmentDate = (selectedTask as { assignment_date?: string }).assignment_date || format(new Date(), "yyyy-MM-dd");
+         const assignmentId = await getAssignmentId(taskId, taskType, assignmentDate, assignmentDate);
+         if (assignmentId) {
+            const { data: assignmentData } = await supabase
+               .from("task_work_assignments")
+               .select("actual_duration")
+               .eq("id", assignmentId)
+               .single();
+            const assignment = Array.isArray(assignmentData) ? assignmentData[0] : assignmentData;
+            const actualDur = (assignment as { actual_duration?: number })?.actual_duration;
+            if (actualDur != null && actualDur > 0) {
+               prefillDuration = actualDur;
+            }
+         }
       }
 
       setSelectedTaskId(taskId);
@@ -2372,8 +2440,8 @@ export default function UserProjectView() {
 
       setStatusDetails(details);
       
-      // SIEMPRE empezar con duración en blanco (0) para que tengan que escribir lo real
-      setActualDuration(0);
+      // Para tareas entregadas: pre-llenar duración para permitir corrección. Para nuevas: en blanco
+      setActualDuration(isEditing && prefillDuration > 0 ? prefillDuration : 0);
       setDurationUnit("minutes");
       setDurationReason(durReason);
       setStatusError(null);
@@ -2599,30 +2667,38 @@ export default function UserProjectView() {
             }
 
             if (assignmentId) {
-               let sessionType: 'progress' | 'completion' | 'block';
-               if (selectedStatus === "completed" || selectedStatus === "in_review") {
-                  sessionType = 'completion';
-               } else if (selectedStatus === "in_progress") {
-                  sessionType = 'progress';
+               const isCorrectingDelivered = (selectedStatus === "completed" || selectedStatus === "in_review") &&
+                  taskForStatusUpdate && ["completed", "in_review", "approved"].includes(taskForStatusUpdate.status || "");
+
+               if (isCorrectingDelivered) {
+                  // Corregir tiempo reportado en tarea ya entregada (no crear nueva sesión)
+                  await correctWorkSessionDuration(assignmentId, durationMin);
                } else {
-                  sessionType = 'block';
-               }
+                  let sessionType: 'progress' | 'completion' | 'block';
+                  if (selectedStatus === "completed" || selectedStatus === "in_review") {
+                     sessionType = 'completion';
+                  } else if (selectedStatus === "in_progress") {
+                     sessionType = 'progress';
+                  } else {
+                     sessionType = 'block';
+                  }
 
-               await createWorkSession(assignmentId, durationMin, statusDetails, sessionType);
-               
-               // Actualizar actual_duration cuando entrega (completed o in_review)
-               if (selectedStatus === "completed" || selectedStatus === "in_review") {
-                  const { data: sessions, error: sessionsError } = await supabase
-                     .from("work_sessions")
-                     .select("duration_minutes")
-                     .eq("assignment_id", assignmentId);
+                  await createWorkSession(assignmentId, durationMin, statusDetails, sessionType);
+                  
+                  // Actualizar actual_duration cuando entrega (completed o in_review)
+                  if (selectedStatus === "completed" || selectedStatus === "in_review") {
+                     const { data: sessions, error: sessionsError } = await supabase
+                        .from("work_sessions")
+                        .select("duration_minutes")
+                        .eq("assignment_id", assignmentId);
 
-                  if (!sessionsError && sessions) {
-                     const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
-                     await supabase
-                        .from("task_work_assignments")
-                        .update({ actual_duration: totalDuration })
-                        .eq("id", assignmentId);
+                     if (!sessionsError && sessions) {
+                        const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
+                        await supabase
+                           .from("task_work_assignments")
+                           .update({ actual_duration: totalDuration })
+                           .eq("id", assignmentId);
+                     }
                   }
                }
             } else if (selectedStatus === "completed" || selectedStatus === "in_progress") {
@@ -6528,7 +6604,7 @@ export default function UserProjectView() {
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                      <div>
                         <h3 className="text-lg font-medium flex items-center gap-2">
-                           {selectedStatus === "completed" && completedTaskItems.some((t) => t.id === selectedTaskId) ? "Editar tarea completada" : returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Actualizar tarea devuelta" : "Actualizar estado de tarea"}
+                           {selectedStatus === "completed" && (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId)) ? "Editar tarea entregada" : returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Actualizar tarea devuelta" : "Actualizar estado de tarea"}
                            {actionType === "progress" && <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">Incluye programación</span>}
                         </h3>
                         {taskForStatusUpdate && (
@@ -6607,7 +6683,7 @@ export default function UserProjectView() {
                      )}
 
                      {/* Sección de información de acción seleccionada */}
-                     {!completedTaskItems.some((t) => t.id === selectedTaskId) && actionType && (
+                     {!(completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId)) && actionType && (
                         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
                            <div className="flex items-center gap-2">
                               {actionType === "complete" && (
@@ -6641,8 +6717,8 @@ export default function UserProjectView() {
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                  {isSupervisionTask
                                     ? "Reporte de supervisión (obligatorio):"
-                                    : completedTaskItems.some((t) => t.id === selectedTaskId)
-                                       ? "Editar entregables o resultados:"
+                                    : (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId))
+                                       ? "Editar entregables, resultados o tiempo reportado:"
                                        : "Detalla los entregables o resultados:"}
                                  <span className="text-red-500"> *</span>
                               </label>
@@ -6661,7 +6737,9 @@ export default function UserProjectView() {
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                  {returnedTaskItems.some((t) => t.id === selectedTaskId)
                                     ? "Tiempo de retrabajo en esta sesión:"
-                                    : "Tiempo real trabajado en esta sesión:"}{" "}
+                                    : (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId))
+                                       ? "Tiempo reportado (puedes corregirlo):"
+                                       : "Tiempo real trabajado en esta sesión:"}{" "}
                                  <span className="text-red-500">*</span>
                               </label>
                               <div className="flex items-center">
@@ -6683,7 +6761,9 @@ export default function UserProjectView() {
                               <p className="text-xs text-gray-500 mt-1">
                                  {returnedTaskItems.some((t) => t.id === selectedTaskId)
                                     ? "Este tiempo se sumará al ya registrado anteriormente (no lo reemplaza)."
-                                    : "Ingresa el tiempo que realmente trabajaste en esta tarea"}
+                                    : (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId))
+                                       ? "Puedes corregir el tiempo reportado si lo ingresaste mal."
+                                       : "Ingresa el tiempo que realmente trabajaste en esta tarea"}
                               </p>
                            </div>
 
@@ -6804,7 +6884,7 @@ export default function UserProjectView() {
                          actionType === "progress" ? "bg-blue-600 focus:ring-blue-500" : 
                          "bg-red-600 focus:ring-red-500"}`}>
                         {(() => {
-                           if (completedTaskItems.some((t) => t.id === selectedTaskId)) {
+                           if (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId)) {
                               return "Guardar Cambios";
                            }
                            

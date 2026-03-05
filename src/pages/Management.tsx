@@ -313,6 +313,9 @@ function Management() {
   const [deliveryComments, setDeliveryComments] = useState<string>('');
   const [newAssignee, setNewAssignee] = useState<string>(''); // Estado para el nuevo responsable
   const [isUpdatingAssignee, setIsUpdatingAssignee] = useState(false); // Estado para controlar la actualización
+  const [assignmentIdForTimeCorrection, setAssignmentIdForTimeCorrection] = useState<string | null>(null);
+  const [reviewerEditDuration, setReviewerEditDuration] = useState<number | null>(null);
+  const [isSavingTimeCorrection, setIsSavingTimeCorrection] = useState(false);
 
   // Agregar estos estados nuevos después de los estados existentes
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -2766,6 +2769,52 @@ function Management() {
     );
   };
 
+  // Corregir tiempo reportado (revisor acordado con usuario) - actualiza work_sessions y actual_duration
+  async function correctWorkSessionDuration(assignmentId: string, newTotalMinutes: number): Promise<boolean> {
+    try {
+      const { data: sessionsRaw, error: fetchError } = await supabase
+        .from('work_sessions')
+        .select('id, duration_minutes, createdAt, created_at')
+        .eq('assignment_id', assignmentId);
+
+      const sessions = Array.isArray(sessionsRaw) ? sessionsRaw : sessionsRaw ? [sessionsRaw] : [];
+      if (fetchError || sessions.length === 0) return false;
+
+      const sorted = [...sessions].sort((a: { createdAt?: string; created_at?: string }, b: { createdAt?: string; created_at?: string }) => {
+        const da = a.createdAt ?? a.created_at ?? '';
+        const db = b.createdAt ?? b.created_at ?? '';
+        return new Date(da).getTime() - new Date(db).getTime();
+      });
+      const lastSession = sorted[sorted.length - 1] as { id: string; duration_minutes?: number };
+      if (!lastSession?.id) return false;
+
+      const currentTotal = sessions.reduce((sum: number, s: { duration_minutes?: number }) => sum + (s.duration_minutes || 0), 0);
+      if (currentTotal === newTotalMinutes) return true;
+      const othersSum = currentTotal - (lastSession.duration_minutes || 0);
+      const newLastDuration = Math.max(0, newTotalMinutes - othersSum);
+
+      const { error: updateError } = await supabase
+        .from('work_sessions')
+        .update({ duration_minutes: newLastDuration })
+        .eq('id', lastSession.id);
+
+      if (updateError) {
+        console.error('Error corrigiendo work_session:', updateError);
+        return false;
+      }
+
+      await supabase
+        .from('task_work_assignments')
+        .update({ actual_duration: newTotalMinutes })
+        .eq('id', assignmentId);
+
+      return true;
+    } catch (err) {
+      console.error('Error en correctWorkSessionDuration:', err);
+      return false;
+    }
+  }
+
   // Improved function to handle viewing task/subtask details
   async function handleViewTaskDetails(itemId: string, itemType: 'task' | 'subtask') {
     setDetailsItem({ id: itemId, type: itemType });
@@ -2875,6 +2924,30 @@ function Management() {
       // Process notes/feedback using the helper
       const details = getItemDetails(item);
       setDeliveryComments(details.deliveryComments || '');
+
+      // Si la tarea está entregada (completed/in_review/approved), obtener assignment para corrección de tiempo
+      setAssignmentIdForTimeCorrection(null);
+      setReviewerEditDuration(null);
+      if (['completed', 'in_review', 'approved'].includes(item.status || '')) {
+        let assignQuery = supabase
+          .from('task_work_assignments')
+          .select('id, actual_duration')
+          .in('status', ['completed', 'in_review', 'approved']);
+        if (isSubtaskType) {
+          assignQuery = assignQuery.eq('task_type', 'subtask').eq('subtask_id', itemId);
+        } else {
+          assignQuery = assignQuery.eq('task_type', 'task').eq('task_id', itemId);
+        }
+        const { data: assignList } = await assignQuery.order('date', { ascending: false }).limit(1);
+        const assignment = Array.isArray(assignList) && assignList.length > 0 ? assignList[0] : assignList;
+        if (assignment?.id) {
+          setAssignmentIdForTimeCorrection(assignment.id);
+          const dur = (assignment as { actual_duration?: number }).actual_duration;
+          setReviewerEditDuration(dur != null && dur > 0 ? dur : (details.realDuration ?? null));
+        } else {
+          setReviewerEditDuration(details.realDuration ?? null);
+        }
+      }
 
     } catch (error: any) {
       console.error('Error al cargar detalles:', error);
@@ -4260,6 +4333,8 @@ function Management() {
                   setDeliveryComments('');
                   setDetailsItem(null); // Reset details item
                   setNewAssignee(''); // Limpiar el selector de responsable
+                  setAssignmentIdForTimeCorrection(null);
+                  setReviewerEditDuration(null);
                 }}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
@@ -4643,17 +4718,57 @@ function Management() {
                            <span className="text-gray-600">Duración estimada:</span>
                            <span className="font-medium text-gray-800">{taskDetails.estimated_duration} min</span>
                          </div>
-                         {getItemDetails(taskDetails).realDuration && (
+                         {((getItemDetails(taskDetails).realDuration != null) || reviewerEditDuration != null) && ['completed', 'in_review', 'approved'].includes(taskDetails.status || '') && (
                           <div className="space-y-1">
-                            <div className="flex justify-between text-sm">
+                            <div className="flex justify-between text-sm items-center gap-2">
                               <span className="text-gray-600">Duración real:</span>
-                              <span className="font-medium text-indigo-600 flex items-center">
-                                {getItemDetails(taskDetails).realDuration} min
-                                {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
-                                  <span className="ml-1 text-orange-600" title="Incluye retrabajo">🔄</span>
-                                )}
-                              </span>
+                              {assignmentIdForTimeCorrection ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-indigo-500 focus:border-indigo-500"
+                                    value={reviewerEditDuration ?? ''}
+                                    onChange={(e) => setReviewerEditDuration(e.target.value ? Number(e.target.value) : null)}
+                                    placeholder="min"
+                                  />
+                                  <span className="text-gray-500 text-xs">min</span>
+                                  <button
+                                    type="button"
+                                    disabled={isSavingTimeCorrection || (reviewerEditDuration == null) || (reviewerEditDuration <= 0)}
+                                    onClick={async () => {
+                                      if (!assignmentIdForTimeCorrection || reviewerEditDuration == null || reviewerEditDuration <= 0) return;
+                                      setIsSavingTimeCorrection(true);
+                                      try {
+                                        const ok = await correctWorkSessionDuration(assignmentIdForTimeCorrection, reviewerEditDuration);
+                                        if (ok) {
+                                          toast.success('Tiempo corregido correctamente (acordado con el usuario)');
+                                          handleViewTaskDetails(detailsItem!.id, detailsItem!.type);
+                                        } else {
+                                          toast.error('No se pudo corregir el tiempo');
+                                        }
+                                      } finally {
+                                        setIsSavingTimeCorrection(false);
+                                      }
+                                    }}
+                                    className="px-2 py-1 text-xs font-medium rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {isSavingTimeCorrection ? 'Guardando...' : 'Guardar corrección'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="font-medium text-indigo-600 flex items-center">
+                                  {(reviewerEditDuration ?? getItemDetails(taskDetails).realDuration) ?? 0} min
+                                  {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
+                                    <span className="ml-1 text-orange-600" title="Incluye retrabajo">🔄</span>
+                                  )}
+                                </span>
+                              )}
                             </div>
+                            {assignmentIdForTimeCorrection && (
+                              <p className="text-xs text-gray-500">Puedes corregir el tiempo si acordaste con el usuario (ej. error al reportar).</p>
+                            )}
                             {getItemDetails(taskDetails).timeBreakdown && getItemDetails(taskDetails).timeBreakdown!.rework.length > 0 && (
                               <div className="bg-orange-50 border border-orange-200 rounded-md p-2 mt-1">
                                 <div className="text-xs text-orange-800 space-y-1">
