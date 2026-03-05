@@ -6548,7 +6548,9 @@ export default function UserProjectView() {
                               {actionType === "complete" && (
                                  <>
                                     <span className="text-green-600">✅</span>
-                                    <span className="text-sm font-medium text-green-700">Completar Tarea</span>
+                                    <span className="text-sm font-medium text-green-700">
+                                       {returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Completar retrabajo" : "Completar Tarea"}
+                                    </span>
                                  </>
                               )}
                               {actionType === "progress" && (
@@ -6576,7 +6578,12 @@ export default function UserProjectView() {
                            </div>
 
                            <div className="mb-4">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">Tiempo real trabajado en esta sesión: <span className="text-red-500">*</span></label>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                 {returnedTaskItems.some((t) => t.id === selectedTaskId)
+                                    ? "Tiempo de retrabajo en esta sesión:"
+                                    : "Tiempo real trabajado en esta sesión:"}{" "}
+                                 <span className="text-red-500">*</span>
+                              </label>
                               <div className="flex items-center">
                                  <input 
                                     type="number" 
@@ -6593,7 +6600,11 @@ export default function UserProjectView() {
                                     <option value="hours">Horas</option>
                                  </select>
                               </div>
-                              <p className="text-xs text-gray-500 mt-1">Ingresa el tiempo que realmente trabajaste en esta tarea</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                 {returnedTaskItems.some((t) => t.id === selectedTaskId)
+                                    ? "Este tiempo se sumará al ya registrado anteriormente (no lo reemplaza)."
+                                    : "Ingresa el tiempo que realmente trabajaste en esta tarea"}
+                              </p>
                            </div>
 
                            <div className="mb-4">
