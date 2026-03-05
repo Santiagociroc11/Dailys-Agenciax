@@ -119,7 +119,7 @@ const Dashboard = () => {
       .from('task_work_assignments')
       .select('*, tasks(deadline, status_history)')
       .eq('user_id', userId)
-      .in('status', ['completed', 'approved'])
+      .in('status', ['completed', 'in_review', 'approved'])
       .in('project_id', activeProjectIds);
 
     const { data: activeTasks } = await supabase.from('tasks').select('id').in('project_id', activeProjectIds);
