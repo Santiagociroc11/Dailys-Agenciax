@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { toast } from 'sonner';
+import { apiUrl } from '../lib/apiBase';
 import DailyHoursControl from './DailyHoursControl';
 import { 
   Clock, 
@@ -9,7 +11,8 @@ import {
   Target, 
   TrendingUp, 
   Briefcase,
-  DollarSign
+  DollarSign,
+  Send
 } from 'lucide-react';
 import { getProjectHoursConsumed, getProjectCostConsumed } from '../lib/metrics';
 
@@ -58,10 +61,34 @@ const Dashboard = () => {
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
   const [activePayroll, setActivePayroll] = useState<ActivePayrollSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reportSending, setReportSending] = useState<'morning' | 'evening' | null>(null);
 
   useEffect(() => {
     fetchMetrics();
   }, [user, isAdmin]);
+
+  async function sendAdminReport(type: 'morning' | 'evening') {
+    setReportSending(type);
+    try {
+      const endpoint = type === 'morning' ? '/api/telegram/admin-morning-report' : '/api/telegram/admin-evening-report';
+      const res = await fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || (type === 'morning' ? 'Panorama del día enviado.' : 'Resumen de entregas enviado.'));
+      } else {
+        toast.error(data.error || 'Error al enviar.');
+      }
+    } catch (e) {
+      toast.error('Error de red.');
+      console.error(e);
+    } finally {
+      setReportSending(null);
+    }
+  }
 
   async function fetchMetrics() {
     try {
@@ -459,6 +486,34 @@ const Dashboard = () => {
             </div>
           </div>
         </>
+      )}
+
+      {isAdmin && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center">
+            <Send className="w-6 h-6 mr-2 text-indigo-600" />
+            Enviar reportes por Telegram
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Dispara manualmente las notificaciones que normalmente se envían por cron (10 AM y 5 PM).
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => sendAdminReport('morning')}
+              disabled={reportSending !== null}
+              className="inline-flex items-center px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {reportSending === 'morning' ? 'Enviando...' : 'Panorama del día (10 AM)'}
+            </button>
+            <button
+              onClick={() => sendAdminReport('evening')}
+              disabled={reportSending !== null}
+              className="inline-flex items-center px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {reportSending === 'evening' ? 'Enviando...' : 'Resumen de entregas (5 PM)'}
+            </button>
+          </div>
+        </div>
       )}
 
       {isAdmin && activePayroll.length > 0 && (
