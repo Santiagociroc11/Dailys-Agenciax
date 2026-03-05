@@ -69,10 +69,10 @@ npx tsx scripts/diagnostico-gantt-56h.ts Angelrudas15@gmail.com "VSL CERO DOLOR"
 
 ---
 
-## Posibles correcciones
+## Correcciones aplicadas
 
-1. **Evitar doble conteo en getOffScheduleWork**: No sumar `duracion_real` si ya existe work_session de tipo `completion` para esa tarea en la semana (o si el total de work_sessions ya cubre ese trabajo).
+1. **Evitar doble conteo en getOffScheduleWork**: Si `taskGroup.workSessions` tiene datos, `getOffScheduleWork` retorna `{}`. work_sessions ya captura el trabajo real; no se suma además status_history.
 
-2. **Agrupar work_sessions por fecha real**: En lugar de `assignment.date`, usar la fecha de creación de la sesión (`createdAt`) para asignar las horas al día correcto. Así las 24h de completion irían al jueves y no al martes.
+2. **Agrupar work_sessions por fecha real**: En lugar de `assignment.date`, se usa la fecha de la sesión (`createdAt` o `created_at`) para asignar las horas al día en que realmente se hizo el trabajo. Así las 24h de completion van al jueves (día de finalización) y no al martes.
 
-3. **Excluir offSchedule cuando hay work_sessions**: Si `taskGroup.workSessions` tiene datos, no sumar además el offSchedule para esa tarea (o restar la parte ya contada).
+3. **Filtro work_sessions**: Se usa `createdAt` (Mongoose) en lugar de `created_at` para el filtro por rango de fechas.

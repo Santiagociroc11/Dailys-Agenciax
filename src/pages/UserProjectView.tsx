@@ -3562,6 +3562,12 @@ export default function UserProjectView() {
    async function getOffScheduleWork(taskGroup: any): Promise<Record<string, number>> {
       if (!user) return {};
       
+      // Si la tarea ya tiene work_sessions, no usar status_history para evitar doble conteo.
+      // work_sessions ya captura el trabajo real (incl. completado en días no planificados).
+      if (taskGroup.workSessions && Object.keys(taskGroup.workSessions).length > 0) {
+         return {};
+      }
+      
       try {
          const weekDays = getWeekDays();
          const startDate = weekDays[0].dateStr;
@@ -3618,9 +3624,9 @@ export default function UserProjectView() {
                )
             `)
             .eq("task_work_assignments.user_id", user!.id)
-            .gte("created_at", `${startDate} 00:00:00`)
-            .lte("created_at", `${endDate} 23:59:59`)
-            .order("created_at", { ascending: true });
+            .gte("createdAt", `${startDate} 00:00:00`)
+            .lte("createdAt", `${endDate} 23:59:59`)
+            .order("createdAt", { ascending: true });
 
          if (error) {
             console.error("Error obteniendo work_sessions:", error);
@@ -3629,13 +3635,17 @@ export default function UserProjectView() {
 
          console.log("✅ Work sessions obtenidas:", workSessions);
          
-         // Agrupar sesiones por assignment y por fecha
+         // Agrupar sesiones por assignment y por fecha REAL de la sesión (cuándo se hizo el trabajo),
+         // no por assignment.date, para evitar atribuir trabajo al día equivocado y doble conteo con offSchedule.
          const sessionsByAssignment: Record<string, Record<string, any[]>> = {};
          
          workSessions?.forEach(session => {
             const assignment = session.task_work_assignments;
             const assignmentKey = `${assignment.task_type}-${assignment.task_type === "subtask" ? assignment.subtask_id : assignment.task_id}`;
-            const sessionDate = assignment.date; // Usar la fecha de la asignación, no del reporte
+            const createdAt = session.created_at ?? session.createdAt;
+            const sessionDate = createdAt
+               ? format(new Date(createdAt), "yyyy-MM-dd")
+               : assignment.date;
             
             if (!sessionsByAssignment[assignmentKey]) {
                sessionsByAssignment[assignmentKey] = {};
