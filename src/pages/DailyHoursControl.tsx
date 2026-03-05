@@ -55,7 +55,11 @@ function getUserStatus(u: DailyHoursUser): 'ok' | 'behind' | 'idle' | 'overdue' 
   return 'behind';
 }
 
-export default function DailyHoursControl() {
+interface DailyHoursControlProps {
+  embedded?: boolean;
+}
+
+export default function DailyHoursControl({ embedded }: DailyHoursControlProps) {
   const [dailyHoursControl, setDailyHoursControl] = useState<DailyHoursUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>('all');
@@ -416,12 +420,12 @@ export default function DailyHoursControl() {
   }
 
   return (
-    <div className="p-6 w-full max-w-[1600px] mx-auto">
+    <div className={embedded ? 'w-full mt-6' : 'p-6 w-full max-w-[1600px] mx-auto'}>
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Control de Jornada</h1>
+            <h2 className={embedded ? 'text-lg font-semibold text-gray-900' : 'text-2xl font-bold text-gray-900'}>Control de Jornada</h2>
             <p className="text-sm text-gray-500 mt-1 capitalize">
               {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
             </p>

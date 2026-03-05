@@ -11,8 +11,7 @@ import {
   Target, 
   TrendingUp, 
   Briefcase,
-  DollarSign,
-  Send
+  DollarSign
 } from 'lucide-react';
 import { getProjectHoursConsumed, getProjectCostConsumed } from '../lib/metrics';
 
@@ -360,17 +359,38 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold mb-2">
-          {isAdmin ? 'Dashboard de Equipo' : 'Mi Dashboard'}
-        </h1>
-        <p className="text-gray-600">
-          {isAdmin 
-            ? 'Métricas de rendimiento del equipo' 
-            : `Bienvenido/a, ${user?.name || user?.email}`
-          }
-        </p>
+    <div className="p-6 max-w-[1600px] mx-auto">
+      {/* Header */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isAdmin ? 'Panel Principal' : 'Mi Dashboard'}
+          </h1>
+          <p className="text-gray-600 text-sm mt-0.5">
+            {isAdmin 
+              ? 'Control de jornada y resumen del equipo' 
+              : `Bienvenido/a, ${user?.name || user?.email}`
+            }
+          </p>
+        </div>
+        {isAdmin && (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <button
+              onClick={() => sendAdminReport('morning')}
+              disabled={reportSending !== null}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {reportSending === 'morning' ? '…' : '📊 Panorama 10AM'}
+            </button>
+            <button
+              onClick={() => sendAdminReport('evening')}
+              disabled={reportSending !== null}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              {reportSending === 'evening' ? '…' : '📋 Entregas 5PM'}
+            </button>
+          </div>
+        )}
       </div>
 
       {!isAdmin && userMetrics && (
@@ -488,105 +508,49 @@ const Dashboard = () => {
         </>
       )}
 
-      {isAdmin && (
-        <div className="mb-6 bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center">
-            <Send className="w-6 h-6 mr-2 text-indigo-600" />
-            Enviar reportes por Telegram
-          </h2>
-          <p className="text-sm text-gray-600 mb-4">
-            Dispara manualmente las notificaciones que normalmente se envían por cron (10 AM y 5 PM).
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => sendAdminReport('morning')}
-              disabled={reportSending !== null}
-              className="inline-flex items-center px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-            >
-              {reportSending === 'morning' ? 'Enviando...' : 'Panorama del día (10 AM)'}
-            </button>
-            <button
-              onClick={() => sendAdminReport('evening')}
-              disabled={reportSending !== null}
-              className="inline-flex items-center px-4 py-2 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-            >
-              {reportSending === 'evening' ? 'Enviando...' : 'Resumen de entregas (5 PM)'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isAdmin && activePayroll.length > 0 && (
-        <div className="mb-6 bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center">
-            <DollarSign className="w-6 h-6 mr-2 text-emerald-600" />
-            Nómina Activa Total del Equipo
-          </h2>
-          <div className="flex flex-wrap gap-4">
-            {activePayroll.map((p) => (
-              <div
-                key={p.currency}
-                className="inline-flex items-baseline gap-2 rounded-lg bg-emerald-50 px-4 py-2 border border-emerald-200"
-              >
-                <span className="text-2xl font-bold text-emerald-700">
-                  {p.total.toLocaleString('es-CO')} {p.currency}
-                </span>
-                <span className="text-sm text-emerald-600">
-                  / mes ({p.count} {p.count === 1 ? 'persona' : 'personas'})
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {isAdmin && budgetAlerts.length > 0 && (
-        <div className="mb-6 bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center">
-            <DollarSign className="w-6 h-6 mr-2 text-amber-600" />
-            Alertas de Presupuesto
-          </h2>
-          <div className="space-y-2">
-            {budgetAlerts.map((a) => (
-              <div
-                key={a.projectId}
-                className={`flex flex-col gap-1 p-3 rounded-lg border ${
-                  a.status === 'over' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
-                }`}
-              >
-                <div className="flex justify-between items-center">
-                  <span className="font-medium text-gray-900">{a.projectName}</span>
-                  <span className={`text-sm font-semibold ${
-                    a.status === 'over' ? 'text-red-700' : 'text-amber-700'
-                  }`}>
-                    {a.hoursConsumed.toFixed(1)}h / {a.budgetHours}h ({a.percentConsumed}%)
+      {isAdmin && (activePayroll.length > 0 || budgetAlerts.length > 0) && (
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {activePayroll.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-4 border-l-4 border-emerald-500">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-emerald-600" />
+                Nómina Activa
+              </h3>
+              <div className="flex flex-wrap gap-3">
+                {activePayroll.map((p) => (
+                  <span key={p.currency} className="text-lg font-bold text-emerald-700">
+                    {p.total.toLocaleString('es-CO')} {p.currency}
+                    <span className="text-sm font-normal text-gray-500 ml-1">/ mes ({p.count})</span>
                   </span>
-                </div>
-                {((a.costConsumed?.length ?? 0) > 0 || (a.budgetAmount != null && a.budgetAmount > 0)) && (
-                  <div className="text-xs text-gray-600 flex gap-2">
-                    {a.costConsumed?.length ? (
-                      <span>
-                        Coste: {a.costConsumed.map((c, i) => (
-                          <span key={c.currency}>{i > 0 && ' · '}{c.cost.toLocaleString('es-CO', { maximumFractionDigits: 0 })} {c.currency}</span>
-                        ))}
-                      </span>
-                    ) : null}
-                    {a.budgetAmount != null && a.budgetAmount > 0 && (
-                      <span>Presupuesto: €{a.budgetAmount.toLocaleString()}</span>
-                    )}
+                ))}
+              </div>
+            </div>
+          )}
+          {budgetAlerts.length > 0 && (
+            <div className="bg-white rounded-lg shadow p-4 border-l-4 border-amber-500">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                Alertas de Presupuesto
+              </h3>
+              <div className="space-y-1.5">
+                {budgetAlerts.slice(0, 3).map((a) => (
+                  <div key={a.projectId} className="flex justify-between items-center text-sm">
+                    <span className="font-medium text-gray-800 truncate">{a.projectName}</span>
+                    <span className={`font-semibold shrink-0 ml-2 ${a.status === 'over' ? 'text-red-600' : 'text-amber-600'}`}>
+                      {a.percentConsumed}%
+                    </span>
                   </div>
+                ))}
+                {budgetAlerts.length > 3 && (
+                  <p className="text-xs text-gray-500 pt-1">+{budgetAlerts.length - 3} más</p>
                 )}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {isAdmin && (
-        <div className="mt-6">
-          <DailyHoursControl />
-        </div>
-      )}
+      {isAdmin && <DailyHoursControl embedded />}
     </div>
   );
 };
