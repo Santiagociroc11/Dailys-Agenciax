@@ -1191,3 +1191,204 @@ export async function getDailyWorkStatistics(userId?: string, days: number = 30)
     return [];
   }
 }
+
+export interface BottleneckBlockedBy {
+  userId: string;
+  userName: string;
+  pendingCount: number;
+}
+
+export interface BottleneckBlockedUser {
+  userId: string;
+  userName: string;
+  waitingCount: number;
+}
+
+export interface BottleneckDetail {
+  subtaskId: string;
+  subtaskTitle: string;
+  taskTitle: string;
+  projectName: string;
+  sequenceOrder: number;
+  assignedTo: string;
+  blockedByUsers: { userId: string; userName: string; subtaskIds: string[] }[];
+}
+
+export interface BottleneckRow {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  waitingCount: number;
+  blockedBy: BottleneckBlockedBy[];
+  blockingCount: number;
+  blockedUsers: BottleneckBlockedUser[];
+  details: BottleneckDetail[];
+}
+
+/** Análisis de cuellos de botella: actividades esperando por dependencias secuenciales */
+export async function getBottleneckAnalysis(projectId?: string): Promise<BottleneckRow[]> {
+  try {
+    const { data: tasksData, error: tasksError } = await supabase
+      .from('tasks')
+      .select(`
+        id, title, is_sequential, project_id,
+        projects!inner(id, name, is_archived)
+      `)
+      .eq('is_sequential', true)
+      .eq('projects.is_archived', false);
+
+    if (tasksError) throw tasksError;
+    const tasks = (tasksData || []).filter((t: { project_id?: string }) =>
+      !projectId || t.project_id === projectId
+    );
+
+    if (tasks.length === 0) return [];
+
+    const taskIds = tasks.map((t: { id: string }) => t.id);
+    const taskMap = new Map(tasks.map((t: { id: string; title?: string; project_id?: string; projects?: { name?: string } }) =>
+      [t.id, { title: t.title, projectId: t.project_id, projectName: (t.projects as { name?: string })?.name || 'Sin proyecto' }]
+    ));
+
+    const { data: subtasksData, error: subtasksError } = await supabase
+      .from('subtasks')
+      .select('id, task_id, sequence_order, assigned_to, status, title')
+      .in('task_id', taskIds);
+
+    if (subtasksError) throw subtasksError;
+    const subtasks = subtasksData || [];
+
+    const userIds = [...new Set(subtasks.map((s: { assigned_to: string }) => s.assigned_to).filter(Boolean))];
+    const { data: usersData } = await supabase.from('users').select('id, name, email').in('id', userIds);
+    const userMap = new Map((usersData || []).map((u: { id: string; name?: string; email?: string }) =>
+      [u.id, { name: u.name || u.email || u.id, email: u.email || '' }]
+    ));
+
+    const byUser = new Map<string, {
+      waitingCount: number;
+      blockedBy: Map<string, { userName: string; pendingCount: number }>;
+      blockedUsers: Map<string, { userName: string; waitingCount: number }>;
+      details: BottleneckDetail[];
+    }>();
+
+    userIds.forEach((uid) => {
+      byUser.set(uid, {
+        waitingCount: 0,
+        blockedBy: new Map(),
+        blockedUsers: new Map(),
+        details: [],
+      });
+    });
+
+    const taskIdsList = [...new Set(subtasks.map((s: { task_id: string }) => s.task_id))];
+    for (const taskId of taskIdsList) {
+      const taskInfo = taskMap.get(taskId);
+      if (!taskInfo) continue;
+
+      const taskSubtasks = subtasks.filter((s: { task_id: string }) => s.task_id === taskId);
+      const groupedByOrder = new Map<number, typeof taskSubtasks>();
+      taskSubtasks.forEach((s: { sequence_order?: number }) => {
+        const order = s.sequence_order ?? 0;
+        if (!groupedByOrder.has(order)) groupedByOrder.set(order, []);
+        groupedByOrder.get(order)!.push(s);
+      });
+      const sortedOrders = Array.from(groupedByOrder.keys()).sort((a, b) => a - b);
+
+      for (const currentOrder of sortedOrders) {
+        if (currentOrder <= 0) continue;
+
+        const currentLevel = groupedByOrder.get(currentOrder) || [];
+        const pendingInLevel = currentLevel.filter((s: { status: string }) => s.status === 'pending');
+
+        let allPreviousApproved = true;
+        const blockerUsers = new Map<string, string[]>();
+
+        for (const prevOrder of sortedOrders) {
+          if (prevOrder >= currentOrder) break;
+          const prevLevel = groupedByOrder.get(prevOrder) || [];
+          const allPrevApproved = prevLevel.every((s: { status: string }) => s.status === 'approved');
+          if (!allPrevApproved) {
+            allPreviousApproved = false;
+            prevLevel.forEach((s: { assigned_to?: string; id: string; status: string }) => {
+              if (s.assigned_to && s.status !== 'approved') {
+                if (!blockerUsers.has(s.assigned_to)) blockerUsers.set(s.assigned_to, []);
+                blockerUsers.get(s.assigned_to)!.push(s.id);
+              }
+            });
+          }
+        }
+
+        if (!allPreviousApproved && pendingInLevel.length > 0) {
+
+          pendingInLevel.forEach((subtask: { id: string; title?: string; assigned_to?: string }) => {
+            const uid = subtask.assigned_to;
+            if (!uid) return;
+
+            const row = byUser.get(uid);
+            if (!row) return;
+
+            row.waitingCount += 1;
+            const blockedByUsers = Array.from(blockerUsers.entries()).map(([bid, subIds]) => ({
+              userId: bid,
+              userName: userMap.get(bid)?.name || bid,
+              subtaskIds: subIds,
+            }));
+
+            row.details.push({
+              subtaskId: subtask.id,
+              subtaskTitle: subtask.title || '',
+              taskTitle: taskInfo.title || '',
+              projectName: taskInfo.projectName || '',
+              sequenceOrder: currentOrder,
+              assignedTo: uid,
+              blockedByUsers,
+            });
+
+            blockedByUsers.forEach((b) => {
+              const existing = row.blockedBy.get(b.userId);
+              if (!existing) {
+                row.blockedBy.set(b.userId, { userName: b.userName, pendingCount: b.subtaskIds.length });
+              }
+
+              const blockerRow = byUser.get(b.userId);
+              if (blockerRow) {
+                const existingBlocked = blockerRow.blockedUsers.get(uid);
+                if (existingBlocked) {
+                  existingBlocked.waitingCount += 1;
+                } else {
+                  blockerRow.blockedUsers.set(uid, {
+                    userName: userMap.get(uid)?.name || uid,
+                    waitingCount: 1,
+                  });
+                }
+              }
+            });
+          });
+        }
+      }
+    }
+
+    return Array.from(byUser.entries())
+      .filter(([, data]) => data.waitingCount > 0 || data.blockedUsers.size > 0)
+      .map(([uid, data]) => ({
+        userId: uid,
+        userName: userMap.get(uid)?.name || uid,
+        userEmail: userMap.get(uid)?.email || '',
+        waitingCount: data.waitingCount,
+        blockedBy: Array.from(data.blockedBy.entries()).map(([bid, v]) => ({
+          userId: bid,
+          userName: v.userName,
+          pendingCount: v.pendingCount,
+        })),
+        blockingCount: data.blockedUsers.size,
+        blockedUsers: Array.from(data.blockedUsers.entries()).map(([bid, v]) => ({
+          userId: bid,
+          userName: v.userName,
+          waitingCount: v.waitingCount,
+        })),
+        details: data.details,
+      }));
+  } catch (error) {
+    console.error('Error in getBottleneckAnalysis:', error);
+    return [];
+  }
+}

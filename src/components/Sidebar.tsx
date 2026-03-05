@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer, GitBranch } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -81,7 +81,7 @@ export default function Sidebar() {
       const next = { ...prev };
       if (['/management', '/projects', '/clients', '/tasks'].includes(path)) next.operativo = true;
       if (['/users', '/areas'].includes(path)) next.equipo = true;
-      if (['/reports', '/audits', '/activity', '/capacity'].includes(path)) next.reportes = true;
+      if (['/reports', '/audits', '/activity', '/capacity', '/bottlenecks'].includes(path)) next.reportes = true;
       if (['/payroll', '/timeline'].includes(path)) next.finanzas = true;
       return next;
     });
@@ -114,6 +114,7 @@ export default function Sidebar() {
     { to: '/activity', label: 'Reporte de actividad', icon: Activity },
     { to: '/daily-hours', label: 'Control de Horas', icon: Timer },
     { to: '/capacity', label: 'Carga del equipo', icon: PieChart },
+    { to: '/bottlenecks', label: 'Cuellos de botella', icon: GitBranch },
     { to: '/audits', label: 'Auditoría', icon: History },
   ];
 
