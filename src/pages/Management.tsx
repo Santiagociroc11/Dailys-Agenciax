@@ -4743,6 +4743,12 @@ function Management() {
                                       try {
                                         const ok = await correctWorkSessionDuration(assignmentIdForTimeCorrection, reviewerEditDuration);
                                         if (ok) {
+                                          // Mantener consistencia: actualizar notes.duracion_real para que getItemDetails y otros usos muestren el valor correcto
+                                          const table = detailsItem!.type === 'subtask' ? 'subtasks' : 'tasks';
+                                          const currentNotes = taskDetails.notes;
+                                          let parsed = typeof currentNotes === 'string' ? (() => { try { return JSON.parse(currentNotes); } catch { return {}; } })() : (currentNotes || {});
+                                          parsed = { ...parsed, duracion_real: reviewerEditDuration, duracion_total: reviewerEditDuration };
+                                          await supabase.from(table).update({ notes: parsed }).eq('id', detailsItem!.id);
                                           toast.success('Tiempo corregido correctamente (acordado con el usuario)');
                                           handleViewTaskDetails(detailsItem!.id, detailsItem!.type);
                                         } else {
