@@ -2562,14 +2562,45 @@ export default function UserProjectView() {
             throw taskRes.error || assignRes.error;
          }
 
-         // ✅ NUEVO: Crear sesión de trabajo en work_sessions
-         // Para tareas devueltas/retrasadas, usar assignment_date (la asignación tiene fecha original, no hoy)
+         // ✅ Crear sesión de trabajo en work_sessions
+         // Si no existe task_work_assignment (usuario nunca planificó en Mi día), crearla on-the-fly para que el Control de Horas muestre Ejecutado
          try {
             const assignmentDate = taskForStatusUpdate?.assignment_date || today;
-            const assignmentId = await getAssignmentId(selectedTaskId, taskType, today, assignmentDate);
+            let assignmentId = await getAssignmentId(selectedTaskId, taskType, today, assignmentDate);
+
+            // Si no existe asignación, crearla para que el tiempo se registre en Control de Horas
+            if (!assignmentId && (selectedStatus === "completed" || selectedStatus === "in_progress") && taskForStatusUpdate) {
+               const estDuration = taskForStatusUpdate.estimated_duration ?? durationMin;
+               const projectId = taskForStatusUpdate.project_id || null;
+               let parentTaskId: string | null = null;
+               if (isSubtask) {
+                  const { data: sub } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
+                  parentTaskId = sub?.task_id ?? null;
+               }
+               const newAssignment = {
+                  user_id: user!.id,
+                  task_id: isSubtask ? parentTaskId : originalId,
+                  subtask_id: isSubtask ? originalId : null,
+                  task_type: taskType,
+                  date: today,
+                  estimated_duration: estDuration,
+                  project_id: projectId,
+                  status: selectedStatus,
+                  actual_duration: selectedStatus === "completed" ? durationMin : null,
+               };
+               const { data: inserted, error: insertErr } = await supabase
+                  .from("task_work_assignments")
+                  .insert([newAssignment])
+                  .select("id")
+                  .single();
+               if (!insertErr && inserted?.id) {
+                  assignmentId = inserted.id;
+               }
+            }
+
             if (assignmentId) {
                let sessionType: 'progress' | 'completion' | 'block';
-               if (selectedStatus === "completed") {
+               if (selectedStatus === "completed" || selectedStatus === "in_review") {
                   sessionType = 'completion';
                } else if (selectedStatus === "in_progress") {
                   sessionType = 'progress';
@@ -2579,9 +2610,8 @@ export default function UserProjectView() {
 
                await createWorkSession(assignmentId, durationMin, statusDetails, sessionType);
                
-               // ✅ NUEVO: Actualizar actual_duration como suma de todas las sesiones
-               if (selectedStatus === "completed") {
-                  // Calcular duración total de todas las sesiones para esta asignación
+               // Actualizar actual_duration cuando entrega (completed o in_review)
+               if (selectedStatus === "completed" || selectedStatus === "in_review") {
                   const { data: sessions, error: sessionsError } = await supabase
                      .from("work_sessions")
                      .select("duration_minutes")
@@ -2589,16 +2619,14 @@ export default function UserProjectView() {
 
                   if (!sessionsError && sessions) {
                      const totalDuration = sessions.reduce((total, session) => total + (session.duration_minutes || 0), 0);
-                     
-                     // Actualizar actual_duration con el total real trabajado
                      await supabase
                         .from("task_work_assignments")
                         .update({ actual_duration: totalDuration })
                         .eq("id", assignmentId);
                   }
                }
-            } else {
-               console.error("❌ No se pudo encontrar assignment_id para crear work_session");
+            } else if (selectedStatus === "completed" || selectedStatus === "in_progress") {
+               console.error("❌ No se pudo encontrar ni crear assignment_id para work_session");
             }
          } catch (sessionError) {
             console.error("Error creando work_session:", sessionError);
