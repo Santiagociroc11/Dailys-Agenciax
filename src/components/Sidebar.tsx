@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -112,6 +112,7 @@ export default function Sidebar() {
   const reportesItems: NavItem[] = [
     { to: '/reports', label: 'Estadísticas', icon: BarChart3 },
     { to: '/activity', label: 'Reporte de actividad', icon: Activity },
+    { to: '/daily-hours', label: 'Control de Horas', icon: Timer },
     { to: '/capacity', label: 'Carga del equipo', icon: PieChart },
     { to: '/audits', label: 'Auditoría', icon: History },
   ];
@@ -165,7 +166,7 @@ export default function Sidebar() {
               items={reportesItems}
               expanded={expanded.reportes}
               onToggle={() => toggle('reportes')}
-              isActive={isActiveIn(['/reports', '/audits', '/activity', '/capacity'])}
+              isActive={isActiveIn(['/reports', '/audits', '/activity', '/daily-hours', '/capacity'])}
             />
             <CollapsibleSection
               label="Finanzas"

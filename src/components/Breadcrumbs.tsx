@@ -24,6 +24,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/capacity': 'Capacidad',
   '/audits': 'Auditoría',
   '/activity': 'Reporte de actividad',
+  '/daily-hours': 'Control de Horas',
   '/payroll': 'Nómina',
   '/timeline': 'Timeline',
   '/settings': 'Configuración',
