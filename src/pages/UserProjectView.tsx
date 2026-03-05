@@ -6773,10 +6773,21 @@ export default function UserProjectView() {
                                  {returnedTaskItems.some((t) => t.id === selectedTaskId)
                                     ? "Tiempo de retrabajo en esta sesión:"
                                     : (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId))
-                                       ? "Tiempo reportado (puedes corregirlo):"
-                                       : "Tiempo real trabajado en esta sesión:"}{" "}
+                                       ? "Tiempo total reportado (puedes corregirlo):"
+                                       : "Tiempo que duraste en ESTA sesión final (no el total):"}{" "}
                                  <span className="text-red-500">*</span>
                               </label>
+
+                              {/* Mostrar el tiempo previamente reportado si aplica */}
+                              {!(completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId)) && taskProgress[selectedTaskId] && taskProgress[selectedTaskId].length > 0 && (
+                                 <div className="mb-3 p-2 bg-blue-50 border border-blue-100 rounded-md flex items-center justify-between">
+                                    <span className="text-xs text-blue-700">Tiempo ya reportado en avances:</span>
+                                    <span className="text-sm font-semibold text-blue-800">
+                                       {Math.round((taskProgress[selectedTaskId].reduce((sum, p) => sum + (p.metadata?.tiempo_sesion || 0), 0) / 60) * 100) / 100} horas
+                                    </span>
+                                 </div>
+                              )}
+
                               <div className="flex items-center">
                                  <input 
                                     type="number" 
@@ -6797,8 +6808,8 @@ export default function UserProjectView() {
                                  {returnedTaskItems.some((t) => t.id === selectedTaskId)
                                     ? "Este tiempo se sumará al ya registrado anteriormente (no lo reemplaza)."
                                     : (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId))
-                                       ? "Puedes corregir el tiempo reportado si lo ingresaste mal."
-                                       : "Ingresa el tiempo que realmente trabajaste en esta tarea"}
+                                       ? "Puedes corregir el tiempo total que tomaste."
+                                       : "Solo pon el tiempo de tu trabajo HOY o en ESTA sesión. El sistema ya sabe cuánto habías reportado en los avances anteriores y lo sumará automáticamente."}
                               </p>
                            </div>
 
@@ -6816,6 +6827,17 @@ export default function UserProjectView() {
 
                            <div className="mb-4">
                               <label className="block text-sm font-medium text-gray-700 mb-2">Tiempo trabajado en esta sesión: <span className="text-red-500">*</span></label>
+                              
+                              {/* Mostrar el tiempo previamente reportado si aplica */}
+                              {taskProgress[selectedTaskId] && taskProgress[selectedTaskId].length > 0 && (
+                                 <div className="mb-3 p-2 bg-blue-50 border border-blue-100 rounded-md flex items-center justify-between">
+                                    <span className="text-xs text-blue-700">Tiempo acumulado en avances anteriores:</span>
+                                    <span className="text-sm font-semibold text-blue-800">
+                                       {Math.round((taskProgress[selectedTaskId].reduce((sum, p) => sum + (p.metadata?.tiempo_sesion || 0), 0) / 60) * 100) / 100} horas
+                                    </span>
+                                 </div>
+                              )}
+
                               <div className="flex items-center">
                                  <input 
                                     type="number" 
@@ -6832,7 +6854,7 @@ export default function UserProjectView() {
                                     <option value="hours">Horas</option>
                                  </select>
                               </div>
-                              <p className="text-xs text-gray-500 mt-1">Ingresa el tiempo que trabajaste en esta sesión</p>
+                              <p className="text-xs text-gray-500 mt-1">Ingresa ÚNICAMENTE el tiempo que duraste trabajando HOY en la tarea.</p>
                            </div>
 
                            <div className="mb-4">
