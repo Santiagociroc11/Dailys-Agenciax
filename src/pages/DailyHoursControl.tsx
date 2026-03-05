@@ -452,6 +452,9 @@ export default function DailyHoursControl() {
                 >
                   <span className="flex items-center justify-center gap-1">Planificado <SortIcon col="hours" /></span>
                 </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider" title="Tiempo ya reportado/completado hoy">
+                  Ejecutado
+                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   Hoy
                 </th>
@@ -469,7 +472,7 @@ export default function DailyHoursControl() {
             <tbody className="divide-y divide-gray-100">
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500 italic">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500 italic">
                     {filter !== 'all' ? 'Nadie en esta categoría.' : 'No hay usuarios en el equipo.'}
                   </td>
                 </tr>
@@ -548,6 +551,15 @@ export default function DailyHoursControl() {
                       <td className="px-4 py-3 text-center">
                         <span className="text-sm font-bold text-gray-900">{fmtH(u.totalMinutes)}h</span>
                         <span className="text-xs text-gray-400"> / {TARGET_HOURS_PER_DAY}h</span>
+                      </td>
+
+                      {/* Ejecutado */}
+                      <td className="px-4 py-3 text-center">
+                        {(u.actualMinutesToday + u.reworkMinutes) > 0 ? (
+                          <span className="text-sm font-semibold text-blue-600">{fmtH(u.actualMinutesToday + u.reworkMinutes)}h</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">--</span>
+                        )}
                       </td>
 
                       {/* Asignado hoy */}
