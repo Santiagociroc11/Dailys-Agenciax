@@ -167,6 +167,8 @@ function Tasks() {
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [creatingTask, setCreatingTask] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [savingSubtask, setSavingSubtask] = useState(false);
   const [showFloatingMenu, setShowFloatingMenu] = useState(false);
   const floatingMenuRef = useRef<HTMLDivElement>(null);
 
@@ -1071,7 +1073,9 @@ function Tasks() {
 
   async function handleUpdateTask() {
     if (!selectedTask || !editedTask) return;
+    if (savingTask) return;
 
+    setSavingTask(true);
     try {
       // 🔔 Verificar cambios en asignación antes de actualizar
       const previousAssignedUsers = selectedTask.assigned_users || [];
@@ -1192,15 +1196,21 @@ function Tasks() {
 
       await fetchTasks();
       setShowTaskDetailModal(false);
+      toast.success('Tarea actualizada correctamente');
     } catch (error) {
       console.error('Error al actualizar la tarea:', error);
       setError('Error al actualizar la tarea. Por favor, inténtalo de nuevo.');
+      toast.error('Error al actualizar la tarea');
+    } finally {
+      setSavingTask(false);
     }
   }
 
   async function handleUpdateSubtask() {
     if (!selectedSubtask || !editedSubtask) return;
+    if (savingSubtask) return;
 
+    setSavingSubtask(true);
     try {
       // 🔔 Verificar cambios antes de actualizar
       const previousAssignedTo = selectedSubtask.assigned_to;
@@ -1350,9 +1360,13 @@ function Tasks() {
 
       await fetchSubtasks();
       setShowSubtaskDetailModal(false);
+      toast.success('Subtarea actualizada correctamente');
     } catch (error) {
       console.error('Error al actualizar la subtarea:', error);
       setError('Error al actualizar la subtarea. Por favor, inténtalo de nuevo.');
+      toast.error('Error al actualizar la subtarea');
+    } finally {
+      setSavingSubtask(false);
     }
   }
 
@@ -1682,7 +1696,9 @@ function Tasks() {
 
   async function handleCompleteTaskUpdate() {
     if (!selectedTask || !editedTask) return;
+    if (savingTask) return;
 
+    setSavingTask(true);
     try {
       const { error: taskError } = await supabase
         .from('tasks')
@@ -1856,10 +1872,14 @@ function Tasks() {
       setEditMode(false);
       setEditedSubtasks({});
       setNewSubtasksInEdit([]);
+      toast.success('Tarea actualizada correctamente');
 
     } catch (error) {
       console.error('Error al actualizar la tarea y subtareas:', error);
       setError('Error al actualizar. Por favor, inténtalo de nuevo.');
+      toast.error('Error al actualizar la tarea');
+    } finally {
+      setSavingTask(false);
     }
   }
 
@@ -3960,9 +3980,10 @@ function Tasks() {
                       <button
                         type="button"
                         onClick={handleCompleteTaskUpdate}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                        disabled={savingTask}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Guardar Cambios
+                        {savingTask ? 'Guardando...' : 'Guardar Cambios'}
                       </button>
                     )}
                   </>
@@ -4483,9 +4504,10 @@ function Tasks() {
                       <button
                         type="button"
                         onClick={handleUpdateSubtask}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                        disabled={savingSubtask}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Guardar Cambios
+                        {savingSubtask ? 'Guardando...' : 'Guardar Cambios'}
                       </button>
                     )}
                   </>
