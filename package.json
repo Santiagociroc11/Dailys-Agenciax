@@ -18,6 +18,7 @@
     "migrate:add-client-id": "npx tsx scripts/add-client-id-to-projects.ts",
     "listar:proyectos-cierre": "npx tsx scripts/listar-proyectos-cierre.ts",
     "diagnostico:usuario": "npx tsx scripts/diagnostico-usuario.ts",
+    "limpiar:assignments-archivados": "npx tsx scripts/limpiar-assignments-proyectos-archivados.ts",
     "dev": "vite",
     "dev:server": "tsx watch server.ts",
     "build:frontend": "vite build",
