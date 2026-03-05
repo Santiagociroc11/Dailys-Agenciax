@@ -3562,10 +3562,18 @@ export default function UserProjectView() {
    async function getOffScheduleWork(taskGroup: any): Promise<Record<string, number>> {
       if (!user) return {};
       
-      // Si la tarea ya tiene work_sessions, no usar status_history para evitar doble conteo.
-      // work_sessions ya captura el trabajo real (incl. completado en días no planificados).
+      // Si la tarea tiene work_sessions, generar offSchedule desde ellas (días no planificados)
+      // en vez de status_history, para evitar doble conteo y mostrar EXTRA correctamente.
       if (taskGroup.workSessions && Object.keys(taskGroup.workSessions).length > 0) {
-         return {};
+         const offScheduleWork: Record<string, number> = {};
+         for (const [dateStr, sessions] of Object.entries(taskGroup.workSessions)) {
+            const plannedSessions = taskGroup.sessions[dateStr] || [];
+            if (plannedSessions.length === 0) {
+               const total = (sessions as any[]).reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
+               if (total > 0) offScheduleWork[dateStr] = total;
+            }
+         }
+         return offScheduleWork;
       }
       
       try {
