@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { apiUrl } from '../lib/apiBase';
-import { Settings as SettingsIcon, FlaskConical, FileText, CheckCircle, AlertCircle, ExternalLink, Copy } from 'lucide-react';
+import { Settings as SettingsIcon, FlaskConical, FileText, CheckCircle, AlertCircle, ExternalLink, Copy, RefreshCw, ChevronDown, ChevronUp, Send, Bell, Clock } from 'lucide-react';
 
 const ADMIN_TELEGRAM_ID_KEY = 'admin_telegram_chat_id';
 const BOT_LINK = 'https://t.me/agenciaxbot';
@@ -349,6 +349,12 @@ const Settings = () => {
     { id: 'log' as const, label: 'Log', icon: FileText },
   ];
   const [activeTab, setActiveTab] = useState<'config' | 'pruebas' | 'log'>('config');
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab === 'log') fetchLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchLog usa logFilter; solo queremos cargar al entrar al tab
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-slate-50/50">
@@ -626,94 +632,94 @@ const Settings = () => {
         {activeTab === 'log' && (
           <div className="space-y-6">
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900 mb-1">Log de notificaciones</h2>
-              <p className="text-sm text-slate-600 mb-6">
-                Historial de envíos (últimos 30 días). Los registros se eliminan automáticamente.
-              </p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-slate-500" />
+                    Log de notificaciones
+                  </h2>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Historial de envíos (últimos 30 días). Los registros se eliminan automáticamente.
+                  </p>
+                </div>
+                <button
+                  onClick={fetchLog}
+                  disabled={logLoading}
+                  className="shrink-0 flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 transition-all"
+                >
+                  <RefreshCw className={`w-4 h-4 ${logLoading ? 'animate-spin' : ''}`} />
+                  {logLoading ? 'Cargando...' : 'Actualizar'}
+                </button>
+              </div>
 
               <div className="flex flex-wrap gap-3 mb-6">
                 <select
                   value={logFilter.type || ''}
                   onChange={(e) => setLogFilter((f) => ({ ...f, type: e.target.value || undefined }))}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-700 bg-slate-50/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
                 >
                   <option value="">Todos los tipos</option>
-                  <option value="test">test</option>
-                  <option value="admin-notification">admin-notification</option>
-                  <option value="task-available">task-available</option>
-                  <option value="user-task-in-review">user-task-in-review</option>
-                  <option value="deadline-reminder">deadline-reminder</option>
-                  <option value="daily-summary">daily-summary</option>
-                  <option value="budget-alert">budget-alert</option>
-                  <option value="admin-morning-report">admin-morning-report</option>
-                  <option value="admin-evening-report">admin-evening-report</option>
+                  <option value="test">Prueba</option>
+                  <option value="admin-notification">Notificación admin</option>
+                  <option value="task-available">Tarea disponible</option>
+                  <option value="user-task-in-review">Tarea en revisión</option>
+                  <option value="deadline-reminder">Recordatorio vencimiento</option>
+                  <option value="daily-summary">Resumen diario</option>
+                  <option value="budget-alert">Alerta presupuesto</option>
+                  <option value="admin-morning-report">Reporte matutino</option>
+                  <option value="admin-evening-report">Reporte vespertino</option>
                 </select>
                 <select
                   value={logFilter.status || ''}
                   onChange={(e) => setLogFilter((f) => ({ ...f, status: e.target.value || undefined }))}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-700 bg-slate-50/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
                 >
                   <option value="">Todos los estados</option>
-                  <option value="success">success</option>
-                  <option value="failed">failed</option>
-                  <option value="skipped">skipped</option>
+                  <option value="success">Enviadas</option>
+                  <option value="failed">Fallidas</option>
+                  <option value="skipped">Omitidas</option>
                 </select>
                 <button
                   onClick={fetchLog}
                   disabled={logLoading}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 transition-colors"
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
                 >
-                  {logLoading ? 'Cargando...' : 'Cargar log'}
+                  Aplicar filtros
                 </button>
               </div>
 
               {logStats && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                  <StatCard label="Total" value={logStats.total} />
-                  <StatCard label="Enviadas" value={logStats.success} variant="success" />
-                  <StatCard label="Fallidas" value={logStats.failed} variant="error" />
-                  <StatCard label="Omitidas" value={logStats.skipped} variant="warning" />
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                  <StatCard label="Total" value={logStats.total} icon={Bell} />
+                  <StatCard label="Enviadas" value={logStats.success} variant="success" icon={CheckCircle} />
+                  <StatCard label="Fallidas" value={logStats.failed} variant="error" icon={AlertCircle} />
+                  <StatCard label="Omitidas" value={logStats.skipped} variant="warning" icon={Clock} />
                 </div>
               )}
 
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50/30">
                 <div className="max-h-[400px] overflow-auto">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Fecha</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Tipo</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Destinatario</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Detalle</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {logEntries.length === 0 && !logLoading && (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-16 text-center">
-                            <FileText className="mx-auto h-12 w-12 text-slate-300 mb-3" />
-                            <p className="text-slate-500 text-sm">Haz clic en &quot;Cargar log&quot; para ver el historial</p>
-                          </td>
-                        </tr>
-                      )}
+                  {logEntries.length === 0 && !logLoading && (
+                    <div className="flex flex-col items-center justify-center py-16 px-4">
+                      <div className="rounded-2xl bg-slate-100 p-4 mb-4">
+                        <Send className="w-10 h-10 text-slate-400" />
+                      </div>
+                      <p className="text-slate-600 font-medium">Sin registros</p>
+                      <p className="text-sm text-slate-500 mt-1">Haz clic en Actualizar para cargar el historial</p>
+                    </div>
+                  )}
+                  {logEntries.length > 0 && (
+                    <div className="divide-y divide-slate-100">
                       {logEntries.map((e) => (
-                        <tr key={e.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
-                            {new Date(e.timestamp).toLocaleString('es-ES')}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-700">{e.type}</td>
-                          <td className="px-4 py-3 text-sm text-slate-700">{e.recipientLabel || e.recipient}</td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={e.status} />
-                          </td>
-                          <td className="px-4 py-3 text-sm text-slate-500 max-w-[200px] truncate" title={e.error || e.details || ''}>
-                            {e.error || e.details || '—'}
-                          </td>
-                        </tr>
+                        <LogEntryCard
+                          key={e.id}
+                          entry={e}
+                          isExpanded={expandedLogId === e.id}
+                          onToggle={() => setExpandedLogId((id) => (id === e.id ? null : e.id))}
+                        />
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -796,14 +802,109 @@ function TestSection({
   );
 }
 
+const LOG_TYPE_LABELS: Record<string, string> = {
+  test: 'Prueba',
+  'admin-notification': 'Admin',
+  'task-available': 'Tarea disponible',
+  'user-task-in-review': 'En revisión',
+  'deadline-reminder': 'Vencimiento',
+  'daily-summary': 'Resumen diario',
+  'budget-alert': 'Presupuesto',
+  'admin-morning-report': 'Reporte AM',
+  'admin-evening-report': 'Reporte PM',
+};
+
+const LOG_TYPE_COLORS: Record<string, string> = {
+  test: 'bg-violet-100 text-violet-700',
+  'admin-notification': 'bg-blue-100 text-blue-700',
+  'task-available': 'bg-emerald-100 text-emerald-700',
+  'user-task-in-review': 'bg-amber-100 text-amber-700',
+  'deadline-reminder': 'bg-orange-100 text-orange-700',
+  'daily-summary': 'bg-cyan-100 text-cyan-700',
+  'budget-alert': 'bg-rose-100 text-rose-700',
+  'admin-morning-report': 'bg-sky-100 text-sky-700',
+  'admin-evening-report': 'bg-indigo-100 text-indigo-700',
+};
+
+function LogEntryCard({
+  entry,
+  isExpanded,
+  onToggle,
+}: {
+  entry: LogEntry;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const hasDetail = !!(entry.error || entry.details);
+  const typeLabel = LOG_TYPE_LABELS[entry.type] || entry.type;
+  const typeColor = LOG_TYPE_COLORS[entry.type] || 'bg-slate-100 text-slate-600';
+
+  return (
+    <div
+      className={`group px-4 py-3 hover:bg-white/60 transition-colors ${hasDetail ? 'cursor-pointer' : ''}`}
+      onClick={hasDetail ? onToggle : undefined}
+    >
+      <div className="flex items-start gap-4">
+        <div className="shrink-0 mt-0.5">
+          {entry.status === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-emerald-500" />
+          ) : entry.status === 'failed' ? (
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          ) : (
+            <Clock className="w-4 h-4 text-amber-500" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs text-slate-500">
+              {new Date(entry.timestamp).toLocaleString('es-ES', {
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+            <span className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-medium ${typeColor}`}>
+              {typeLabel}
+            </span>
+            <StatusBadge status={entry.status} />
+          </div>
+          <p className="text-sm font-medium text-slate-800 mt-1 truncate">
+            {entry.recipientLabel || entry.recipient}
+          </p>
+          {hasDetail && (
+            <div className="mt-2 flex items-center gap-1">
+              {isExpanded ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+              <span className="text-xs text-slate-500">
+                {isExpanded ? 'Ocultar' : 'Ver detalle'}
+              </span>
+            </div>
+          )}
+          {isExpanded && hasDetail && (
+            <div className="mt-3 p-3 rounded-lg bg-slate-100/80 text-xs text-slate-600 font-mono whitespace-pre-wrap break-words">
+              {entry.error || entry.details}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
   variant = 'default',
+  icon: Icon,
 }: {
   label: string;
   value: number;
   variant?: 'default' | 'success' | 'error' | 'warning';
+  icon?: React.ComponentType<{ className?: string }>;
 }) {
   const styles = {
     default: 'bg-slate-50 border-slate-200 text-slate-700',
@@ -811,23 +912,36 @@ function StatCard({
     error: 'bg-red-50 border-red-200 text-red-700',
     warning: 'bg-amber-50 border-amber-200 text-amber-700',
   };
+  const iconColors = {
+    default: 'text-slate-500',
+    success: 'text-emerald-500',
+    error: 'text-red-500',
+    warning: 'text-amber-500',
+  };
   return (
-    <div className={`rounded-xl border p-4 ${styles[variant]}`}>
-      <p className="text-xs font-medium opacity-80">{label}</p>
+    <div className={`rounded-xl border p-4 ${styles[variant]} transition-shadow hover:shadow-sm`}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium opacity-80">{label}</p>
+        {Icon && <Icon className={`w-4 h-4 ${iconColors[variant]}`} />}
+      </div>
       <p className="text-2xl font-bold mt-1">{value}</p>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const styles = {
-    success: 'bg-emerald-100 text-emerald-700',
-    failed: 'bg-red-100 text-red-700',
-    skipped: 'bg-amber-100 text-amber-700',
+  const config = {
+    success: { label: 'Enviada', class: 'bg-emerald-100 text-emerald-700' },
+    failed: { label: 'Fallida', class: 'bg-red-100 text-red-700' },
+    skipped: { label: 'Omitida', class: 'bg-amber-100 text-amber-700' },
   };
+  const { label, class: cls } = config[status as keyof typeof config] || { label: status, class: 'bg-slate-100 text-slate-600' };
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status as keyof typeof styles] || 'bg-slate-100 text-slate-600'}`}>
-      {status}
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
+      {status === 'success' && <CheckCircle className="w-3 h-3" />}
+      {status === 'failed' && <AlertCircle className="w-3 h-3" />}
+      {status === 'skipped' && <Clock className="w-3 h-3" />}
+      {label}
     </span>
   );
 }
