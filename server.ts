@@ -31,6 +31,7 @@ import {
   type TelegramLogType,
   type TelegramLogStatus,
 } from './lib/telegramLog.js';
+import { logger } from './lib/logger.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -63,7 +64,7 @@ app.post('/api/settings/invalidate-cache', async (_req, res) => {
 // Middleware: verificar que Telegram esté configurado antes de procesar notificaciones
 const telegramCheck = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!isTelegramConfigured()) {
-    console.warn('[TELEGRAM] Petición rechazada: TELEGRAM_BOT_TOKEN no configurado');
+    logger.telegram.warn('Petición rechazada: TELEGRAM_BOT_TOKEN no configurado');
     return res.status(503).json({
       success: false,
       error: 'Telegram no configurado. Configura TELEGRAM_BOT_TOKEN en las variables de entorno.',
@@ -111,7 +112,7 @@ app.post('/api/telegram/test-admin', telegramCheck, async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error en test-admin endpoint:', error);
+    logger.server.error('Error en test-admin endpoint', error as Error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 
@@ -187,16 +188,16 @@ app.post('/api/telegram/admin-notification', telegramCheck, async (req, res) => 
     // Obtener información de tiempo si tenemos el ID de la tarea
     let timeInfo = {};
     if (taskId) {
-      console.log(`[SERVER] Obteniendo información de tiempo para ${isSubtask ? 'subtask' : 'task'} ID: ${taskId}, status: ${status}`);
+      logger.server.info(`Obteniendo tiempo ${isSubtask ? 'subtask' : 'task'} ${taskId}`, `status=${status}`);
       try {
         timeInfo = await getTimeInfo(taskId, isSubtask, status);
-        console.log(`[SERVER] Información de tiempo obtenida:`, timeInfo);
+        logger.server.info('Tiempo obtenido', JSON.stringify(timeInfo).slice(0, 80));
       } catch (error) {
-        console.warn('No se pudo obtener información de tiempo:', error);
+        logger.server.warn('No se pudo obtener tiempo', (error as Error).message);
         // Continuar sin información de tiempo si hay error
       }
     } else {
-      console.warn('[SERVER] No se proporcionó taskId para obtener información de tiempo');
+      logger.server.warn('No se proporcionó taskId para obtener tiempo');
     }
 
     // Crear el mensaje apropiado según el estado
@@ -243,7 +244,7 @@ app.post('/api/telegram/admin-notification', telegramCheck, async (req, res) => 
     }
 
   } catch (error) {
-    console.error('Error en admin-notification endpoint:', error);
+    logger.server.error('Error en admin-notification endpoint', error as Error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 
@@ -279,7 +280,7 @@ app.post('/api/telegram/user-task-in-review', telegramCheck, async (req, res) =>
       });
     }
 
-    console.log(`[SERVER] Enviando notificaciones de tarea en revisión. Admin: ${adminName}, Users: ${userIds.length}, Task: ${taskTitle}`);
+    logger.server.info(`Tarea en revisión: ${taskTitle}`, `Admin=${adminName} Users=${userIds.length}`);
 
     // Enviar las notificaciones
     const successCount = await notifyUsersTaskInReview(
@@ -300,7 +301,7 @@ app.post('/api/telegram/user-task-in-review', telegramCheck, async (req, res) =>
     });
 
   } catch (error) {
-    console.error('Error en user-task-in-review endpoint:', error);
+    logger.server.error('Error en user-task-in-review endpoint', error as Error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 
@@ -386,7 +387,7 @@ app.post('/api/telegram/deadline-reminders', telegramCheck, async (req, res) => 
       tasksChecked: tasksDue.length + subtasksDue.length,
     });
   } catch (error) {
-    console.error('Error en deadline-reminders:', error);
+    logger.server.error('Error en deadline-reminders', error as Error);
     return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
   }
 });
@@ -462,7 +463,7 @@ app.post('/api/telegram/daily-summary', telegramCheck, async (req, res) => {
       totalUsers: usersWithTelegram.length,
     });
   } catch (error) {
-    console.error('Error en daily-summary:', error);
+    logger.server.error('Error en daily-summary', error as Error);
     return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
   }
 });
@@ -508,7 +509,7 @@ app.post('/api/telegram/budget-check', telegramCheck, async (req, res) => {
       projectsChecked: projects.length,
     });
   } catch (error) {
-    console.error('Error en budget-check endpoint:', error);
+    logger.server.error('Error en budget-check endpoint', error as Error);
     return res.status(500).json({
       success: false,
       error: 'Error interno del servidor.',
@@ -589,7 +590,7 @@ app.post('/api/telegram/admin-morning-report', telegramCheck, async (req, res) =
       usersCount: userRows.length,
     });
   } catch (error) {
-    console.error('Error en admin-morning-report:', error);
+    logger.server.error('Error en admin-morning-report', error as Error);
     return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
   }
 });
@@ -658,7 +659,7 @@ app.post('/api/telegram/admin-evening-report', telegramCheck, async (req, res) =
       usersCount: userRows.length,
     });
   } catch (error) {
-    console.error('Error en admin-evening-report:', error);
+    logger.server.error('Error en admin-evening-report', error as Error);
     return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
   }
 });
@@ -699,7 +700,7 @@ app.post('/api/telegram/task-available', telegramCheck, async (req, res) => {
       });
     }
 
-    console.log(`[SERVER] Enviando notificaciones de tarea disponible. Reason: ${reason}, Users: ${userIds.length}, Task: ${taskTitle}`);
+    logger.server.info(`Tarea disponible: ${taskTitle}`, `reason=${reason} users=${userIds.length}`);
 
     // Enviar las notificaciones
     const successCount = await notifyMultipleUsersTaskAvailable(
@@ -719,7 +720,7 @@ app.post('/api/telegram/task-available', telegramCheck, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error en task-available endpoint:', error);
+    logger.server.error('Error en task-available endpoint', error as Error);
     return res.status(500).json({ 
       success: false, 
       error: 'Error interno del servidor.' 
@@ -755,7 +756,7 @@ app.get('/api/telegram/log', async (req, res) => {
       stats,
     });
   } catch (error) {
-    console.error('Error en telegram/log endpoint:', error);
+    logger.server.error('Error en telegram/log endpoint', error as Error);
     return res.status(500).json({ success: false, error: 'Error interno del servidor.' });
   }
 });
@@ -793,15 +794,15 @@ app.get('*', (req, res) => {
 connectDB()
   .then(() => {
     if (!process.env.TELEGRAM_BOT_TOKEN) {
-      console.warn('⚠️ TELEGRAM_BOT_TOKEN no configurado. Las notificaciones a Telegram no se enviarán.');
+      logger.telegram.warn('TELEGRAM_BOT_TOKEN no configurado. Las notificaciones no se enviarán.');
     } else {
-      console.log('✅ Telegram: token configurado');
+      logger.telegram.success('Token configurado');
     }
     app.listen(port, () => {
-      console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+      logger.server.success(`Servidor corriendo en http://localhost:${port}`);
     });
   })
   .catch((err) => {
-    console.error('❌ Error conectando a MongoDB:', err);
+    logger.db.error('Error conectando a MongoDB', err);
     process.exit(1);
   }); 

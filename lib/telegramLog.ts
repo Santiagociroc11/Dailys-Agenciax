@@ -4,6 +4,7 @@
  */
 
 import { TelegramNotificationLog } from '../models/TelegramNotificationLog.js';
+import { logger } from './logger.js';
 
 export type TelegramLogType =
   | 'test'
@@ -48,19 +49,11 @@ export async function logTelegramSend(
       error: options?.error ?? undefined,
     });
   } catch (err) {
-    console.error('[TELEGRAM-LOG] Error guardando log en BD:', err);
+    logger.db.error('Error guardando log Telegram en BD', err as Error);
   }
 
   const label = options?.recipientLabel || recipient;
-  const statusIcon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '⏭️';
-  const msg = `[TELEGRAM-LOG] ${new Date().toISOString()} | ${type} | ${label} | ${statusIcon} ${status}`;
-  if (status === 'success') {
-    console.log(msg);
-  } else if (status === 'failed') {
-    console.error(msg, options?.error ? `| ${options.error}` : '');
-  } else {
-    console.log(msg, options?.details ? `| ${options.details}` : '');
-  }
+  logger.telegram.telegram(type, label, status, options?.error || options?.details);
 }
 
 /**
@@ -72,10 +65,7 @@ export function logTelegramAttempt(
   options?: { recipientLabel?: string; details?: string }
 ): void {
   const label = options?.recipientLabel || recipient;
-  console.log(
-    `[TELEGRAM-LOG] ${new Date().toISOString()} | ${type} | ${label} | 📤 intentando envío`,
-    options?.details ? `| ${options.details}` : ''
-  );
+  logger.telegram.attempt(type, label, options?.details);
 }
 
 /**
