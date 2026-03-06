@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { WORKABLE_STATUSES } from '../lib/userAccess';
 import { useAuth } from '../contexts/AuthContext';
 import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw, LogIn } from 'lucide-react';
 import { format } from 'date-fns';
@@ -281,7 +282,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
       }
 
       // Actividades disponibles: subtareas que el usuario puede trabajar ahora (no bloqueadas por secuencia)
-      const workableStatuses = ['pending', 'in_progress', 'in_review', 'returned', 'assigned'];
+      const workableStatuses = [...WORKABLE_STATUSES];
       const { data: availableSubtasksData } = await supabase
         .from('subtasks')
         .select(`

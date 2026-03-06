@@ -34,8 +34,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedUser = localStorage.getItem('user');
     const impersonating = localStorage.getItem('impersonating_user') === 'true';
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      const parsed = JSON.parse(storedUser);
+      setUser(parsed);
       setIsImpersonating(impersonating);
+      // Refrescar assigned_projects desde la BD para evitar datos desactualizados
+      supabase
+        .from('users')
+        .select('assigned_projects')
+        .eq('id', parsed.id)
+        .single()
+        .then(({ data }) => {
+          if (data?.assigned_projects) {
+            const updated = { ...parsed, assigned_projects: data.assigned_projects };
+            setUser(updated);
+            localStorage.setItem('user', JSON.stringify(updated));
+          }
+        });
     }
     setLoading(false);
   }, []);

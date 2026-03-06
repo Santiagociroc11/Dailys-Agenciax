@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { getAllowedProjectIds } from "../lib/userAccess";
 import { useAuth } from "../contexts/AuthContext";
 import { format, isWithinInterval, parseISO, differenceInDays, isBefore, isAfter, addDays } from "date-fns";
 import { es } from "date-fns/locale";
@@ -281,34 +282,13 @@ export default function UserProjectView() {
 
    const allowedProjectIds = !isAdmin ? effectiveProjectIds : null;
 
-   // Efecto: para no-admin, combinar assigned_projects con proyectos de asignaciones pendientes, SOLO proyectos NO archivados
+   // Efecto: para no-admin, usar lógica centralizada de userAccess (assigned_projects + assignments + subtareas)
    useEffect(() => {
       if (!user || isAdmin) {
          setEffectiveProjectIds(null);
          return;
       }
-      const base = new Set<string>(user.assigned_projects ?? []);
-      (async () => {
-         const { data } = await supabase
-            .from("task_work_assignments")
-            .select("project_id")
-            .eq("user_id", user.id)
-            .not("status", "in", "('completed','in_review','approved')");
-         const fromAssignments = [...new Set((data || []).map((r) => r.project_id).filter(Boolean))] as string[];
-         fromAssignments.forEach((id) => base.add(id));
-         const allIds = Array.from(base);
-         if (allIds.length === 0) {
-            setEffectiveProjectIds([]);
-            return;
-         }
-         const { data: activeProjects } = await supabase
-            .from("projects")
-            .select("id")
-            .in("id", allIds)
-            .eq("is_archived", false);
-         const activeIds = (activeProjects || []).map((p) => p.id);
-         setEffectiveProjectIds(activeIds.length > 0 ? activeIds : []);
-      })();
+      getAllowedProjectIds(user.id, user.assigned_projects ?? []).then(setEffectiveProjectIds);
    }, [user?.id, user?.assigned_projects, isAdmin]);
 
    // Estados para datos principales
