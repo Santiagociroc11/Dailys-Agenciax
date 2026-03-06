@@ -21,21 +21,12 @@ function c(code: keyof typeof colors): string {
   return isTTY ? colors[code] : '';
 }
 
-function timestamp(): string {
-  return new Date().toISOString();
-}
-
 function shortTime(): string {
   const d = new Date();
   return d.toTimeString().slice(0, 8);
 }
 
 type LogLevel = 'info' | 'warn' | 'error';
-
-interface LoggerOptions {
-  prefix?: string;
-  color?: keyof typeof colors;
-}
 
 function formatMessage(level: LogLevel, prefix: string, msg: string, extra?: string): string {
   const ts = shortTime();
