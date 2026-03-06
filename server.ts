@@ -762,10 +762,31 @@ app.get('/api/telegram/log', async (req, res) => {
 
 // Servir la aplicación de React
 const clientBuildPath = path.join(__dirname, '..');
-app.use(express.static(clientBuildPath));
 
-// Servir index.html para cualquier otra ruta (manejo de rutas de React)
+// version.json SIEMPRE sin caché para que VersionUpdateChecker detecte nuevas versiones
+app.get('/version.json', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(clientBuildPath, 'version.json'));
+});
+
+// index: false para que express.static NO sirva index.html; lo servimos nosotros con headers anti-caché
+app.use(express.static(clientBuildPath, { index: false }));
+
+// Servir index.html para / y SPA rutas, con headers anti-caché para que los usuarios
+// siempre reciban la versión actual y no tengan que hacer Ctrl+Shift+R tras un deploy
+const noCacheHeaders = () => ({
+  'Cache-Control': 'no-cache, no-store, must-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+});
+app.get('/', (req, res) => {
+  Object.entries(noCacheHeaders()).forEach(([k, v]) => res.setHeader(k, v));
+  res.sendFile(path.join(clientBuildPath, 'index.html'));
+});
 app.get('*', (req, res) => {
+  Object.entries(noCacheHeaders()).forEach(([k, v]) => res.setHeader(k, v));
   res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
