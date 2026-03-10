@@ -176,7 +176,7 @@ export default function ActivityReport() {
                             : log.activity_type === 'assigned_by_admin'
                             ? 'bg-indigo-100 text-indigo-800'
                             : log.activity_type === 'completed'
-                            ? 'bg-emerald-100 text-emerald-800'
+                            ? 'bg-teal-100 text-teal-800'
                             : log.activity_type === 'approved'
                             ? 'bg-green-100 text-green-800'
                             : log.activity_type === 'returned'
