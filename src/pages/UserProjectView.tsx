@@ -3428,6 +3428,26 @@ export default function UserProjectView() {
 
          console.log(`[UNASSIGN] Desasignando tarea: ${taskId}, tipo: ${taskType}, fecha de asignación: ${assignmentDate}, originalId: ${originalId}`);
 
+         // 0. Registrar en status_history antes de eliminar
+         let taskIdForHistory: string;
+         let subtaskIdForHistory: string | null = null;
+         if (isSubtask) {
+            const { data: subData } = await supabase.from("subtasks").select("task_id").eq("id", originalId).single();
+            taskIdForHistory = subData?.task_id ?? "";
+            subtaskIdForHistory = originalId;
+         } else {
+            taskIdForHistory = originalId;
+         }
+         const historyRecord = {
+            task_id: taskIdForHistory,
+            subtask_id: subtaskIdForHistory,
+            changed_by: user.id,
+            previous_status: "assigned",
+            new_status: "unassigned_from_day",
+            metadata: { date: assignmentDate, reason: "user_removed" },
+         };
+         await supabase.from("status_history").insert([historyRecord]);
+
          // 1. Delete from task_work_assignments using the actual assignment date
          const deleteQuery = supabase.from("task_work_assignments").delete().eq("user_id", user.id).eq("date", assignmentDate).eq("task_type", taskType);
 
@@ -6614,9 +6634,9 @@ export default function UserProjectView() {
 
          {/* Modal de actualización de estado */}
          {showStatusModal && (
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
-               <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
-                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50 p-4 overflow-y-auto">
+               <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[calc(100vh-2rem)] flex flex-col my-auto">
+                  <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex justify-between items-center shrink-0">
                      <div>
                         <h3 className="text-lg font-medium flex items-center gap-2">
                            {selectedStatus === "completed" && (completedTaskItems.some((t) => t.id === selectedTaskId) || inReviewTaskItems.some((t) => t.id === selectedTaskId) || approvedTaskItems.some((t) => t.id === selectedTaskId)) ? "Editar tarea entregada" : returnedTaskItems.some((t) => t.id === selectedTaskId) ? "Actualizar tarea devuelta" : "Actualizar estado de tarea"}
@@ -6647,7 +6667,7 @@ export default function UserProjectView() {
                      </button>
                   </div>
 
-                  <div className="px-6 py-4">
+                  <div className="px-4 sm:px-6 py-4 overflow-y-auto flex-1 min-h-0">
                      {/* Panel informativo para tareas devueltas */}
                      {returnedTaskItems.some((t) => t.id === selectedTaskId) && (
                         <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
@@ -6899,7 +6919,7 @@ export default function UserProjectView() {
                      {statusError && <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-md">{statusError}</div>}
                   </div>
 
-                  <div className="px-6 py-3 bg-gray-50 flex justify-end space-x-3 border-t border-gray-200">
+                  <div className="px-4 sm:px-6 py-3 bg-gray-50 flex justify-end gap-3 border-t border-gray-200 shrink-0">
                      <button
                         onClick={() => {
                            setShowStatusModal(false);

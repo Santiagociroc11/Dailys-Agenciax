@@ -822,7 +822,7 @@ function Tasks() {
           }
           if (user?.id && createdSubtasks) {
             const subs = Array.isArray(createdSubtasks) ? createdSubtasks : [createdSubtasks];
-            for (const st of subs as { id: string; title: string }[]) {
+            for (const st of subs as { id: string; title: string; assigned_to?: string }[]) {
               await logAudit({
                 user_id: user.id,
                 entity_type: 'subtask',
@@ -830,7 +830,30 @@ function Tasks() {
                 action: 'create',
                 summary: `Subtarea creada: ${st.title}`,
               });
+              if (st.assigned_to) {
+                await supabase.from('status_history').insert([{
+                  task_id: taskId,
+                  subtask_id: st.id,
+                  changed_by: user.id,
+                  previous_status: 'pending',
+                  new_status: 'assigned_by_admin',
+                  metadata: { assigned_to: st.assigned_to },
+                }]);
+              }
             }
+          }
+        } else if (user?.id && taskId) {
+          // Tarea sin subtareas: registrar asignación si hay assigned_users
+          const assigned = finalAssignedUsers?.[0];
+          if (assigned) {
+            await supabase.from('status_history').insert([{
+              task_id: taskId,
+              subtask_id: null,
+              changed_by: user.id,
+              previous_status: 'pending',
+              new_status: 'assigned_by_admin',
+              metadata: { assigned_users: finalAssignedUsers },
+            }]);
           }
         }
 

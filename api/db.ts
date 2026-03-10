@@ -834,7 +834,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         const assignee = users[userIdx % users.length];
         userIdx++;
         const subChecklist = (s.checklist || []).map((c) => ({ id: c.id, title: c.title, checked: false, order: c.order ?? 0 }));
-        await Subtask.create({
+        const sub = await Subtask.create({
           title: s.title,
           description: s.description ?? null,
           estimated_duration: s.estimated_duration ?? 30,
@@ -846,9 +846,29 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
           status: 'pending',
           checklist: subChecklist,
         });
+        if (assignee) {
+          await StatusHistory.create({
+            task_id: task.id,
+            subtask_id: (sub as { id: string }).id,
+            changed_by: createdBy,
+            previous_status: 'pending',
+            new_status: 'assigned_by_admin',
+            metadata: { assigned_to: assignee },
+          });
+        }
       }
       if (subs.length === 0) {
         await Task.updateOne({ id: task.id }, { $set: { assigned_users: [users[0]] } }).exec();
+        if (users[0]) {
+          await StatusHistory.create({
+            task_id: task.id,
+            subtask_id: null,
+            changed_by: createdBy,
+            previous_status: 'pending',
+            new_status: 'assigned_by_admin',
+            metadata: { assigned_users: [users[0]] },
+          });
+        }
       } else {
         const subUsers = [...new Set(subs.map((_, i) => users[i % users.length]))];
         await Task.updateOne({ id: task.id }, { $set: { assigned_users: subUsers } }).exec();
@@ -1202,7 +1222,8 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
       const userMap = new Map((users as { id: string; name: string }[]).map((u) => [u.id, u]));
 
       const ACTIVITY_LABELS: Record<string, string> = {
-        assigned: 'Asignación',
+        assigned: 'Planificación del día',
+        assigned_by_admin: 'Asignación (admin)',
         in_progress: 'En progreso',
         completed: 'Entrega',
         in_review: 'En revisión',
@@ -1210,6 +1231,8 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         returned: 'Devuelto',
         blocked: 'Bloqueado',
         pending: 'Pendiente',
+        unassigned_from_day: 'Desasignado del día',
+        reassigned: 'Reasignación',
       };
 
       data = logsTyped.map((l) => {

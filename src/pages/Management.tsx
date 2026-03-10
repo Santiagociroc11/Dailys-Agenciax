@@ -1157,6 +1157,18 @@ function Management() {
           .eq('id', itemId);
 
         if (error) throw error;
+
+        // Registrar reasignación en status_history
+        if (previousUserId !== newAssigneeId && subtaskData?.task_id) {
+          await supabase.from('status_history').insert([{
+            task_id: subtaskData.task_id,
+            subtask_id: itemId,
+            changed_by: user?.id,
+            previous_status: 'assigned',
+            new_status: 'reassigned',
+            metadata: { previous_user_id: previousUserId, new_user_id: newAssigneeId },
+          }]);
+        }
       } else {
         // Para tareas principales, obtener información antes de actualizar
         const { data: currentTask, error: fetchError } = await supabase
@@ -1199,6 +1211,18 @@ function Management() {
           .eq('id', itemId);
 
         if (error) throw error;
+
+        // Registrar reasignación en status_history
+        if (previousUserId !== newAssigneeId) {
+          await supabase.from('status_history').insert([{
+            task_id: itemId,
+            subtask_id: null,
+            changed_by: user?.id,
+            previous_status: 'assigned',
+            new_status: 'reassigned',
+            metadata: { previous_user_id: previousUserId, new_user_id: newAssigneeId },
+          }]);
+        }
       }
 
       // 🗑️ Eliminar sesiones de trabajo y asignaciones del usuario anterior
@@ -2169,6 +2193,22 @@ function Management() {
       if (fetchErr) throw fetchErr;
       const toRemove = assignments && assignments.length > 0 ? assignments[0] : null;
       if (toRemove) {
+        // Registrar en status_history antes de eliminar
+        let taskIdForHistory: string | null = isSubtask ? null : itemId;
+        if (isSubtask) {
+          const { data: subDataForHistory } = await supabase.from('subtasks').select('task_id').eq('id', itemId).single();
+          taskIdForHistory = subDataForHistory?.task_id ?? null;
+        }
+        const historyRecord = {
+          task_id: taskIdForHistory,
+          subtask_id: isSubtask ? itemId : null,
+          changed_by: user?.id,
+          previous_status: 'assigned',
+          new_status: 'unassigned_from_day',
+          metadata: { date: toRemove.date, affected_user_id: userId, reason: 'admin_removed' },
+        };
+        await supabase.from('status_history').insert([historyRecord]);
+
         const { error: delErr } = await supabase
           .from('task_work_assignments')
           .delete()

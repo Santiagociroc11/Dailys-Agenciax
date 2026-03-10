@@ -5,7 +5,8 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const ACTIVITY_LABELS: Record<string, string> = {
-  assigned: 'Asignación',
+  assigned: 'Planificación del día',
+  assigned_by_admin: 'Asignación (admin)',
   in_progress: 'En progreso',
   completed: 'Entrega',
   in_review: 'En revisión',
@@ -13,6 +14,8 @@ const ACTIVITY_LABELS: Record<string, string> = {
   returned: 'Devuelto',
   blocked: 'Bloqueado',
   pending: 'Pendiente',
+  unassigned_from_day: 'Desasignado del día',
+  reassigned: 'Reasignación',
 };
 
 interface ActivityRow {
@@ -88,7 +91,7 @@ export default function ActivityReport() {
           Reporte de actividad
         </h1>
         <p className="text-gray-600 mt-1">
-          Log de asignaciones, entregas, revisiones y cambios de estado
+          Log de planificaciones del día, entregas, revisiones y cambios de estado
         </p>
       </div>
 
@@ -170,6 +173,8 @@ export default function ActivityReport() {
                         className={`px-2 py-0.5 rounded text-xs font-medium ${
                           log.activity_type === 'assigned'
                             ? 'bg-blue-100 text-blue-800'
+                            : log.activity_type === 'assigned_by_admin'
+                            ? 'bg-indigo-100 text-indigo-800'
                             : log.activity_type === 'completed'
                             ? 'bg-emerald-100 text-emerald-800'
                             : log.activity_type === 'approved'
@@ -180,6 +185,10 @@ export default function ActivityReport() {
                             ? 'bg-purple-100 text-purple-800'
                             : log.activity_type === 'blocked'
                             ? 'bg-red-100 text-red-800'
+                            : log.activity_type === 'unassigned_from_day'
+                            ? 'bg-slate-100 text-slate-700'
+                            : log.activity_type === 'reassigned'
+                            ? 'bg-cyan-100 text-cyan-800'
                             : 'bg-gray-100 text-gray-700'
                         }`}
                       >
