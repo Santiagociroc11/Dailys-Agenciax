@@ -1225,6 +1225,7 @@ export async function handleDbRpc(req: Request, res: Response): Promise<void> {
         assigned: 'Planificación del día',
         assigned_by_admin: 'Asignación (admin)',
         in_progress: 'En progreso',
+        parent_in_progress: 'Inicio por planificación',
         completed: 'Entrega',
         in_review: 'En revisión',
         approved: 'Aprobado',

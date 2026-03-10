@@ -8,6 +8,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   assigned: 'Planificación del día',
   assigned_by_admin: 'Asignación (admin)',
   in_progress: 'En progreso',
+  parent_in_progress: 'Inicio por planificación',
   completed: 'Entrega',
   in_review: 'En revisión',
   approved: 'Aprobado',
@@ -175,10 +176,14 @@ export default function ActivityReport() {
                             ? 'bg-blue-100 text-blue-800'
                             : log.activity_type === 'assigned_by_admin'
                             ? 'bg-indigo-100 text-indigo-800'
+                            : log.activity_type === 'parent_in_progress'
+                            ? 'bg-orange-100 text-orange-800'
                             : log.activity_type === 'completed'
                             ? 'bg-teal-100 text-teal-800'
                             : log.activity_type === 'approved'
                             ? 'bg-green-100 text-green-800'
+                            : log.activity_type === 'in_progress'
+                            ? 'bg-sky-100 text-sky-800'
                             : log.activity_type === 'returned'
                             ? 'bg-amber-100 text-amber-800'
                             : log.activity_type === 'in_review'

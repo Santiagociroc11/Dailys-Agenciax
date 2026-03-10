@@ -1731,14 +1731,14 @@ export default function UserProjectView() {
             } else {
                console.log("[SAVE] Tareas principales de subtareas actualizadas a 'in_progress':", updatedParentTasks);
                
-               // Registrar en historial para tareas padre
+               // Registrar en historial para tareas padre (distinto de "Reportar Avance")
                if (updatedParentTasks) {
                   const historyRecords = updatedParentTasks.map(task => ({
                      task_id: task.id,
                      subtask_id: null,
                      changed_by: user.id,
                      previous_status: 'pending',
-                     new_status: 'in_progress',
+                     new_status: 'parent_in_progress',
                      metadata: {
                         reason: 'Parent task moved to in_progress because subtasks were assigned',
                         assigned_date: today
