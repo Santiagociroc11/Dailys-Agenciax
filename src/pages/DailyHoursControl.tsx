@@ -444,7 +444,8 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
   async function fetchWeeklyTeamData(startDate: string, endDate: string) {
     setWeekLoading(true);
     try {
-      const weekDaysForFetch = getWeekDays(new Date(startDate));
+      const [y, m, d] = startDate.split('-').map(Number);
+      const weekDaysForFetch = getWeekDays(new Date(y, m - 1, d));
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
       const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
 
@@ -591,7 +592,8 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
   async function fetchWeeklyTeamGanttData(startDate: string, endDate: string) {
     setWeekLoading(true);
     try {
-      const weekDaysForFetch = getWeekDays(new Date(startDate));
+      const [y, m, d] = startDate.split('-').map(Number);
+      const weekDaysForFetch = getWeekDays(new Date(y, m - 1, d));
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
       const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
       const filterByProject = (projectId: string | null) =>

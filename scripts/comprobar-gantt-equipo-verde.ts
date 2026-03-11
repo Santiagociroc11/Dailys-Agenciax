@@ -38,12 +38,10 @@ const startISO = new Date(startDate + 'T00:00:00').toISOString();
 const endISO = new Date(endDate + 'T23:59:59.999').toISOString();
 
 const weekDays = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
-function getWeekDays(baseDate: Date): { dateStr: string; dayShort: string }[] {
-  const d = new Date(baseDate);
-  const day = d.getDay();
-  const mondayOffset = day === 0 ? -6 : -(day - 1);
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + mondayOffset);
+/** Parsea startDate (YYYY-MM-DD) como fecha local para evitar bugs de timezone con new Date(string). */
+function getWeekDaysFromStart(startDate: string): { dateStr: string; dayShort: string }[] {
+  const [y, m, d] = startDate.split('-').map(Number);
+  const monday = new Date(y, m - 1, d);
   const result: { dateStr: string; dayShort: string }[] = [];
   for (let i = 0; i < 7; i++) {
     const dayDate = new Date(monday);
@@ -64,7 +62,7 @@ async function main() {
   console.log(`startISO: ${startISO}`);
   console.log(`endISO: ${endISO}\n`);
 
-  const weekDaysForFetch = getWeekDays(new Date(startDate));
+  const weekDaysForFetch = getWeekDaysFromStart(startDate);
 
   // 1. Proyectos activos
   const activeProjects = await Project.find({ is_archived: false }).select('id').lean().exec();
@@ -247,7 +245,69 @@ async function main() {
     }
   }
 
-  console.log('\n--- 5. RESUMEN ---');
+  // 8. Simular executedTimeData como el frontend (para verificar estructura)
+  console.log('\n--- 6. ESTRUCTURA executedTimeData (como GanttDayCell la espera) ---');
+  const byUserTaskGroups = new Map<string, Map<string, { id: string; sessions: Record<string, unknown[]> }>>();
+  for (const a of filterAssignments) {
+    const taskData = a.task_type === 'subtask' ? a.subtasks : a.tasks;
+    if (!taskData) continue;
+    const aRefId = a.task_type === 'subtask' ? a.subtask_id : a.task_id;
+    if (!aRefId) continue;
+    const taskKey = `${a.task_type}-${aRefId}`;
+    const dateStr = a.date;
+    if (!byUserTaskGroups.has(a.user_id)) {
+      byUserTaskGroups.set(a.user_id, new Map());
+    }
+    const userTg = byUserTaskGroups.get(a.user_id)!;
+    if (!userTg.has(taskKey)) {
+      userTg.set(taskKey, { id: taskKey, sessions: {} });
+    }
+    const tg = userTg.get(taskKey)!;
+    if (!tg.sessions[dateStr]) tg.sessions[dateStr] = [];
+    tg.sessions[dateStr].push({ id: a.id });
+  }
+
+  let sampleCount = 0;
+  for (const u of userList) {
+    const userTg = byUserTaskGroups.get(u.id);
+    const userSessions = sessionsByUserTask[u.id] || {};
+    if (!userTg || userTg.size === 0) continue;
+    if (sampleCount >= 3) break; // Solo 3 usuarios de muestra
+    sampleCount++;
+
+    const executedTimeData: Record<string, Record<string, number>> = {};
+    for (const [taskKey, tg] of userTg) {
+      executedTimeData[tg.id] = {};
+      for (const day of weekDaysForFetch) {
+        const fromWs = userSessions[tg.id]?.[day.dateStr]?.reduce((s, x) => s + (x.duration_minutes ?? 0), 0) ?? 0;
+        if (fromWs > 0) executedTimeData[tg.id][day.dateStr] = fromWs;
+      }
+    }
+
+    const wsKeys = Object.keys(userSessions);
+    console.log(`\n${u.name} (ejemplo executedTimeData):`);
+    console.log(`  userSessions keys (taskKeys con WS): ${wsKeys.length > 0 ? wsKeys.slice(0, 3).join(', ') + (wsKeys.length > 3 ? '...' : '') : 'ninguna'}`);
+    for (const [taskKey, byDate] of Object.entries(executedTimeData)) {
+      const daysWithData = Object.entries(byDate).filter(([, m]) => m > 0);
+      const tg = userTg.get(taskKey);
+      const sessionDates = tg ? Object.keys(tg.sessions) : [];
+      if (daysWithData.length === 0) {
+        const hasWs = wsKeys.includes(taskKey);
+        if (hasWs) {
+          const rawDates = userSessions[taskKey] ? Object.keys(userSessions[taskKey]) : [];
+          console.log(`  ${taskKey}: SIN datos en executedTimeData (pero tiene WS en fechas: ${rawDates.join(', ')})`);
+        }
+        continue;
+      }
+      console.log(`  ${taskKey}:`);
+      for (const [dateStr, mins] of daysWithData) {
+        const hasSession = sessionDates.includes(dateStr);
+        console.log(`    ${dateStr}: ${mins}min (${(mins / 60).toFixed(1)}h) | ¿session planificada? ${hasSession ? 'SÍ' : 'NO'}`);
+      }
+    }
+  }
+
+  console.log('\n--- 7. RESUMEN ---');
   if (matchedByAssignId === 0 && sessionList.length > 0) {
     console.log('PROBLEMA: Ninguna work_session tiene assignment_id que coincida con assignments de la semana.');
     console.log('  Las work_sessions son de asignaciones de OTRAS semanas (retrabajo).');
