@@ -626,13 +626,25 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           .from('work_sessions')
           .select(`
             id, assignment_id, duration_minutes, created_at,
-            task_work_assignments!inner(id, user_id, task_id, subtask_id, task_type, date, project_id)
+            task_work_assignments!inner(
+              id, user_id, task_id, subtask_id, task_type, date, project_id,
+              tasks(id, title, project_id, projects(name)),
+              subtasks(id, title, task_id, tasks(id, title, projects(name)))
+            )
           `)
-          .gte('createdAt', startISO)
-          .lte('createdAt', endISO),
+          .gte('created_at', startISO)
+          .lte('created_at', endISO),
       ]);
 
-      if (assignErr) throw assignErr;
+      if (assignErr) {
+        console.error('❌ GANTT: Error fetching assignments:', assignErr);
+        throw assignErr;
+      }
+      if (eventsErr) console.error('⚠️ GANTT: Error fetching work events:', eventsErr);
+      if (sessionsErr) console.error('⚠️ GANTT: Error fetching work sessions:', sessionsErr);
+
+      console.log(`📊 GANTT DEBUG: Raw assignments fetched: ${assignments?.length || 0}`);
+      console.log(`📊 GANTT DEBUG: Raw work sessions fetched: ${workSessions?.length || 0}`);
 
       const filterAssignments = (assignments || []).filter((a: { project_id?: string | null }) =>
         filterByProject(a.project_id)
@@ -721,9 +733,17 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         task_work_assignments?: { user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null };
       }>;
       const sessionsByUserTask: Record<string, Record<string, Record<string, Array<{ duration_minutes?: number }>>>> = {};
+      console.log(`📊 GANTT DEBUG: sessionList processing complete. Total sessions found: ${sessionList.length}`);
       sessionList.forEach((s) => {
         const assign = s.task_work_assignments;
-        if (!assign || !filterByProject(assign.project_id)) return;
+        if (!assign) {
+           console.log('⚠️ GANTT DEBUG: Session has no task_work_assignments:', s.id);
+           return;
+        }
+        if (!filterByProject(assign.project_id)) {
+           // console.log('⚠️ GANTT DEBUG: Session filtered out by project:', assign.project_id);
+           return;
+        }
         const taskKey = `${assign.task_type}-${assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id}`;
         const sessionDate = (s.createdAt || s.created_at)
           ? format(new Date(s.createdAt || s.created_at), 'yyyy-MM-dd')
@@ -736,14 +756,44 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         sessionsByUserTask[assign.user_id][taskKey][sessionDate].push({
           duration_minutes: s.duration_minutes ?? 0,
         });
+
+        // ✅ NUEVO: Asegurarse de que la tarea esté en byUser.taskGroups para el usuario
+        const entry = byUser.get(assign.user_id);
+        if (entry && !entry.taskGroups[taskKey]) {
+          const twa = assign as any;
+          const taskData = twa.tasks || twa.subtasks;
+          if (taskData) {
+            let projectName = '';
+            let parentTaskTitle = '';
+            if (twa.task_type === 'subtask' && taskData.tasks) {
+              parentTaskTitle = taskData.tasks.title;
+              projectName = taskData.tasks.projects?.name || '';
+            } else if (twa.task_type === 'task' && taskData.projects) {
+              projectName = taskData.projects.name || '';
+            }
+            entry.taskGroups[taskKey] = {
+              id: taskKey,
+              title: taskData.title,
+              type: twa.task_type || 'task',
+              project_name: projectName,
+              parent_task_title: parentTaskTitle,
+              estimated_duration: taskData.estimated_duration,
+              sessions: {},
+            };
+          }
+        }
       });
+      console.log('📊 GANTT DEBUG: sessionsByUserTask users:', Object.keys(sessionsByUserTask).map(uid => userList.find(u => u.id === uid)?.name));
 
       const result: TeamGanttUserData[] = userList.map((u) => {
         const taskGroups = Object.values(byUser.get(u.id)!.taskGroups);
         taskGroups.forEach((tg) => {
           const taskKey = tg.id;
           const ws = sessionsByUserTask[u.id]?.[taskKey];
-          if (ws) tg.workSessions = ws;
+          if (ws) {
+            tg.workSessions = ws;
+            // console.log(`✅ GANTT DEBUG: Attached workSessions to task ${tg.title} for user ${u.userName}`);
+          }
         });
 
         const executedTimeData: Record<string, Record<string, number>> = {};
@@ -805,6 +855,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         };
       });
 
+      console.log('📊 GANTT DEBUG: Rendering result users:', result.length);
       setWeekGanttData(result);
     } catch (e) {
       console.error('Error fetching weekly team Gantt:', e);
