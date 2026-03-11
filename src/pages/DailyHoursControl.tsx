@@ -645,18 +645,6 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
 
       console.log(`📊 GANTT DEBUG: Raw assignments fetched: ${assignments?.length || 0}`);
       console.log(`📊 GANTT DEBUG: Raw work sessions fetched: ${workSessions?.length || 0}`);
-      if (sessionsErr) console.log('📊 GANTT DEBUG: sessionsErr:', sessionsErr);
-      if (workSessions?.length) {
-        const first = workSessions[0] as Record<string, unknown>;
-        console.log('📊 GANTT DEBUG: First session keys:', Object.keys(first));
-        console.log('📊 GANTT DEBUG: First session task_work_assignments type:', Array.isArray(first?.task_work_assignments) ? 'array' : typeof first?.task_work_assignments);
-        const twa = first?.task_work_assignments;
-        const assign = Array.isArray(twa) ? twa[0] : twa;
-        if (assign && typeof assign === 'object') {
-          console.log('📊 GANTT DEBUG: First assign keys:', Object.keys(assign as object));
-          console.log('📊 GANTT DEBUG: First assign task_type, task_id, subtask_id:', (assign as Record<string, unknown>).task_type, (assign as Record<string, unknown>).task_id, (assign as Record<string, unknown>).subtask_id);
-        }
-      }
 
       const filterAssignments = (assignments || []).filter((a: { project_id?: string | null }) =>
         filterByProject(a.project_id)
@@ -668,8 +656,8 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
       const byUser = new Map<string, { taskGroups: Record<string, GanttTaskGroup> }>();
       userList.forEach((u) => byUser.set(u.id, { taskGroups: {} }));
 
-      const assignmentTaskKeysByUser = new Map<string, Set<string>>();
-      filterAssignments.forEach((a: { user_id: string; task_type?: string; task_id?: string; subtask_id?: string; date: string; tasks?: { title: string; projects?: { name: string } }; subtasks?: { title: string; projects?: { name: string } } }; project_id?: string | null }) => {
+      const assignmentIdToUserAndTaskKey = new Map<string, { user_id: string; taskKey: string }>();
+      filterAssignments.forEach((a: { id?: string; user_id: string; task_type?: string; task_id?: string; subtask_id?: string; date: string; tasks?: unknown; subtasks?: unknown; project_id?: string | null }) => {
         const entry = byUser.get(a.user_id);
         if (!entry || !filterByProject(a.project_id)) return;
         const taskData = a.task_type === 'subtask' ? a.subtasks : a.tasks;
@@ -677,8 +665,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         const aRefId = a.task_type === 'subtask' ? a.subtask_id : a.task_id;
         if (!aRefId) return;
         const taskKey = `${a.task_type}-${aRefId}`;
-        if (!assignmentTaskKeysByUser.has(a.user_id)) assignmentTaskKeysByUser.set(a.user_id, new Set());
-        assignmentTaskKeysByUser.get(a.user_id)!.add(taskKey);
+        if (a.id) assignmentIdToUserAndTaskKey.set(a.id, { user_id: a.user_id, taskKey });
         if (!entry.taskGroups[taskKey]) {
           let projectName = '';
           let parentTaskTitle = '';
@@ -759,25 +746,27 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
            return;
         }
         if (!filterByProject(assign.project_id)) {
-           // console.log('⚠️ GANTT DEBUG: Session filtered out by project:', assign.project_id);
            return;
         }
-        const refId = assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id;
-        if (!refId) return;
-        const taskKey = `${assign.task_type}-${refId}`;
+        const mapped = assignmentIdToUserAndTaskKey.get(s.assignment_id);
+        const user_id = mapped?.user_id ?? assign.user_id;
+        const taskKey = mapped?.taskKey ?? (() => {
+          const refId = assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id;
+          return refId ? `${assign.task_type}-${refId}` : null;
+        })();
+        if (!taskKey) return;
         const created = (s as { createdAt?: string; created_at?: string }).createdAt ?? (s as { createdAt?: string; created_at?: string }).created_at;
         const sessionDate = created ? format(new Date(created), 'yyyy-MM-dd') : assign.date;
-        if (!sessionsByUserTask[assign.user_id]) sessionsByUserTask[assign.user_id] = {};
-        if (!sessionsByUserTask[assign.user_id][taskKey]) sessionsByUserTask[assign.user_id][taskKey] = {};
-        if (!sessionsByUserTask[assign.user_id][taskKey][sessionDate]) {
-          sessionsByUserTask[assign.user_id][taskKey][sessionDate] = [];
+        if (!sessionsByUserTask[user_id]) sessionsByUserTask[user_id] = {};
+        if (!sessionsByUserTask[user_id][taskKey]) sessionsByUserTask[user_id][taskKey] = {};
+        if (!sessionsByUserTask[user_id][taskKey][sessionDate]) {
+          sessionsByUserTask[user_id][taskKey][sessionDate] = [];
         }
-        sessionsByUserTask[assign.user_id][taskKey][sessionDate].push({
+        sessionsByUserTask[user_id][taskKey][sessionDate].push({
           duration_minutes: s.duration_minutes ?? 0,
         });
 
-        // ✅ NUEVO: Asegurarse de que la tarea esté en byUser.taskGroups para el usuario
-        const entry = byUser.get(assign.user_id);
+        const entry = byUser.get(user_id);
         if (entry && !entry.taskGroups[taskKey]) {
           const twa = assign as any;
           const taskData = twa.tasks || twa.subtasks;
@@ -803,37 +792,16 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         }
       });
       console.log('📊 GANTT DEBUG: sessionsByUserTask users:', Object.keys(sessionsByUserTask).map(uid => userList.find(u => u.id === uid)?.name));
-      for (const [uid, assignKeys] of assignmentTaskKeysByUser) {
-        const wsKeys = sessionsByUserTask[uid] ? Object.keys(sessionsByUserTask[uid]) : [];
-        const match = [...assignKeys].filter(k => wsKeys.includes(k));
-        const noMatch = [...assignKeys].filter(k => !wsKeys.includes(k));
-        if (assignKeys.size > 0) {
-          console.log(`📊 GANTT DEBUG: taskKey match [${userList.find(u => u.id === uid)?.name}]: assign=${assignKeys.size} ws=${wsKeys.length} match=${match.length} noMatch=${noMatch.slice(0, 3).join(',')}`);
-        }
-      }
-      for (const [uid, byTask] of Object.entries(sessionsByUserTask)) {
-        const uname = userList.find(u => u.id === uid)?.name || uid.slice(0, 8);
-        const taskKeys = Object.keys(byTask);
-        console.log(`📊 GANTT DEBUG: sessionsByUserTask[${uname}] taskKeys:`, taskKeys);
-        for (const tk of taskKeys.slice(0, 2)) {
-          const dates = Object.keys(byTask[tk]);
-          const mins = Object.values(byTask[tk]).flat().reduce((s, x) => s + (x.duration_minutes ?? 0), 0);
-          console.log(`  - ${tk}: dates=${dates.join(',')} totalMin=${mins}`);
-        }
-      }
 
       const result: TeamGanttUserData[] = userList.map((u) => {
         const taskGroups = Object.values(byUser.get(u.id)!.taskGroups);
-        let attachedCount = 0;
         taskGroups.forEach((tg) => {
           const taskKey = tg.id;
           const ws = sessionsByUserTask[u.id]?.[taskKey];
           if (ws) {
             tg.workSessions = ws;
-            attachedCount++;
           }
         });
-        if (attachedCount > 0) console.log(`📊 GANTT DEBUG: Attached workSessions for ${u.name}: ${attachedCount} tasks`);
 
         const executedTimeData: Record<string, Record<string, number>> = {};
         for (const tg of taskGroups) {
