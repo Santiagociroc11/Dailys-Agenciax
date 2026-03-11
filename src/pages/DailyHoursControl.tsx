@@ -755,11 +755,17 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         for (const tg of taskGroups) {
           executedTimeData[tg.id] = {};
           for (const day of weekDaysForFetch) {
-            if (tg.workSessions?.[day.dateStr]) {
+            if (tg.type === 'event') {
+              const sess = tg.sessions[day.dateStr] || [];
+              const total = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
+              executedTimeData[tg.id][day.dateStr] = total;
+            } else if (tg.workSessions?.[day.dateStr]) {
               const total = tg.workSessions[day.dateStr].reduce((s, x) => s + (x.duration_minutes ?? 0), 0);
               executedTimeData[tg.id][day.dateStr] = total;
             } else {
-              executedTimeData[tg.id][day.dateStr] = 0;
+              const sess = tg.sessions[day.dateStr] || [];
+              const fromActual = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
+              executedTimeData[tg.id][day.dateStr] = fromActual;
             }
           }
         }
