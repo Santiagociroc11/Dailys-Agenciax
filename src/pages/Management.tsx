@@ -292,7 +292,8 @@ function Management() {
     approvedPercentage: number;
     completedAndApprovedPercentage: number;
   })[]>([]);
-  const [reviewSubTab, setReviewSubTab] = useState<'ready_for_review' | 'in_review' | 'blocked'>('ready_for_review');
+  const [reviewSubTab, setReviewSubTab] = useState<'ready_for_review' | 'in_review' | 'blocked' | 'approved'>('ready_for_review');
+  const [propagateToPreviousLevel, setPropagateToPreviousLevel] = useState(false);
   
   // Estados para los modales
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -618,8 +619,9 @@ function Management() {
     // Validar transiciones permitidas
     const allowedTransitions: Record<string, string[]> = {
       'completed': ['in_review'],
-      'blocked': ['pending'], // <-- CAMBIO: De 'assigned' a 'pending'
-      'in_review': ['returned', 'approved', 'completed']
+      'blocked': ['pending'],
+      'in_review': ['returned', 'approved', 'completed'],
+      'approved': ['returned'] // Reversión de aprobación (corregir tarea mal revisada)
     };
     
     // Verificar si la transición está permitida
@@ -1080,12 +1082,21 @@ function Management() {
         }
       }
 
+      // Si se revirtió una subtarea aprobada (approved → returned), revertir tarea padre si aplica
+      if (isSubtask && newStatus === 'returned' && previousStatus === 'approved') {
+        const parentTaskId = (resolvedData as Subtask)?.task_id;
+        if (parentTaskId) {
+          await checkAndRevertParentTaskIfNeeded(parentTaskId);
+        }
+      }
+
       // Cerrar modales
       setShowFeedbackModal(false);
       setShowApprovalModal(false);
       setSelectedItem(null);
       setFeedback('');
       setRating(5);
+      setPropagateToPreviousLevel(false);
       
     } catch (error) {
       console.error('Error al actualizar estado:', error);
@@ -1779,6 +1790,55 @@ function Management() {
     }
   }
 
+  // Revertir tarea padre a in_review cuando se revierte una subtarea aprobada
+  async function checkAndRevertParentTaskIfNeeded(parentId: string) {
+    try {
+      const { data: parentTask, error: parentError } = await supabase
+        .from('tasks')
+        .select('status')
+        .eq('id', parentId)
+        .single();
+
+      if (parentError || !parentTask || parentTask.status !== 'approved') return;
+
+      const { data: subtasks, error: subError } = await supabase
+        .from('subtasks')
+        .select('status')
+        .eq('task_id', parentId);
+
+      if (subError) return;
+
+      const allApproved = subtasks!.every(s => s.status === 'approved');
+      if (allApproved) return;
+
+      const { error: updateError } = await supabase
+        .from('tasks')
+        .update({ status: 'in_review' })
+        .eq('id', parentId);
+
+      if (updateError) throw updateError;
+
+      const historyRecord = {
+        task_id: parentId,
+        subtask_id: null,
+        changed_by: user!.id,
+        previous_status: 'approved',
+        new_status: 'in_review',
+        metadata: { reason: 'Subtask approval reverted.', triggering_action: 'subtask_approval_reverted' },
+      };
+
+      await supabase.from('status_history').insert([historyRecord]);
+
+      setTasks(prev => prev.map(task =>
+        task.id === parentId ? { ...task, status: 'in_review' as const } : task
+      ));
+
+      console.log(`✅ [REVERT] Tarea padre ${parentId} revertida a in_review.`);
+    } catch (e) {
+      console.error(`Error checking and reverting parent task ${parentId}:`, e);
+    }
+  }
+
   // Función para verificar y notificar sobre dependencias secuenciales disponibles
   async function checkAndNotifySequentialDependencies(taskId: string, approvedSequenceOrder: number | null) {
     try {
@@ -1885,7 +1945,7 @@ function Management() {
   }
 
   // Función para manejar el envío del formulario de retroalimentación
-  function handleFeedbackSubmit(e: React.FormEvent) {
+  async function handleFeedbackSubmit(e: React.FormEvent) {
     e.preventDefault();
     
     if (!selectedItem) return;
@@ -1910,7 +1970,25 @@ function Management() {
     
     // Si es 'returned', configuramos para que vuelva a aparecer como pendiente
     if (targetStatus === 'returned') {
-      updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData, updateData);
+      // Propagación: si la causa está en el nivel anterior, devolver primero esas subtareas
+      if (propagateToPreviousLevel && selectedItem.type === 'subtask') {
+        const st = subtasks.find(s => s.id === selectedItem.id);
+        const parentTask = tasks.find(t => t.id === st?.task_id);
+        const currentOrder = st?.sequence_order ?? 0;
+        if (parentTask?.is_sequential && currentOrder > 1) {
+          const prevLevelSubtasks = subtasks.filter(s =>
+            s.task_id === st!.task_id &&
+            s.sequence_order === currentOrder - 1 &&
+            s.status === 'approved'
+          );
+          for (const prevSt of prevLevelSubtasks) {
+            await updateItemStatus(prevSt.id, 'returned', true, feedbackData, updateData);
+            updateTaskWorkAssignment(prevSt.id, 'subtask');
+          }
+        }
+      }
+
+      await updateItemStatus(selectedItem.id, targetStatus, selectedItem.type === 'subtask', feedbackData, updateData);
       
       // Actualizar también el task_work_assignment para que aparezca como pendiente de nuevo
       updateTaskWorkAssignment(selectedItem.id, selectedItem.type === 'subtask' ? 'subtask' : 'task');
@@ -2600,6 +2678,20 @@ function Management() {
                                     Aprobar
                                   </button>
                                 </div>
+                              ) : subtask.status === 'approved' ? (
+                                <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
+                                  <button
+                                    className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStatusChange(subtask.id, 'returned', true);
+                                    }}
+                                    title="Revertir aprobación (corregir tarea mal revisada)"
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5 mr-1" />
+                                    Revertir aprobación
+                                  </button>
+                                </div>
                               ) : subtask.status === 'assigned' ? (
                                 <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
                                   <button
@@ -2761,6 +2853,20 @@ function Management() {
                                 >
                                   <CheckCircle className="w-2.5 h-2.5 mr-1" />
                                   Aprobar
+                                </button>
+                              </div>
+                            ) : task.status === 'approved' ? (
+                              <div className="mt-2 flex flex-wrap gap-2 border-t pt-1.5">
+                                <button
+                                  className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded-md flex items-center"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStatusChange(task.id, 'returned', false);
+                                  }}
+                                  title="Revertir aprobación (corregir tarea mal revisada)"
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5 mr-1" />
+                                  Revertir aprobación
                                 </button>
                               </div>
                             ) : task.status === 'assigned' ? (
@@ -3241,6 +3347,9 @@ function Management() {
     const blockedTasks = tasks.filter(task => task.status === 'blocked');
     const blockedSubtasks = subtasks.filter(subtask => subtask.status === 'blocked');
 
+    const approvedTasks = tasks.filter(task => task.status === 'approved');
+    const approvedSubtasks = subtasks.filter(subtask => subtask.status === 'approved');
+
     // Function to group items by area
     const groupItemsByArea = (tasksToGroup: Task[], subtasksToGroup: Subtask[]) => {
       const grouped: { [areaId: string]: { area: Area | null, tasks: Task[], subtasks: Subtask[] } } = {};
@@ -3399,9 +3508,11 @@ function Management() {
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
                         item.status === 'blocked' 
                           ? 'bg-red-100 text-red-800 border border-red-200' 
-                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : item.status === 'approved'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                       }`}>
-                        {item.status === 'blocked' ? '🚫 Bloqueada' : '✅ Completada'}
+                        {item.status === 'blocked' ? '🚫 Bloqueada' : item.status === 'approved' ? '✅ Aprobada' : '✅ Completada'}
                       </span>
                     </td>
 
@@ -3582,6 +3693,19 @@ function Management() {
                             </button>
                           </>
                         )}
+                        {reviewSubTab === 'approved' && (
+                          <button
+                            className="text-sm font-medium px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-2 shadow-sm hover:shadow-md"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStatusChange(item.id, 'returned', isSubtask);
+                            }}
+                            title="Revertir aprobación (corregir tarea mal revisada)"
+                          >
+                            <AlertTriangle className="w-4 h-4" />
+                            Revertir aprobación
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -3655,6 +3779,26 @@ function Management() {
                     : 'bg-gray-100 text-gray-600'
                 }`}>
                   {blockedTasks.length + blockedSubtasks.length}
+                </span>
+              </div>
+            </button>
+            <button
+              onClick={() => setReviewSubTab('approved')}
+              className={`relative px-8 py-4 text-sm font-semibold transition-all duration-300 ${
+                reviewSubTab === 'approved'
+                  ? 'text-emerald-600 bg-emerald-50 border-b-2 border-emerald-500'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5" />
+                <span>Aprobadas</span>
+                <span className={`px-2.5 py-1 text-xs font-bold rounded-full transition-all duration-300 ${
+                  reviewSubTab === 'approved' 
+                    ? 'bg-emerald-100 text-emerald-800 shadow-md' 
+                    : 'bg-gray-100 text-gray-600'
+                }`}>
+                  {approvedTasks.length + approvedSubtasks.length}
                 </span>
               </div>
             </button>
@@ -3811,7 +3955,7 @@ function Management() {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : reviewSubTab === 'blocked' ? (
             <div className="max-w-8xl mx-auto">
               <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
                 {/* Header de sección */}
@@ -3864,6 +4008,79 @@ function Management() {
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                                {group.tasks.length + group.subtasks.length}
+                              </span>
+                              <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
+                                expandedAreas.has(areaId) ? 'rotate-180' : ''
+                              }`} />
+                            </div>
+                          </button>
+                          
+                          {/* Area Content */}
+                          {expandedAreas.has(areaId) && (
+                            <div className="p-4">
+                              {renderTasksTable(group)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-8xl mx-auto">
+              <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+                {/* Header de sección - Aprobadas */}
+                <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-white/20 rounded-xl">
+                      <CheckCircle className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">Actividades Aprobadas</h3>
+                      <p className="text-emerald-100 mt-1">
+                        {approvedTasks.length + approvedSubtasks.length} actividades aprobadas. Puedes revertir si detectas un error de revisión.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="p-6">
+                  {approvedTasks.length === 0 && approvedSubtasks.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full blur-3xl opacity-20 animate-pulse"></div>
+                        <CheckCircle className="relative w-20 h-20 mx-auto mb-6 text-emerald-400" />
+                      </div>
+                      <h4 className="text-2xl font-bold text-gray-800 mb-2">No hay actividades aprobadas</h4>
+                      <p className="text-gray-600 text-lg">Las actividades aprobadas aparecerán aquí para poder revertir si es necesario.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {groupItemsByArea(approvedTasks, approvedSubtasks).map(([areaId, group]) => (
+                        <div key={areaId} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                          {/* Area Header */}
+                          <button
+                            onClick={() => toggleAreaExpansion(areaId)}
+                            className="w-full p-4 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-150 transition-all duration-200 flex items-center justify-between border-b border-gray-200"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-emerald-100 rounded-lg">
+                                <Users className="w-5 h-5 text-emerald-600" />
+                              </div>
+                              <div className="text-left">
+                                <h4 className="font-semibold text-gray-900">
+                                  {group.area?.name || '📋 Sin Área Asignada'}
+                                </h4>
+                                <p className="text-sm text-gray-500">
+                                  {group.tasks.length + group.subtasks.length} actividades aprobadas
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium">
                                 {group.tasks.length + group.subtasks.length}
                               </span>
                               <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${
@@ -4209,7 +4426,15 @@ function Management() {
       </div>
 
       {/* Modal de retroalimentación para devolver tarea */}
-      {showFeedbackModal && (
+      {showFeedbackModal && (() => {
+        const st = selectedItem?.type === 'subtask' ? subtasks.find(s => s.id === selectedItem.id) : null;
+        const parentTask = st ? tasks.find(t => t.id === st.task_id) : null;
+        const currentOrder = st?.sequence_order ?? 0;
+        const prevLevelApproved = st && parentTask?.is_sequential && currentOrder > 1
+          ? subtasks.filter(s => s.task_id === st.task_id && s.sequence_order === currentOrder - 1 && s.status === 'approved')
+          : [];
+        const showPropagateCheckbox = prevLevelApproved.length > 0;
+        return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h3 className="text-xl font-semibold mb-4">Retroalimentación para devolución</h3>
@@ -4228,12 +4453,29 @@ function Management() {
                 />
               </div>
 
+              {showPropagateCheckbox && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={propagateToPreviousLevel}
+                      onChange={(e) => setPropagateToPreviousLevel(e.target.checked)}
+                      className="mt-1"
+                    />
+                    <span className="text-sm text-amber-900">
+                      La causa del bloqueo está en el nivel anterior. Devolver también las {prevLevelApproved.length} subtarea(s) del nivel anterior.
+                    </span>
+                  </label>
+                </div>
+              )}
+
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
                   onClick={() => {
                     setShowFeedbackModal(false);
                     setSelectedItem(null);
+                    setPropagateToPreviousLevel(false);
                   }}
                   className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
                 >
@@ -4249,7 +4491,8 @@ function Management() {
             </form>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Modal de aprobación con calificación */}
       {showApprovalModal && (
