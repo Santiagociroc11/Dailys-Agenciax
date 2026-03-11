@@ -665,7 +665,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         const aRefId = a.task_type === 'subtask' ? a.subtask_id : a.task_id;
         if (!aRefId) return;
         const taskKey = `${a.task_type}-${aRefId}`;
-        if (a.id) assignmentIdToUserAndTaskKey.set(a.id, { user_id: a.user_id, taskKey });
+        if (a.id) assignmentIdToUserAndTaskKey.set(String(a.id), { user_id: a.user_id, taskKey });
         if (!entry.taskGroups[taskKey]) {
           let projectName = '';
           let parentTaskTitle = '';
@@ -748,11 +748,15 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         if (!filterByProject(assign.project_id)) {
            return;
         }
-        const mapped = assignmentIdToUserAndTaskKey.get(s.assignment_id);
-        const user_id = mapped?.user_id ?? assign.user_id;
+        const assignId = String(s.assignment_id || (assign as { id?: string }).id || '');
+        const mapped = assignmentIdToUserAndTaskKey.get(assignId);
+        const user_id = mapped?.user_id ?? (assign as { user_id?: string }).user_id;
         const taskKey = mapped?.taskKey ?? (() => {
-          const refId = assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id;
-          return refId ? `${assign.task_type}-${refId}` : null;
+          const refId = (assign as { task_type?: string; subtask_id?: string; task_id?: string }).task_type === 'subtask'
+            ? (assign as { subtask_id?: string }).subtask_id ?? (assign as { subtasks?: { id?: string } }).subtasks?.id
+            : (assign as { task_id?: string }).task_id ?? (assign as { tasks?: { id?: string } }).tasks?.id;
+          const t = (assign as { task_type?: string }).task_type;
+          return refId && t ? `${t}-${refId}` : null;
         })();
         if (!taskKey) return;
         const created = (s as { createdAt?: string; created_at?: string }).createdAt ?? (s as { createdAt?: string; created_at?: string }).created_at;
@@ -791,16 +795,22 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           }
         }
       });
+      const matchedCount = sessionList.filter((s) => {
+        const rawAssign = s.task_work_assignments;
+        const assign = Array.isArray(rawAssign) ? rawAssign[0] : rawAssign;
+        if (!assign) return false;
+        const assignId = String(s.assignment_id || (assign as { id?: string }).id || '');
+        return assignmentIdToUserAndTaskKey.has(assignId);
+      }).length;
+      console.log(`📊 GANTT DEBUG: assignmentId map size=${assignmentIdToUserAndTaskKey.size} work_sessions matched=${matchedCount}/${sessionList.length}`);
       console.log('📊 GANTT DEBUG: sessionsByUserTask users:', Object.keys(sessionsByUserTask).map(uid => userList.find(u => u.id === uid)?.name));
 
       const result: TeamGanttUserData[] = userList.map((u) => {
         const taskGroups = Object.values(byUser.get(u.id)!.taskGroups);
+        const userSessions = sessionsByUserTask[u.id] || {};
         taskGroups.forEach((tg) => {
-          const taskKey = tg.id;
-          const ws = sessionsByUserTask[u.id]?.[taskKey];
-          if (ws) {
-            tg.workSessions = ws;
-          }
+          const ws = userSessions[tg.id];
+          if (ws) tg.workSessions = ws;
         });
 
         const executedTimeData: Record<string, Record<string, number>> = {};
@@ -809,15 +819,15 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           for (const day of weekDaysForFetch) {
             if (tg.type === 'event') {
               const sess = tg.sessions[day.dateStr] || [];
-              const total = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
-              executedTimeData[tg.id][day.dateStr] = total;
-            } else if (tg.workSessions?.[day.dateStr]) {
-              const total = tg.workSessions[day.dateStr].reduce((s, x) => s + (x.duration_minutes ?? 0), 0);
-              executedTimeData[tg.id][day.dateStr] = total;
+              executedTimeData[tg.id][day.dateStr] = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
             } else {
-              const sess = tg.sessions[day.dateStr] || [];
-              const fromActual = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
-              executedTimeData[tg.id][day.dateStr] = fromActual;
+              const fromWs = userSessions[tg.id]?.[day.dateStr]?.reduce((s, x) => s + (x.duration_minutes ?? 0), 0) ?? 0;
+              if (fromWs > 0) {
+                executedTimeData[tg.id][day.dateStr] = fromWs;
+              } else {
+                const sess = tg.sessions[day.dateStr] || [];
+                executedTimeData[tg.id][day.dateStr] = sess.reduce((s, x) => s + (x.actual_duration ?? 0), 0);
+              }
             }
           }
         }
