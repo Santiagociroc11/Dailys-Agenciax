@@ -407,7 +407,14 @@ function Management() {
         return (u?.name || u?.email || '').toLowerCase();
       }).join(' ');
       const matchAssignee = assigneeStr.includes(term);
-      if (matchTitle || matchProject || matchAssignee) {
+      // Para tareas con subtareas: buscar también por asignados de las subtareas
+      const taskSubtasks = subtasks.filter(st => st.task_id === t.id);
+      const subtaskAssigneeStr = taskSubtasks.map(st => {
+        const u = users.find(us => us.id === st.assigned_to);
+        return (u?.name || u?.email || '').toLowerCase();
+      }).join(' ');
+      const matchSubtaskAssignee = subtaskAssigneeStr.includes(term);
+      if (matchTitle || matchProject || matchAssignee || matchSubtaskAssignee) {
         taskIdsMatching.add(t.id);
         return true;
       }
@@ -421,7 +428,11 @@ function Management() {
       const matchParent = parentTask?.title?.toLowerCase().includes(term);
       return matchTitle || matchAssignee || matchParent || taskIdsMatching.has(st.task_id);
     });
-    return { tasks: filteredTasks, subtasks: filteredSubtasks };
+    // Si una subtarea coincide pero su tarea padre no está en filteredTasks, incluir la tarea padre para que la subtarea se muestre en el grupo correcto
+    const parentIdsNeeded = new Set(filteredSubtasks.map(st => st.task_id));
+    const tasksToAdd = tasks.filter(t => parentIdsNeeded.has(t.id) && !filteredTasks.some(ft => ft.id === t.id));
+    const finalTasks = [...filteredTasks, ...tasksToAdd];
+    return { tasks: finalTasks, subtasks: filteredSubtasks };
   }, [tasks, subtasks, searchTerm, projects, users]);
 
   useEffect(() => {
@@ -3334,21 +3345,21 @@ function Management() {
   };
 
   const renderReviewView = () => {
-    const readyForReviewTasks = tasks.filter(task => 
+    const readyForReviewTasks = displayTasks.filter(task =>
       task.status === 'completed'
     );
-    const readyForReviewSubtasks = subtasks.filter(subtask => 
+    const readyForReviewSubtasks = displaySubtasks.filter(subtask =>
       subtask.status === 'completed'
     );
 
-    const inReviewTasks = tasks.filter(task => task.status === 'in_review');
-    const inReviewSubtasks = subtasks.filter(subtask => subtask.status === 'in_review');
+    const inReviewTasks = displayTasks.filter(task => task.status === 'in_review');
+    const inReviewSubtasks = displaySubtasks.filter(subtask => subtask.status === 'in_review');
 
-    const blockedTasks = tasks.filter(task => task.status === 'blocked');
-    const blockedSubtasks = subtasks.filter(subtask => subtask.status === 'blocked');
+    const blockedTasks = displayTasks.filter(task => task.status === 'blocked');
+    const blockedSubtasks = displaySubtasks.filter(subtask => subtask.status === 'blocked');
 
-    const approvedTasks = tasks.filter(task => task.status === 'approved');
-    const approvedSubtasks = subtasks.filter(subtask => subtask.status === 'approved');
+    const approvedTasks = displayTasks.filter(task => task.status === 'approved');
+    const approvedSubtasks = displaySubtasks.filter(subtask => subtask.status === 'approved');
 
     // Function to group items by area
     const groupItemsByArea = (tasksToGroup: Task[], subtasksToGroup: Subtask[]) => {
