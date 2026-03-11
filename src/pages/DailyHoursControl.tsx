@@ -625,15 +625,15 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         supabase
           .from('work_sessions')
           .select(`
-            id, assignment_id, duration_minutes, created_at,
+            id, assignment_id, duration_minutes, created_at, createdAt,
             task_work_assignments!inner(
               id, user_id, task_id, subtask_id, task_type, date, project_id,
               tasks(id, title, project_id, projects(name)),
               subtasks(id, title, task_id, tasks(id, title, projects(name)))
             )
           `)
-          .gte('created_at', startISO)
-          .lte('created_at', endISO),
+          .gte('createdAt', startISO)
+          .lte('createdAt', endISO),
       ]);
 
       if (assignErr) {
@@ -735,19 +735,21 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
       const sessionsByUserTask: Record<string, Record<string, Record<string, Array<{ duration_minutes?: number }>>>> = {};
       console.log(`📊 GANTT DEBUG: sessionList processing complete. Total sessions found: ${sessionList.length}`);
       sessionList.forEach((s) => {
-        const assign = s.task_work_assignments;
+        const rawAssign = s.task_work_assignments;
+        const assign = Array.isArray(rawAssign) ? rawAssign[0] : rawAssign;
         if (!assign) {
-           console.log('⚠️ GANTT DEBUG: Session has no task_work_assignments:', s.id);
+           console.log('⚠️ GANTT DEBUG: Session has no task_work_assignments:', (s as { id?: string }).id);
            return;
         }
         if (!filterByProject(assign.project_id)) {
            // console.log('⚠️ GANTT DEBUG: Session filtered out by project:', assign.project_id);
            return;
         }
-        const taskKey = `${assign.task_type}-${assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id}`;
-        const sessionDate = (s.createdAt || s.created_at)
-          ? format(new Date(s.createdAt || s.created_at), 'yyyy-MM-dd')
-          : assign.date;
+        const refId = assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id;
+        if (!refId) return;
+        const taskKey = `${assign.task_type}-${refId}`;
+        const created = (s as { createdAt?: string; created_at?: string }).createdAt ?? (s as { createdAt?: string; created_at?: string }).created_at;
+        const sessionDate = created ? format(new Date(created), 'yyyy-MM-dd') : assign.date;
         if (!sessionsByUserTask[assign.user_id]) sessionsByUserTask[assign.user_id] = {};
         if (!sessionsByUserTask[assign.user_id][taskKey]) sessionsByUserTask[assign.user_id][taskKey] = {};
         if (!sessionsByUserTask[assign.user_id][taskKey][sessionDate]) {
