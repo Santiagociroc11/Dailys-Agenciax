@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { WORKABLE_STATUSES } from '../lib/userAccess';
 import { useAuth } from '../contexts/AuthContext';
-import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw, LogIn } from 'lucide-react';
+import { getWeekDays, getWeekRange } from '../lib/weekUtils';
+import { Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, ChevronDown, ChevronUp, RotateCcw, LogIn, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -25,6 +26,31 @@ interface DailyHoursUser {
 }
 
 type StatusFilter = 'all' | 'ok' | 'behind' | 'overdue';
+type ViewTab = 'day' | 'week';
+
+interface DayCellData {
+  planned: number;
+  extra: number;
+  actual: number;
+  overdue: number;
+  rework: number;
+}
+
+interface WeekUserData {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  byDate: Record<string, DayCellData>;
+  overdueCount: number;
+  overdueMinutes: number;
+}
+
+interface TaskRowItem {
+  dateStr: string;
+  taskName: string;
+  minutes: number;
+  type: 'planned' | 'extra' | 'rework' | 'overdue';
+}
 
 const TARGET_HOURS_PER_DAY = 8;
 const TARGET_MINUTES_PER_DAY = TARGET_HOURS_PER_DAY * 60;
@@ -69,10 +95,24 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [sortBy, setSortBy] = useState<'status' | 'name' | 'hours'>('status');
   const [sortAsc, setSortAsc] = useState(true);
+  const [activeTab, setActiveTab] = useState<ViewTab>('day');
+  const [selectedWeekDate, setSelectedWeekDate] = useState(new Date());
+  const [weekData, setWeekData] = useState<WeekUserData[]>([]);
+  const [weekLoading, setWeekLoading] = useState(false);
+
+  const weekDays = getWeekDays(selectedWeekDate);
+  const startDate = weekDays[0].dateStr;
+  const endDate = weekDays[6].dateStr;
 
   useEffect(() => {
     fetchDailyHoursControl();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'week') {
+      fetchWeeklyTeamData(startDate, endDate);
+    }
+  }, [activeTab, startDate, endDate]);
 
   async function fetchDailyHoursControl() {
     try {
@@ -369,6 +409,218 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
     }
   }
 
+  async function fetchWeeklyTeamData(startDate: string, endDate: string) {
+    setWeekLoading(true);
+    try {
+      const weekDaysForFetch = getWeekDays(new Date(startDate));
+      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
+      const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
+
+      const { data: users } = await supabase.from('users').select('id, name, email').not('is_active', 'eq', false);
+      const userList = users || [];
+
+      const startISO = new Date(startDate + 'T00:00:00').toISOString();
+      const endISO = new Date(endDate + 'T23:59:59.999').toISOString();
+
+      const [
+        { data: weekAssignments, error: assignErr },
+        { data: weekWorkEvents, error: eventsErr },
+        { data: weekWorkSessions, error: sessionsErr },
+        { data: overdueAssignments, error: overdueErr },
+      ] = await Promise.all([
+        supabase
+          .from('task_work_assignments')
+          .select('id, user_id, date, project_id, estimated_duration, actual_duration, created_at')
+          .gte('date', startDate)
+          .lte('date', endDate),
+        supabase
+          .from('work_events')
+          .select('user_id, date, project_id, start_time, end_time')
+          .gte('date', startDate)
+          .lte('date', endDate),
+        supabase
+          .from('work_sessions')
+          .select('assignment_id, duration_minutes, createdAt, created_at')
+          .gte('createdAt', startISO)
+          .lte('createdAt', endISO),
+        supabase
+          .from('task_work_assignments')
+          .select('user_id, date, project_id, estimated_duration')
+          .lt('date', startDate)
+          .not('status', 'in', "('completed','in_review','approved')"),
+      ]);
+
+      if (assignErr) throw assignErr;
+
+      const filterByProject = (projectId: string | null) =>
+        activeProjectIds.size === 0 || !projectId || activeProjectIds.has(projectId);
+
+      const assignments = (weekAssignments || []).filter((a: { project_id?: string | null }) =>
+        filterByProject(a.project_id)
+      );
+      const workEvents = (weekWorkEvents || []).filter((e: { project_id?: string | null }) =>
+        filterByProject(e.project_id)
+      );
+      const overdue = (overdueAssignments || []).filter((a: { project_id?: string | null }) =>
+        filterByProject(a.project_id)
+      );
+
+      const byUserDate = new Map<string, Map<string, DayCellData>>();
+      userList.forEach((u) => {
+        const dateMap = new Map<string, DayCellData>();
+        weekDaysForFetch.forEach((d) => {
+          dateMap.set(d.dateStr, { planned: 0, extra: 0, actual: 0, overdue: 0, rework: 0 });
+        });
+        byUserDate.set(u.id, dateMap);
+      });
+
+      assignments.forEach((a: { user_id: string; date: string; estimated_duration?: number; actual_duration?: number | null }) => {
+        const map = byUserDate.get(a.user_id);
+        if (!map) return;
+        const cell = map.get(a.date);
+        if (!cell) return;
+        cell.planned += a.estimated_duration ?? 0;
+      });
+
+      workEvents.forEach((e: { user_id: string; date: string; start_time: string; end_time: string }) => {
+        const map = byUserDate.get(e.user_id);
+        if (!map) return;
+        const cell = map.get(e.date);
+        if (!cell) return;
+        const [sh, sm] = (e.start_time || '00:00').split(':').map(Number);
+        const [eh, em] = (e.end_time || '00:00').split(':').map(Number);
+        const mins = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+        cell.extra += mins;
+      });
+
+      const sessionList = (weekWorkSessions || []) as { assignment_id: string; duration_minutes?: number; createdAt?: string; created_at?: string }[];
+      if (sessionList.length > 0) {
+        const assignmentIds = [...new Set(sessionList.map((s) => s.assignment_id))];
+        const { data: assignData } = await supabase
+          .from('task_work_assignments')
+          .select('id, user_id, date, project_id')
+          .in('id', assignmentIds);
+        const assignMap = new Map((assignData || []).map((a: { id: string; user_id: string; date: string; project_id?: string | null }) => [a.id, a]));
+
+        sessionList.forEach((s) => {
+          const assign = assignMap.get(s.assignment_id);
+          if (!assign || !filterByProject(assign.project_id)) return;
+          const map = byUserDate.get(assign.user_id);
+          if (!map) return;
+          const createdAt = s.createdAt || s.created_at;
+          const sessionDate = createdAt ? format(new Date(createdAt), 'yyyy-MM-dd') : assign.date;
+          const cell = map.get(sessionDate);
+          if (!cell) return;
+          const mins = s.duration_minutes ?? 0;
+          if (assign.date < sessionDate) {
+            cell.rework += mins;
+          } else {
+            cell.actual += mins;
+          }
+        });
+      }
+
+      const overdueByUser = new Map<string, { count: number; minutes: number }>();
+      overdue.forEach((a: { user_id: string; estimated_duration?: number }) => {
+        const cur = overdueByUser.get(a.user_id) || { count: 0, minutes: 0 };
+        cur.count += 1;
+        cur.minutes += a.estimated_duration ?? 0;
+        overdueByUser.set(a.user_id, cur);
+      });
+
+      const result: WeekUserData[] = userList.map((u) => {
+        const dateMap = byUserDate.get(u.id)!;
+        const byDate: Record<string, DayCellData> = {};
+        dateMap.forEach((v, k) => { byDate[k] = v; });
+        const od = overdueByUser.get(u.id) || { count: 0, minutes: 0 };
+        if (od.count > 0) {
+          const mondayCell = byDate[startDate];
+          if (mondayCell) mondayCell.overdue = od.minutes;
+        }
+        return {
+          userId: u.id,
+          userName: u.name || u.email || u.id,
+          userEmail: u.email || '',
+          byDate,
+          overdueCount: od.count,
+          overdueMinutes: od.minutes,
+        };
+      });
+
+      setWeekData(result);
+    } catch (e) {
+      console.error('Error fetching weekly team data:', e);
+      setWeekData([]);
+    } finally {
+      setWeekLoading(false);
+    }
+  }
+
+  async function fetchUserWeekTasks(userId: string, startDate: string, endDate: string): Promise<TaskRowItem[]> {
+    try {
+      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
+      const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
+      const filterByProject = (projectId: string | null) =>
+        activeProjectIds.size === 0 || !projectId || activeProjectIds.has(projectId);
+
+      const [assignRes, eventsRes] = await Promise.all([
+        supabase
+          .from('task_work_assignments')
+          .select('id, date, task_id, subtask_id, task_type, estimated_duration, project_id')
+          .eq('user_id', userId)
+          .gte('date', startDate)
+          .lte('date', endDate),
+        supabase
+          .from('work_events')
+          .select('date, project_id, start_time, end_time, title')
+          .eq('user_id', userId)
+          .gte('date', startDate)
+          .lte('date', endDate),
+      ]);
+
+      const rows: TaskRowItem[] = [];
+      const assignments = (assignRes.data || []).filter((a: { project_id?: string | null }) =>
+        filterByProject(a.project_id)
+      );
+      const taskIds = [...new Set(assignments.map((a: { task_id?: string }) => a.task_id).filter(Boolean))];
+      const subtaskIds = [...new Set(assignments.map((a: { subtask_id?: string }) => a.subtask_id).filter(Boolean))];
+
+      const taskTitles = new Map<string, string>();
+      const subtaskTitles = new Map<string, string>();
+      if (taskIds.length > 0) {
+        const { data: tasks } = await supabase.from('tasks').select('id, title').in('id', taskIds);
+        (tasks || []).forEach((t: { id: string; title: string }) => taskTitles.set(t.id, t.title || 'Tarea'));
+      }
+      if (subtaskIds.length > 0) {
+        const { data: subs } = await supabase.from('subtasks').select('id, title, task_id').in('id', subtaskIds);
+        (subs || []).forEach((s: { id: string; title: string; task_id: string }) => {
+          const taskTitle = taskTitles.get(s.task_id) || '';
+          subtaskTitles.set(s.id, `${taskTitle} › ${s.title || 'Subtarea'}`);
+        });
+      }
+
+      assignments.forEach((a: { date: string; task_id?: string; subtask_id?: string; task_type?: string; estimated_duration?: number }) => {
+        const mins = a.estimated_duration ?? 0;
+        const name = a.subtask_id ? subtaskTitles.get(a.subtask_id) : a.task_id ? taskTitles.get(a.task_id) : 'Tarea';
+        rows.push({ dateStr: a.date, taskName: name || 'Tarea', minutes: mins, type: 'planned' });
+      });
+
+      (eventsRes.data || []).filter((e: { project_id?: string | null }) => filterByProject(e.project_id)).forEach(
+        (e: { date: string; start_time: string; end_time: string; title?: string }) => {
+          const [sh, sm] = (e.start_time || '00:00').split(':').map(Number);
+          const [eh, em] = (e.end_time || '00:00').split(':').map(Number);
+          const mins = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+          rows.push({ dateStr: e.date, taskName: e.title || 'Actividad extra', minutes: mins, type: 'extra' });
+        }
+      );
+
+      return rows.sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.taskName.localeCompare(b.taskName));
+    } catch (e) {
+      console.error('Error fetching user week tasks:', e);
+      return [];
+    }
+  }
+
   const countOk = dailyHoursControl.filter((u) => getUserStatus(u) === 'ok').length;
   const countBehind = dailyHoursControl.filter((u) => getUserStatus(u) === 'behind' || getUserStatus(u) === 'idle').length;
   const countOverdue = dailyHoursControl.filter((u) => getUserStatus(u) === 'overdue').length;
@@ -427,6 +679,20 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
     );
   }
 
+  function goToPreviousWeek() {
+    const d = new Date(selectedWeekDate);
+    d.setDate(d.getDate() - 7);
+    setSelectedWeekDate(d);
+  }
+  function goToNextWeek() {
+    const d = new Date(selectedWeekDate);
+    d.setDate(d.getDate() + 7);
+    setSelectedWeekDate(d);
+  }
+  function goToThisWeek() {
+    setSelectedWeekDate(new Date());
+  }
+
   return (
     <div className={embedded ? 'w-full mt-6' : 'p-6 w-full max-w-[1600px] mx-auto'}>
       {/* Header */}
@@ -435,15 +701,63 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           <div>
             <h2 className={embedded ? 'text-lg font-semibold text-gray-900' : 'text-2xl font-bold text-gray-900'}>Control de Jornada</h2>
             <p className="text-sm text-gray-500 mt-1 capitalize">
-              {format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })}
+              {activeTab === 'day'
+                ? format(new Date(), "EEEE d 'de' MMMM, yyyy", { locale: es })
+                : getWeekRange(selectedWeekDate)}
             </p>
           </div>
-          <div className="text-right text-sm text-gray-500">
-            Meta diaria: <span className="font-bold text-gray-900">{TARGET_HOURS_PER_DAY}h</span> por persona
+          <div className="flex items-center gap-2">
+            <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setActiveTab('day')}
+                className={`px-3 py-1.5 text-sm font-medium ${activeTab === 'day' ? 'bg-blue-100 text-blue-800' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                Vista día
+              </button>
+              <button
+                onClick={() => setActiveTab('week')}
+                className={`px-3 py-1.5 text-sm font-medium flex items-center gap-1 ${activeTab === 'week' ? 'bg-blue-100 text-blue-800' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                <Calendar className="w-4 h-4" />
+                Vista semana
+              </button>
+            </div>
+            {activeTab === 'week' && (
+              <div className="flex items-center gap-1 border border-gray-300 rounded-lg p-1">
+                <button onClick={goToPreviousWeek} className="p-1.5 hover:bg-gray-100 rounded" title="Semana anterior">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button onClick={goToThisWeek} className="px-2 py-1 text-xs font-medium hover:bg-gray-100 rounded" title="Ir a esta semana">
+                  Hoy
+                </button>
+                <button onClick={goToNextWeek} className="p-1.5 hover:bg-gray-100 rounded" title="Semana siguiente">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            <div className="text-right text-sm text-gray-500">
+              Meta diaria: <span className="font-bold text-gray-900">{TARGET_HOURS_PER_DAY}h</span> por persona
+            </div>
           </div>
         </div>
       </div>
 
+      {activeTab === 'week' ? (
+        <TeamWeekGantt
+          weekData={weekData}
+          weekDays={weekDays}
+          loading={weekLoading}
+          targetMinutes={TARGET_MINUTES_PER_DAY}
+          fmtH={fmtH}
+          isAdmin={!!isAdmin}
+          currentUserId={currentUser?.id}
+          impersonateUser={impersonateUser}
+          fetchUserTasks={fetchUserWeekTasks}
+          startDate={startDate}
+          endDate={endDate}
+        />
+      ) : (
+        <>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <button
@@ -746,6 +1060,231 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
             Retrasos = tareas de días anteriores sin completar
           </span>
         </div>
+      </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TeamWeekGantt({
+  weekData,
+  weekDays,
+  loading,
+  targetMinutes,
+  fmtH,
+  isAdmin,
+  currentUserId,
+  impersonateUser,
+  fetchUserTasks,
+  startDate,
+  endDate,
+}: {
+  weekData: WeekUserData[];
+  weekDays: ReturnType<typeof getWeekDays>;
+  loading: boolean;
+  targetMinutes: number;
+  fmtH: (m: number) => string;
+  isAdmin: boolean;
+  currentUserId?: string;
+  impersonateUser?: (u: { id: string; name: string; email: string; role: string }) => void;
+  fetchUserTasks?: (userId: string, startDate: string, endDate: string) => Promise<TaskRowItem[]>;
+  startDate?: string;
+  endDate?: string;
+}) {
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<TaskRowItem[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+
+  async function handleToggleExpand(userId: string) {
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      setExpandedTasks([]);
+      return;
+    }
+    setExpandedUserId(userId);
+    if (fetchUserTasks && startDate && endDate) {
+      setTasksLoading(true);
+      try {
+        const tasks = await fetchUserTasks(userId, startDate, endDate);
+        setExpandedTasks(tasks);
+      } finally {
+        setTasksLoading(false);
+      }
+    } else {
+      setExpandedTasks([]);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg shadow p-8">
+        <div className="animate-pulse">
+          <div className="h-6 bg-gray-200 rounded w-1/3 mb-4" />
+          <div className="h-64 bg-gray-100 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="overflow-x-auto">
+        <div className="min-w-[900px]">
+          <div className="grid gap-0" style={{ gridTemplateColumns: `minmax(140px, 1fr) repeat(7, minmax(90px, 1fr)) minmax(70px, 1fr)` }}>
+            <div className="px-3 py-2 font-medium text-sm text-gray-700 bg-gray-50 border-b border-r border-gray-200">Persona</div>
+            {weekDays.map((d) => (
+              <div
+                key={d.dateStr}
+                className={`px-2 py-2 text-center text-sm border-b border-r border-gray-200 ${
+                  d.isToday ? 'bg-blue-100 text-blue-800 font-medium' : 'bg-gray-50 text-gray-700'
+                }`}
+              >
+                {d.isToday && <span className="block text-[10px] font-bold text-red-600 mb-0.5">HOY</span>}
+                <div className="font-medium">{d.dayShort}</div>
+                <div className="text-xs">{d.dayNumber}</div>
+              </div>
+            ))}
+            <div className="px-2 py-2 text-center text-xs font-medium bg-gray-100 text-gray-700 border-b border-gray-200">TOTAL</div>
+          </div>
+
+          {weekData.length === 0 ? (
+            <div className="py-12 text-center text-gray-500">No hay datos para esta semana.</div>
+          ) : (
+            weekData.map((u) => {
+              let totalWeek = 0;
+              const cells = weekDays.map((d) => {
+                const cell = u.byDate[d.dateStr] || { planned: 0, extra: 0, actual: 0, overdue: 0, rework: 0 };
+                const total = cell.planned + cell.extra + cell.overdue + cell.rework;
+                totalWeek += total;
+                const pctTotal = Math.min(100, (total / targetMinutes) * 100);
+                const taskPart = cell.planned + cell.overdue;
+                const pctTask = total > 0 ? Math.min(100, (taskPart / total) * 100) : 0;
+                const pctExtra = total > 0 ? Math.min(100 - pctTask, (cell.extra / total) * 100) : 0;
+                const pctRework = total > 0 ? Math.min(100 - pctTask - pctExtra, (cell.rework / total) * 100) : 0;
+                const pctOverdue = total > 0 ? 100 - pctTask - pctExtra - pctRework : 0;
+
+                return (
+                  <div
+                    key={`${u.userId}-${d.dateStr}`}
+                    className="px-2 py-2 border-b border-r border-gray-100 min-h-[60px] flex flex-col justify-center"
+                  >
+                    {total > 0 ? (
+                      <>
+                        <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex mb-1">
+                          <div className="h-full bg-emerald-600" style={{ width: `${Math.max(0, pctTask - (cell.overdue / total) * 100) || 0}%` }} />
+                          <div className="h-full bg-red-300" style={{ width: `${(cell.overdue / total) * 100}%` }} />
+                          <div className="h-full bg-purple-400" style={{ width: `${pctExtra}%` }} />
+                          <div className="h-full bg-orange-400" style={{ width: `${pctRework}%` }} />
+                        </div>
+                        <div className="text-xs font-semibold text-gray-800">{fmtH(total)}h</div>
+                        {cell.actual > 0 && (
+                          <div className="text-[10px] text-blue-600" title="Ejecutado">E: {fmtH(cell.actual)}h</div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-400">--</span>
+                    )}
+                  </div>
+                );
+              });
+
+              return (
+                <React.Fragment key={u.userId}>
+                  <div className="contents">
+                    <div
+                      className="px-3 py-2 border-b border-r border-gray-200 flex items-center gap-2 min-w-0 cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleToggleExpand(u.userId)}
+                    >
+                      <button
+                        type="button"
+                        className="p-0.5 rounded hover:bg-gray-200 shrink-0 text-gray-500"
+                        onClick={(e) => { e.stopPropagation(); handleToggleExpand(u.userId); }}
+                        title={expandedUserId === u.userId ? 'Contraer' : 'Expandir tareas'}
+                      >
+                        {expandedUserId === u.userId ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
+                      </button>
+                      <span className="font-medium text-gray-900 text-sm truncate">{u.userName}</span>
+                      {isAdmin && currentUserId !== u.userId && impersonateUser && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); impersonateUser({ id: u.userId, name: u.userName, email: u.userEmail, role: 'user' }); }}
+                          className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 shrink-0"
+                          title="Ver como usuario"
+                        >
+                          <LogIn className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {u.overdueCount > 0 && (
+                        <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded shrink-0" title="Tareas retrasadas">
+                          +{u.overdueCount}
+                        </span>
+                      )}
+                    </div>
+                    {cells}
+                    <div className="px-2 py-2 border-b border-gray-200 text-center">
+                      <span className="text-sm font-bold text-gray-800">{fmtH(totalWeek)}h</span>
+                    </div>
+                  </div>
+                  {expandedUserId === u.userId && (
+                    <div
+                      className="col-span-full grid gap-0 border-b border-gray-200 bg-gray-50/80"
+                      style={{ gridTemplateColumns: `minmax(140px, 1fr) repeat(7, minmax(90px, 1fr)) minmax(70px, 1fr)` }}
+                    >
+                      <div className="px-3 py-2 text-xs font-medium text-gray-600 col-span-full">
+                        Desglose por tarea
+                      </div>
+                      {tasksLoading ? (
+                        <div className="col-span-full px-3 py-4 text-sm text-gray-500">Cargando...</div>
+                      ) : expandedTasks.length === 0 ? (
+                        <div className="col-span-full px-3 py-4 text-sm text-gray-500">Sin tareas en esta semana</div>
+                      ) : (
+                        expandedTasks.map((t, i) => {
+                          const dayCells = weekDays.map((d) => {
+                            const match = t.dateStr === d.dateStr;
+                            return (
+                              <div key={d.dateStr} className="px-2 py-1 border-r border-gray-100 text-center">
+                                {match ? (
+                                  <span className="text-xs text-gray-700" title={t.taskName}>
+                                    {fmtH(t.minutes)}h
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300">-</span>
+                                )}
+                              </div>
+                            );
+                          });
+                          return (
+                            <React.Fragment key={i}>
+                              <div className="px-3 py-1 text-xs text-gray-700 truncate border-r border-gray-200" title={t.taskName}>
+                                {t.taskName}
+                              </div>
+                              {dayCells}
+                              <div className="px-2 py-1 text-center">
+                                <span className="text-xs font-medium">{fmtH(t.minutes)}h</span>
+                              </div>
+                            </React.Fragment>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-600 inline-block" /> Tareas</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> Retrasos</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-purple-400 inline-block" /> Extras</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-orange-400 inline-block" /> Retrabajos</span>
+        <span className="text-blue-600">E = Ejecutado</span>
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import RichTextSummary from "../components/RichTextSummary";
 import { ActivityChecklist } from "../components/ActivityChecklist";
 import { TaskComments } from "../components/TaskComments";
 import { apiUrl } from "../lib/apiBase";
+import { getWeekDays, getWeekRange } from "../lib/weekUtils";
 
 interface ChecklistItem {
    id: string;
@@ -1454,7 +1455,7 @@ export default function UserProjectView() {
       
       setLoadingAllEvents(true);
       try {
-         const weekDays = getWeekDays();
+         const weekDays = getWeekDays(selectedWeekDate);
          const startDate = weekDays[0].dateStr;
          const endDate = weekDays[weekDays.length - 1].dateStr;
          
@@ -3563,44 +3564,8 @@ export default function UserProjectView() {
    }
 
    // =====================
-   // FUNCIONES PARA GANTT SEMANAL
+   // FUNCIONES PARA GANTT SEMANAL (getWeekDays y getWeekRange desde weekUtils)
    // =====================
-
-   function getWeekDays(baseDate?: Date) {
-      const referenceDate = baseDate || selectedWeekDate;
-      const currentDay = referenceDate.getDay(); // 0 = Domingo, 1 = Lunes, etc.
-      const mondayOffset = currentDay === 0 ? -6 : -(currentDay - 1); // Ajustar para que Lunes sea el primer día
-      
-      const monday = new Date(referenceDate);
-      monday.setDate(referenceDate.getDate() + mondayOffset);
-      
-      const weekDays = [];
-      for (let i = 0; i < 7; i++) { // Lunes a Domingo (7 días)
-         const day = new Date(monday);
-         day.setDate(monday.getDate() + i);
-         weekDays.push({
-            date: day,
-            dateStr: format(day, "yyyy-MM-dd"),
-            dayName: format(day, "EEEE", { locale: es }),
-            dayShort: format(day, "EEE", { locale: es }),
-            dayNumber: format(day, "dd"),
-            isToday: format(day, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd")
-         });
-      }
-      return weekDays;
-   }
-
-   // Función para obtener el rango de fechas de la semana
-   function getWeekRange(baseDate?: Date): string {
-      const weekDays = getWeekDays(baseDate);
-      const startDate = weekDays[0].date;
-      const endDate = weekDays[weekDays.length - 1].date;
-      
-      const startFormatted = format(startDate, "dd 'de' MMMM", { locale: es });
-      const endFormatted = format(endDate, "dd 'de' MMMM 'de' yyyy", { locale: es });
-      
-      return `Semana del ${startFormatted} al ${endFormatted}`;
-   }
 
    // Función para navegar a la semana anterior
    function goToPreviousWeek() {
@@ -3669,7 +3634,7 @@ export default function UserProjectView() {
       }
       
       try {
-         const weekDays = getWeekDays();
+         const weekDays = getWeekDays(selectedWeekDate);
          const startDate = weekDays[0].dateStr;
          const endDate = weekDays[weekDays.length - 1].dateStr;
 
@@ -3771,7 +3736,7 @@ export default function UserProjectView() {
       if (!user) return [];
 
       try {
-         const weekDays = getWeekDays();
+         const weekDays = getWeekDays(selectedWeekDate);
          const startDate = weekDays[0].dateStr;
          const endDate = weekDays[weekDays.length - 1].dateStr;
 
@@ -3916,7 +3881,7 @@ export default function UserProjectView() {
 
    // Función para obtener la hora más temprana de una tarea en la semana
    function getEarliestTimeForTask(taskGroup: any): string {
-      const weekDays = getWeekDays();
+      const weekDays = getWeekDays(selectedWeekDate);
       let earliestTime = "23:59"; // Default a final del día
       
       weekDays.forEach(day => {
@@ -3955,7 +3920,7 @@ export default function UserProjectView() {
 
    // ✅ ACTUALIZADA: Función para precalcular tiempos ejecutados usando work_sessions
    async function calculateExecutedTimes(ganttData: any[]) {
-      const weekDays = getWeekDays();
+      const weekDays = getWeekDays(selectedWeekDate);
       const executedTimes: Record<string, Record<string, number>> = {};
 
       for (const taskGroup of ganttData) {
@@ -5081,7 +5046,7 @@ export default function UserProjectView() {
                                     ⬅️
                                  </button>
                                  <div className="text-sm font-medium text-gray-700 px-3 py-1 bg-gray-100 rounded-lg">
-                                    {getWeekRange()}
+                                    {getWeekRange(selectedWeekDate)}
                                  </div>
                                  <button
                                     onClick={goToNextWeek}
@@ -5129,7 +5094,7 @@ export default function UserProjectView() {
                                  {/* Header con días de la semana */}
                                  <div className="grid grid-cols-9 gap-2 mb-4">
                                     <div className="font-medium text-sm text-gray-700 p-1 min-h-[50px] flex items-center">Tareas</div>
-                                    {getWeekDays().map(day => (
+                                    {getWeekDays(selectedWeekDate).map(day => (
                                        <div key={day.dateStr} className={`text-center p-1 text-sm min-h-[50px] flex flex-col justify-center relative ${
                                           day.isToday 
                                              ? 'bg-blue-100 text-blue-800 font-medium border-2 border-blue-400 rounded-lg' 
@@ -5153,7 +5118,7 @@ export default function UserProjectView() {
                                  {/* Filas de tareas */}
                                  {ganttData.map(taskGroup => {
                                     // Calcular total de horas para esta tarea
-                                    const totalTaskHours = getWeekDays().reduce((total, day) => {
+                                    const totalTaskHours = getWeekDays(selectedWeekDate).reduce((total, day) => {
                                        const sessions = taskGroup.sessions[day.dateStr] || [];
                                        const dayTotal = sessions.reduce((daySum: number, session: any) => {
                                           if (session.start_time && session.end_time) {
@@ -5226,7 +5191,7 @@ export default function UserProjectView() {
                                              </div>
 
                                           {/* Celdas para cada día */}
-                                          {getWeekDays().map(day => {
+                                          {getWeekDays(selectedWeekDate).map(day => {
                                              const sessions = taskGroup.sessions[day.dateStr] || [];
                                              const plannedSessions = sessions.filter((s: any) => s.start_time && s.end_time);
                                              const isNonCompliant = checkNonCompliance(taskGroup, day.dateStr);
@@ -5408,7 +5373,7 @@ export default function UserProjectView() {
                                                 P: {Math.round((totalTaskHours / 60) * 100) / 100}h
                                     </div>
                                              <div className="text-gray-700 leading-tight">
-                                                E: {Math.round((getWeekDays().reduce((total, day) => {
+                                                E: {Math.round((getWeekDays(selectedWeekDate).reduce((total, day) => {
                                                    if (taskGroup.type === "event") {
                                                       // Para actividades adicionales, contar toda su duración como ejecutada
                                                       const sessions = taskGroup.sessions[day.dateStr] || [];
@@ -5436,7 +5401,7 @@ export default function UserProjectView() {
                                        <div className="p-1 bg-blue-50 text-xs text-blue-700 text-center">
                                           📅 Plan
                                        </div>
-                                       {getWeekDays().map(day => {
+                                       {getWeekDays(selectedWeekDate).map(day => {
                                           const plannedHours = ganttData.reduce((total, taskGroup) => {
                                              const sessions = taskGroup.sessions[day.dateStr] || [];
                                              const dayTotal = sessions.reduce((daySum: number, session: any) => {
@@ -5459,7 +5424,7 @@ export default function UserProjectView() {
                                        })}
                                        <div className="p-1 bg-blue-100 text-center text-xs text-blue-800">
                                           {Math.round((ganttData.reduce((grandTotal, taskGroup) => {
-                                             return grandTotal + getWeekDays().reduce((total, day) => {
+                                             return grandTotal + getWeekDays(selectedWeekDate).reduce((total, day) => {
                                                 const sessions = taskGroup.sessions[day.dateStr] || [];
                                                 return total + sessions.reduce((daySum: number, session: any) => {
                                                    if (session.start_time && session.end_time) {
@@ -5480,7 +5445,7 @@ export default function UserProjectView() {
                                        <div className="p-1 bg-green-50 text-xs text-green-700 text-center">
                                           ✅ Ejec
                                        </div>
-                                       {getWeekDays().map(day => {
+                                       {getWeekDays(selectedWeekDate).map(day => {
                                           const executedHours = ganttData.reduce((total, taskGroup) => {
                                              if (taskGroup.type === "event") {
                                                 // Para actividades adicionales, contar toda su duración como ejecutada
@@ -5507,7 +5472,7 @@ export default function UserProjectView() {
                                           {Math.round((ganttData.reduce((grandTotal, taskGroup) => {
                                              if (taskGroup.type === "event") {
                                                 // Para actividades adicionales, sumar toda su duración como ejecutada
-                                                return grandTotal + getWeekDays().reduce((total, day) => {
+                                                return grandTotal + getWeekDays(selectedWeekDate).reduce((total, day) => {
                                                    const sessions = taskGroup.sessions[day.dateStr] || [];
                                                    const eventTime = sessions.reduce((daySum: number, session: any) => {
                                                       return daySum + (session.actual_duration || 0);
@@ -5516,7 +5481,7 @@ export default function UserProjectView() {
                                                 }, 0);
                                              } else {
                                                 // Para tareas normales, usar executedTimeData + tiempos extra
-                                                return grandTotal + getWeekDays().reduce((total, day) => {
+                                                return grandTotal + getWeekDays(selectedWeekDate).reduce((total, day) => {
                                                    const realExecutedTime = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
                                                    const offScheduleTime = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
                                                    return total + realExecutedTime + offScheduleTime;
