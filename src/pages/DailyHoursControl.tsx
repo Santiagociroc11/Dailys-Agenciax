@@ -472,7 +472,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           .lte('date', endDate),
         supabase
           .from('work_sessions')
-          .select('assignment_id, duration_minutes, createdAt, created_at')
+          .select('assignment_id, duration_minutes, created_at')
           .gte('createdAt', startISO)
           .lte('createdAt', endISO),
         supabase
@@ -625,7 +625,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         supabase
           .from('work_sessions')
           .select(`
-            id, assignment_id, duration_minutes, createdAt, created_at,
+            id, assignment_id, duration_minutes, created_at,
             task_work_assignments!inner(id, user_id, task_id, subtask_id, task_type, date, project_id)
           `)
           .gte('createdAt', startISO)
