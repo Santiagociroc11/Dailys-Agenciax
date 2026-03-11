@@ -415,7 +415,11 @@ function Management() {
       }).join(' ');
       const matchSubtaskAssignee = subtaskAssigneeStr.includes(term);
       if (matchTitle || matchProject || matchAssignee || matchSubtaskAssignee) {
-        taskIdsMatching.add(t.id);
+        // Solo añadir a taskIdsMatching cuando la tarea coincide por sus propios atributos (título, proyecto, asignados directos).
+        // Si coincide solo por asignados de subtareas, NO añadir: así solo se muestran las subtareas que realmente coincen.
+        if (matchTitle || matchProject || matchAssignee) {
+          taskIdsMatching.add(t.id);
+        }
         return true;
       }
       return false;
