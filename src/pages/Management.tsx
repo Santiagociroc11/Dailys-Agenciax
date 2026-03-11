@@ -398,6 +398,10 @@ function Management() {
     if (!searchTerm.trim()) return { tasks, subtasks };
     const term = searchTerm.toLowerCase().trim();
     const taskIdsMatching = new Set<string>();
+    // Si el término coincide con el nombre/email de algún usuario, es búsqueda por asignado: no incluir subtareas solo por matchParent o taskIdsMatching
+    const termMatchesAnyUser = users.some(u =>
+      (u.name?.toLowerCase() || '').includes(term) || (u.email?.toLowerCase() || '').includes(term)
+    );
     const filteredTasks = tasks.filter(t => {
       const matchTitle = t.title?.toLowerCase().includes(term);
       const projectName = projects.find(p => p.id === t.project_id)?.name?.toLowerCase() || '';
@@ -407,7 +411,6 @@ function Management() {
         return (u?.name || u?.email || '').toLowerCase();
       }).join(' ');
       const matchAssignee = assigneeStr.includes(term);
-      // Para tareas con subtareas: buscar también por asignados de las subtareas
       const taskSubtasks = subtasks.filter(st => st.task_id === t.id);
       const subtaskAssigneeStr = taskSubtasks.map(st => {
         const u = users.find(us => us.id === st.assigned_to);
@@ -415,8 +418,6 @@ function Management() {
       }).join(' ');
       const matchSubtaskAssignee = subtaskAssigneeStr.includes(term);
       if (matchTitle || matchProject || matchAssignee || matchSubtaskAssignee) {
-        // Solo añadir a taskIdsMatching cuando la tarea coincide por sus propios atributos (título, proyecto, asignados directos).
-        // Si coincide solo por asignados de subtareas, NO añadir: así solo se muestran las subtareas que realmente coincen.
         if (matchTitle || matchProject || matchAssignee) {
           taskIdsMatching.add(t.id);
         }
@@ -430,7 +431,12 @@ function Management() {
       const matchAssignee = assigneeName.includes(term);
       const parentTask = tasks.find(t => t.id === st.task_id);
       const matchParent = parentTask?.title?.toLowerCase().includes(term);
-      return matchTitle || matchAssignee || matchParent || taskIdsMatching.has(st.task_id);
+      const matchByParentOrTask = matchParent || taskIdsMatching.has(st.task_id);
+      // Cuando el término coincide con un usuario (búsqueda por asignado), no incluir subtareas que solo coinciden por título de tarea padre o por taskIdsMatching
+      if (termMatchesAnyUser && !matchTitle && !matchAssignee) {
+        return false;
+      }
+      return matchTitle || matchAssignee || matchByParentOrTask;
     });
     // Si una subtarea coincide pero su tarea padre no está en filteredTasks, incluir la tarea padre para que la subtarea se muestre en el grupo correcto
     const parentIdsNeeded = new Set(filteredSubtasks.map(st => st.task_id));
