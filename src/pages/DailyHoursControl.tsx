@@ -52,6 +52,37 @@ interface TaskRowItem {
   type: 'planned' | 'extra' | 'rework' | 'overdue';
 }
 
+/** Estructura tipo Gantt del asesor: task groups con sessions por día */
+interface GanttTaskGroup {
+  id: string;
+  title: string;
+  type: 'task' | 'subtask' | 'event';
+  project_name?: string;
+  parent_task_title?: string;
+  estimated_duration?: number;
+  event_type?: string;
+  sessions: Record<string, Array<{
+    id?: string;
+    status?: string;
+    estimated_duration?: number;
+    actual_duration?: number;
+    start_time?: string;
+    end_time?: string;
+    notes?: string;
+    event_type?: string;
+  }>>;
+  workSessions?: Record<string, Array<{ duration_minutes?: number }>>;
+}
+
+interface TeamGanttUserData {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  ganttData: GanttTaskGroup[];
+  executedTimeData: Record<string, Record<string, number>>;
+  offScheduleWorkData: Record<string, Record<string, number>>;
+}
+
 const TARGET_HOURS_PER_DAY = 8;
 const TARGET_MINUTES_PER_DAY = TARGET_HOURS_PER_DAY * 60;
 
@@ -98,6 +129,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
   const [activeTab, setActiveTab] = useState<ViewTab>('day');
   const [selectedWeekDate, setSelectedWeekDate] = useState(new Date());
   const [weekData, setWeekData] = useState<WeekUserData[]>([]);
+  const [weekGanttData, setWeekGanttData] = useState<TeamGanttUserData[]>([]);
   const [weekLoading, setWeekLoading] = useState(false);
 
   const weekDays = getWeekDays(selectedWeekDate);
@@ -110,7 +142,7 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
 
   useEffect(() => {
     if (activeTab === 'week') {
-      fetchWeeklyTeamData(startDate, endDate);
+      fetchWeeklyTeamGanttData(startDate, endDate);
     }
   }, [activeTab, startDate, endDate]);
 
@@ -556,6 +588,231 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
     }
   }
 
+  async function fetchWeeklyTeamGanttData(startDate: string, endDate: string) {
+    setWeekLoading(true);
+    try {
+      const weekDaysForFetch = getWeekDays(new Date(startDate));
+      const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
+      const activeProjectIds = new Set((activeProjects || []).map((p) => p.id));
+      const filterByProject = (projectId: string | null) =>
+        activeProjectIds.size === 0 || !projectId || activeProjectIds.has(projectId);
+
+      const { data: users } = await supabase.from('users').select('id, name, email').not('is_active', 'eq', false);
+      const userList = users || [];
+      const startISO = new Date(startDate + 'T00:00:00').toISOString();
+      const endISO = new Date(endDate + 'T23:59:59.999').toISOString();
+
+      const [
+        { data: assignments, error: assignErr },
+        { data: workEvents, error: eventsErr },
+        { data: workSessions, error: sessionsErr },
+      ] = await Promise.all([
+        supabase
+          .from('task_work_assignments')
+          .select(`
+            id, user_id, date, project_id, task_id, subtask_id, task_type, estimated_duration, actual_duration,
+            start_time, end_time, status,
+            tasks(id, title, description, project_id, phase_id, estimated_duration, priority, start_date, deadline, status, is_sequential, projects(name)),
+            subtasks(id, title, description, task_id, estimated_duration, start_date, deadline, status, tasks(id, title, phase_id, projects(name)))
+          `)
+          .gte('date', startDate)
+          .lte('date', endDate),
+        supabase
+          .from('work_events')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate),
+        supabase
+          .from('work_sessions')
+          .select('id, assignment_id, duration_minutes, createdAt, created_at')
+          .gte('createdAt', startISO)
+          .lte('createdAt', endISO),
+      ]);
+
+      if (assignErr) throw assignErr;
+
+      const filterAssignments = (assignments || []).filter((a: { project_id?: string | null }) =>
+        filterByProject(a.project_id)
+      );
+      const filterEvents = (workEvents || []).filter((e: { project_id?: string | null }) =>
+        filterByProject(e.project_id)
+      );
+
+      const byUser = new Map<string, { taskGroups: Record<string, GanttTaskGroup> }>();
+      userList.forEach((u) => byUser.set(u.id, { taskGroups: {} }));
+
+      filterAssignments.forEach((a: { user_id: string; task_type?: string; task_id?: string; subtask_id?: string; date: string; tasks?: { title: string; projects?: { name: string } }; subtasks?: { title: string; tasks?: { title: string; projects?: { name: string } } }; project_id?: string | null }) => {
+        const entry = byUser.get(a.user_id);
+        if (!entry || !filterByProject(a.project_id)) return;
+        const taskData = a.task_type === 'subtask' ? a.subtasks : a.tasks;
+        if (!taskData) return;
+        const taskKey = `${a.task_type}-${a.task_type === 'subtask' ? a.subtask_id : a.task_id}`;
+        if (!entry.taskGroups[taskKey]) {
+          let projectName = '';
+          let parentTaskTitle = '';
+          if (a.task_type === 'subtask' && (taskData as { tasks?: { title: string; projects?: { name: string } } }).tasks) {
+            parentTaskTitle = (taskData as { tasks: { title: string; projects?: { name: string } } }).tasks.title;
+            projectName = (taskData as { tasks: { projects?: { name: string } } }).tasks.projects?.name || '';
+          } else if (a.task_type === 'task' && (taskData as { projects?: { name: string } }).projects) {
+            projectName = (taskData as { projects: { name: string } }).projects.name || '';
+          }
+          entry.taskGroups[taskKey] = {
+            id: taskKey,
+            title: (taskData as { title: string }).title,
+            type: (a.task_type as 'task' | 'subtask') || 'task',
+            project_name: projectName,
+            parent_task_title: parentTaskTitle,
+            estimated_duration: (taskData as { estimated_duration?: number }).estimated_duration,
+            sessions: {},
+          };
+        }
+        const group = entry.taskGroups[taskKey];
+        const dateStr = a.date;
+        if (!group.sessions[dateStr]) group.sessions[dateStr] = [];
+        const sess = a as { id: string; status?: string; estimated_duration?: number; actual_duration?: number; start_time?: string; end_time?: string; notes?: string };
+        group.sessions[dateStr].push({
+          id: sess.id,
+          status: sess.status,
+          estimated_duration: sess.estimated_duration,
+          actual_duration: sess.actual_duration ?? undefined,
+          start_time: sess.start_time,
+          end_time: sess.end_time,
+          notes: sess.notes,
+        });
+      });
+
+      filterEvents.forEach((e: { user_id: string; id: string; date: string; start_time: string; end_time: string; title?: string; event_type?: string; description?: string; project_id?: string | null }) => {
+        const entry = byUser.get(e.user_id);
+        if (!entry || !filterByProject(e.project_id)) return;
+        const [sh, sm] = (e.start_time || '00:00').split(':').map(Number);
+        const [eh, em] = (e.end_time || '00:00').split(':').map(Number);
+        const durationMinutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
+        const eventKey = `event-${e.id}`;
+        entry.taskGroups[eventKey] = {
+          id: eventKey,
+          title: e.title || 'Actividad',
+          type: 'event',
+          project_name: 'Actividad Adicional',
+          estimated_duration: durationMinutes,
+          event_type: e.event_type,
+          sessions: {
+            [e.date]: [{
+              id: e.id,
+              status: 'completed',
+              estimated_duration: durationMinutes,
+              actual_duration: durationMinutes,
+              start_time: `${e.date}T${e.start_time}`,
+              end_time: `${e.date}T${e.end_time}`,
+              notes: e.description,
+              event_type: e.event_type,
+            }],
+          },
+        };
+      });
+
+      const sessionList = (workSessions || []) as Array<{
+        assignment_id: string;
+        duration_minutes?: number;
+        createdAt?: string;
+        created_at?: string;
+      }>;
+      let assignMap = new Map<string, { user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null }>();
+      if (sessionList.length > 0) {
+        const assignmentIds = [...new Set(sessionList.map((s) => s.assignment_id))];
+        const { data: assignData } = await supabase
+          .from('task_work_assignments')
+          .select('id, user_id, task_id, subtask_id, task_type, date, project_id')
+          .in('id', assignmentIds);
+        assignMap = new Map((assignData || []).map((a: { id: string; user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null }) => [a.id, a]));
+      }
+      const sessionsByUserTask: Record<string, Record<string, Record<string, Array<{ duration_minutes?: number }>>>> = {};
+      sessionList.forEach((s) => {
+        const assign = assignMap.get(s.assignment_id);
+        if (!assign || !filterByProject(assign.project_id)) return;
+        const taskKey = `${assign.task_type}-${assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id}`;
+        const sessionDate = (s.createdAt || s.created_at)
+          ? format(new Date(s.createdAt || s.created_at), 'yyyy-MM-dd')
+          : assign.date;
+        if (!sessionsByUserTask[assign.user_id]) sessionsByUserTask[assign.user_id] = {};
+        if (!sessionsByUserTask[assign.user_id][taskKey]) sessionsByUserTask[assign.user_id][taskKey] = {};
+        if (!sessionsByUserTask[assign.user_id][taskKey][sessionDate]) {
+          sessionsByUserTask[assign.user_id][taskKey][sessionDate] = [];
+        }
+        sessionsByUserTask[assign.user_id][taskKey][sessionDate].push({
+          duration_minutes: s.duration_minutes ?? 0,
+        });
+      });
+
+      const result: TeamGanttUserData[] = userList.map((u) => {
+        const taskGroups = Object.values(byUser.get(u.id)!.taskGroups);
+        taskGroups.forEach((tg) => {
+          const taskKey = tg.id;
+          const ws = sessionsByUserTask[u.id]?.[taskKey];
+          if (ws) tg.workSessions = ws;
+        });
+
+        const executedTimeData: Record<string, Record<string, number>> = {};
+        for (const tg of taskGroups) {
+          executedTimeData[tg.id] = {};
+          for (const day of weekDaysForFetch) {
+            if (tg.workSessions?.[day.dateStr]) {
+              const total = tg.workSessions[day.dateStr].reduce((s, x) => s + (x.duration_minutes ?? 0), 0);
+              executedTimeData[tg.id][day.dateStr] = total;
+            } else {
+              executedTimeData[tg.id][day.dateStr] = 0;
+            }
+          }
+        }
+
+        const offScheduleWorkData: Record<string, Record<string, number>> = {};
+        for (const tg of taskGroups) {
+          const off: Record<string, number> = {};
+          if (tg.workSessions) {
+            for (const [dateStr, sessions] of Object.entries(tg.workSessions)) {
+              const planned = tg.sessions[dateStr] || [];
+              if (planned.length === 0) {
+                const total = sessions.reduce((s, x) => s + (x.duration_minutes ?? 0), 0);
+                if (total > 0) off[dateStr] = total;
+              }
+            }
+          }
+          offScheduleWorkData[tg.id] = off;
+        }
+
+        const sortedGantt = taskGroups.sort((a, b) => {
+          const getEarliest = (t: GanttTaskGroup) => {
+            let earliest = '23:59';
+            for (const sess of Object.values(t.sessions).flat()) {
+              const st = sess.start_time;
+              if (st) {
+                const timeOnly = st.includes('T') ? st.split('T')[1]?.substring(0, 5) : st;
+                if (timeOnly && timeOnly < earliest) earliest = timeOnly;
+              }
+            }
+            return earliest;
+          };
+          return getEarliest(a).localeCompare(getEarliest(b));
+        });
+
+        return {
+          userId: u.id,
+          userName: u.name || u.email || u.id,
+          userEmail: u.email || '',
+          ganttData: sortedGantt,
+          executedTimeData,
+          offScheduleWorkData,
+        };
+      });
+
+      setWeekGanttData(result);
+    } catch (e) {
+      console.error('Error fetching weekly team Gantt:', e);
+      setWeekGanttData([]);
+    } finally {
+      setWeekLoading(false);
+    }
+  }
+
   async function fetchUserWeekTasks(userId: string, startDate: string, endDate: string): Promise<TaskRowItem[]> {
     try {
       const { data: activeProjects } = await supabase.from('projects').select('id').eq('is_archived', false);
@@ -744,17 +1001,13 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
 
       {activeTab === 'week' ? (
         <TeamWeekGantt
-          weekData={weekData}
+          weekGanttData={weekGanttData}
           weekDays={weekDays}
           loading={weekLoading}
-          targetMinutes={TARGET_MINUTES_PER_DAY}
           fmtH={fmtH}
           isAdmin={!!isAdmin}
           currentUserId={currentUser?.id}
           impersonateUser={impersonateUser}
-          fetchUserTasks={fetchUserWeekTasks}
-          startDate={startDate}
-          endDate={endDate}
         />
       ) : (
         <>
@@ -1067,54 +1320,139 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
   );
 }
 
+function isDayPassed(dateStr: string): boolean {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dayDate = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today > dayDate;
+}
+
+function GanttDayCell({
+  taskGroup,
+  day,
+  executedTimeData,
+  offScheduleWorkData,
+  fmtH,
+}: {
+  taskGroup: GanttTaskGroup;
+  day: { dateStr: string; dayShort: string; dayNumber: string; isToday: boolean };
+  executedTimeData: Record<string, Record<string, number>>;
+  offScheduleWorkData: Record<string, Record<string, number>>;
+  fmtH: (m: number) => string;
+}) {
+  const sessions = taskGroup.sessions[day.dateStr] || [];
+  const plannedSessions = sessions.filter((s) => s.start_time && s.end_time);
+  const realExecuted = executedTimeData[taskGroup.id]?.[day.dateStr] || 0;
+  const offSchedule = offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0;
+  const hasOffSchedule = offSchedule > 0;
+
+  return (
+    <div className="p-1 min-h-[50px] border-r border-gray-200">
+      {hasOffSchedule && (
+        <div className="space-y-1 mb-1">
+          <div className="text-xs p-1 rounded border bg-orange-100 border-orange-300 relative" title={`🕒 FUERA DE CRONOGRAMA: ${(offSchedule / 60).toFixed(1)}h`}>
+            <div className="absolute inset-0 bg-orange-200 opacity-60" />
+            <div className="relative z-10 text-orange-800 font-medium">
+              <div className="text-center">🕒 EXTRA</div>
+              <div className="text-center">{(offSchedule / 60).toFixed(1)}h</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {sessions.length > 0 ? (
+        <div className="space-y-1">
+          {plannedSessions.map((session, idx) => {
+            const startTime = session.start_time ? new Date(session.start_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+            const endTime = session.end_time ? new Date(session.end_time).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+            let plannedMinutes = 0;
+            if (session.start_time && session.end_time) {
+              plannedMinutes = Math.max(0, (new Date(session.end_time).getTime() - new Date(session.start_time).getTime()) / 60000);
+            }
+            const executedMinutes = realExecuted + offSchedule;
+            const maxTime = Math.max(plannedMinutes, executedMinutes);
+            const executedPercent = maxTime > 0 ? (executedMinutes / maxTime) * 100 : 0;
+            const isNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0 && taskGroup.type !== 'event';
+
+            let bgClass, barClass;
+            if (taskGroup.type === 'event') {
+              bgClass = 'bg-purple-50 border-purple-200';
+              barClass = 'bg-purple-200';
+            } else if (isNonCompliant) {
+              bgClass = 'bg-red-50 border-red-200';
+              barClass = 'bg-red-200';
+            } else {
+              bgClass = 'bg-blue-50 border-blue-200';
+              barClass = 'bg-blue-200';
+            }
+
+            return (
+              <div key={idx} className={`text-xs p-1 rounded border ${bgClass} relative overflow-hidden`} title={`${startTime}-${endTime} | P:${(plannedMinutes / 60).toFixed(1)}h E:${(executedMinutes / 60).toFixed(1)}h`}>
+                <div className={`absolute inset-0 ${barClass} opacity-50`} />
+                {(executedMinutes > 0 || taskGroup.type === 'event') && (
+                  <div
+                    className={`absolute inset-y-0 left-0 ${taskGroup.type === 'event' ? 'bg-purple-400' : executedMinutes >= plannedMinutes ? 'bg-green-400' : 'bg-green-300'} opacity-70`}
+                    style={{ width: taskGroup.type === 'event' ? '100%' : `${Math.min(executedPercent, 100)}%` }}
+                  />
+                )}
+                <div className="relative z-10">
+                  <div className="font-medium text-gray-800">{startTime && endTime ? `${startTime}-${endTime}` : 'Sin horario'}</div>
+                  <div className="flex justify-between text-xs">
+                    {taskGroup.type === 'event' ? (
+                      <><span>📅 {(plannedMinutes / 60).toFixed(1)}h</span><span>✅ Ejecutado</span></>
+                    ) : (
+                      <><span>P:{(plannedMinutes / 60).toFixed(1)}h</span><span>E:{(executedMinutes / 60).toFixed(1)}h</span></>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {sessions.filter((s) => !s.start_time || !s.end_time).map((session, idx) => {
+            const plannedMinutes = session.estimated_duration || 0;
+            const executedMinutes = realExecuted + offSchedule;
+            const isNonCompliant = isDayPassed(day.dateStr) && executedMinutes === 0;
+            const bgClass = isNonCompliant ? 'bg-red-100 border-red-300 text-red-700' : 'bg-gray-100 border-gray-300 text-gray-700';
+            const barClass = isNonCompliant ? 'bg-red-300' : 'bg-green-300';
+
+            return (
+              <div key={`no-${idx}`} className={`text-xs p-1 rounded border ${bgClass} relative overflow-hidden`} title={`Sin horario | P:${(plannedMinutes / 60).toFixed(1)}h E:${(executedMinutes / 60).toFixed(1)}h`}>
+                {executedMinutes > 0 && (
+                  <div className={`absolute inset-y-0 left-0 ${barClass} opacity-50`} style={{ width: `${Math.min((executedMinutes / plannedMinutes) * 100, 100)}%` }} />
+                )}
+                <div className="relative z-10">
+                  <div>{isNonCompliant ? '⚠️ INCUMPLIDO' : 'Sin horario'}</div>
+                  <div className="flex justify-between"><span>P:{(plannedMinutes / 60).toFixed(1)}h</span><span>E:{(executedMinutes / 60).toFixed(1)}h</span></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-xs text-gray-400 text-center pt-2">-</div>
+      )}
+    </div>
+  );
+}
+
 function TeamWeekGantt({
-  weekData,
+  weekGanttData,
   weekDays,
   loading,
-  targetMinutes,
   fmtH,
   isAdmin,
   currentUserId,
   impersonateUser,
-  fetchUserTasks,
-  startDate,
-  endDate,
 }: {
-  weekData: WeekUserData[];
+  weekGanttData: TeamGanttUserData[];
   weekDays: ReturnType<typeof getWeekDays>;
   loading: boolean;
-  targetMinutes: number;
   fmtH: (m: number) => string;
   isAdmin: boolean;
   currentUserId?: string;
   impersonateUser?: (u: { id: string; name: string; email: string; role: string }) => void;
-  fetchUserTasks?: (userId: string, startDate: string, endDate: string) => Promise<TaskRowItem[]>;
-  startDate?: string;
-  endDate?: string;
 }) {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
-  const [expandedTasks, setExpandedTasks] = useState<TaskRowItem[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
-
-  async function handleToggleExpand(userId: string) {
-    if (expandedUserId === userId) {
-      setExpandedUserId(null);
-      setExpandedTasks([]);
-      return;
-    }
-    setExpandedUserId(userId);
-    if (fetchUserTasks && startDate && endDate) {
-      setTasksLoading(true);
-      try {
-        const tasks = await fetchUserTasks(userId, startDate, endDate);
-        setExpandedTasks(tasks);
-      } finally {
-        setTasksLoading(false);
-      }
-    } else {
-      setExpandedTasks([]);
-    }
-  }
 
   if (loading) {
     return (
@@ -1130,83 +1468,36 @@ function TeamWeekGantt({
   return (
     <div className="bg-white rounded-lg shadow overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
-          <div className="grid gap-0" style={{ gridTemplateColumns: `minmax(140px, 1fr) repeat(7, minmax(90px, 1fr)) minmax(70px, 1fr)` }}>
-            <div className="px-3 py-2 font-medium text-sm text-gray-700 bg-gray-50 border-b border-r border-gray-200">Persona</div>
+        <div className="min-w-[1000px]">
+          <div className="grid grid-cols-9 gap-2 mb-4">
+            <div className="font-medium text-sm text-gray-700 p-1 min-h-[50px] flex items-center">Persona / Tarea</div>
             {weekDays.map((d) => (
-              <div
-                key={d.dateStr}
-                className={`px-2 py-2 text-center text-sm border-b border-r border-gray-200 ${
-                  d.isToday ? 'bg-blue-100 text-blue-800 font-medium' : 'bg-gray-50 text-gray-700'
-                }`}
-              >
-                {d.isToday && <span className="block text-[10px] font-bold text-red-600 mb-0.5">HOY</span>}
+              <div key={d.dateStr} className={`text-center p-1 text-sm min-h-[50px] flex flex-col justify-center relative ${d.isToday ? 'bg-blue-100 text-blue-800 font-medium border-2 border-blue-400 rounded-lg' : 'bg-gray-50 text-gray-700'}`}>
+                {d.isToday && <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs px-1 rounded-full font-bold shadow-sm">HOY</div>}
                 <div className="font-medium">{d.dayShort}</div>
                 <div className="text-xs">{d.dayNumber}</div>
               </div>
             ))}
-            <div className="px-2 py-2 text-center text-xs font-medium bg-gray-100 text-gray-700 border-b border-gray-200">TOTAL</div>
+            <div className="text-center p-1 text-xs bg-gray-100 text-gray-700 min-h-[50px] flex flex-col justify-center">
+              <div className="font-medium">TOTAL</div>
+              <div className="text-xs text-gray-500">P/E</div>
+            </div>
           </div>
 
-          {weekData.length === 0 ? (
+          {weekGanttData.length === 0 ? (
             <div className="py-12 text-center text-gray-500">No hay datos para esta semana.</div>
           ) : (
-            weekData.map((u) => {
-              let totalWeek = 0;
-              const cells = weekDays.map((d) => {
-                const cell = u.byDate[d.dateStr] || { planned: 0, extra: 0, actual: 0, overdue: 0, rework: 0 };
-                const total = cell.planned + cell.extra + cell.overdue + cell.rework;
-                totalWeek += total;
-                const pctTotal = Math.min(100, (total / targetMinutes) * 100);
-                const taskPart = cell.planned + cell.overdue;
-                const pctTask = total > 0 ? Math.min(100, (taskPart / total) * 100) : 0;
-                const pctExtra = total > 0 ? Math.min(100 - pctTask, (cell.extra / total) * 100) : 0;
-                const pctRework = total > 0 ? Math.min(100 - pctTask - pctExtra, (cell.rework / total) * 100) : 0;
-                const pctOverdue = total > 0 ? 100 - pctTask - pctExtra - pctRework : 0;
-
-                return (
-                  <div
-                    key={`${u.userId}-${d.dateStr}`}
-                    className="px-2 py-2 border-b border-r border-gray-100 min-h-[60px] flex flex-col justify-center"
-                  >
-                    {total > 0 ? (
-                      <>
-                        <div className="h-3 bg-gray-100 rounded-full overflow-hidden flex mb-1">
-                          <div className="h-full bg-emerald-600" style={{ width: `${Math.max(0, pctTask - (cell.overdue / total) * 100) || 0}%` }} />
-                          <div className="h-full bg-red-300" style={{ width: `${(cell.overdue / total) * 100}%` }} />
-                          <div className="h-full bg-purple-400" style={{ width: `${pctExtra}%` }} />
-                          <div className="h-full bg-orange-400" style={{ width: `${pctRework}%` }} />
-                        </div>
-                        <div className="text-xs font-semibold text-gray-800">{fmtH(total)}h</div>
-                        {cell.actual > 0 && (
-                          <div className="text-[10px] text-blue-600" title="Ejecutado">E: {fmtH(cell.actual)}h</div>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-xs text-gray-400">--</span>
-                    )}
-                  </div>
-                );
-              });
-
+            weekGanttData.map((u) => {
+              const isExpanded = expandedUserId === u.userId;
               return (
-                <React.Fragment key={u.userId}>
-                  <div className="contents">
-                    <div
-                      className="px-3 py-2 border-b border-r border-gray-200 flex items-center gap-2 min-w-0 cursor-pointer hover:bg-gray-50"
-                      onClick={() => handleToggleExpand(u.userId)}
-                    >
-                      <button
-                        type="button"
-                        className="p-0.5 rounded hover:bg-gray-200 shrink-0 text-gray-500"
-                        onClick={(e) => { e.stopPropagation(); handleToggleExpand(u.userId); }}
-                        title={expandedUserId === u.userId ? 'Contraer' : 'Expandir tareas'}
-                      >
-                        {expandedUserId === u.userId ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
+                <div key={u.userId} className="mb-3 border border-gray-200 rounded-lg overflow-hidden">
+                  <div
+                    className="grid grid-cols-9 gap-2 bg-gray-100 border-b border-gray-200 cursor-pointer hover:bg-gray-50"
+                    onClick={() => setExpandedUserId(isExpanded ? null : u.userId)}
+                  >
+                    <div className="p-2 flex items-center gap-2 col-span-1">
+                      <button type="button" className="p-0.5 rounded hover:bg-gray-200 shrink-0 text-gray-500">
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
                       <span className="font-medium text-gray-900 text-sm truncate">{u.userName}</span>
                       {isAdmin && currentUserId !== u.userId && impersonateUser && (
@@ -1218,61 +1509,75 @@ function TeamWeekGantt({
                           <LogIn className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      {u.overdueCount > 0 && (
-                        <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded shrink-0" title="Tareas retrasadas">
-                          +{u.overdueCount}
-                        </span>
-                      )}
                     </div>
-                    {cells}
-                    <div className="px-2 py-2 border-b border-gray-200 text-center">
-                      <span className="text-sm font-bold text-gray-800">{fmtH(totalWeek)}h</span>
+                    {weekDays.map((d) => {
+                      const totalP = u.ganttData.reduce((s, tg) => {
+                        const sess = tg.sessions[d.dateStr] || [];
+                        return s + sess.reduce((a, x) => a + (x.start_time && x.end_time ? Math.max(0, (new Date(x.end_time!).getTime() - new Date(x.start_time!).getTime()) / 60000) : (x.estimated_duration || 0)), 0);
+                      }, 0);
+                      const totalE = u.ganttData.reduce((s, tg) => s + (u.executedTimeData[tg.id]?.[d.dateStr] || 0) + (u.offScheduleWorkData[tg.id]?.[d.dateStr] || 0), 0);
+                      return (
+                        <div key={d.dateStr} className="p-1 text-center text-xs font-medium">
+                          <div>P:{(totalP / 60).toFixed(1)}h</div>
+                          <div>E:{(totalE / 60).toFixed(1)}h</div>
+                        </div>
+                      );
+                    })}
+                    <div className="p-1 text-center text-xs font-bold bg-gray-200">
+                      <div>P:{(u.ganttData.reduce((s, tg) => s + Object.values(tg.sessions).flat().reduce((a, x) => {
+                        if (x.start_time && x.end_time) return a + Math.max(0, (new Date(x.end_time).getTime() - new Date(x.start_time).getTime()) / 60000);
+                        return a + (x.estimated_duration || 0);
+                      }, 0), 0) / 60).toFixed(1)}h</div>
+                      <div>E:{(u.ganttData.reduce((s, tg) => s + Object.values(u.executedTimeData[tg.id] || {}).reduce((a, v) => a + v, 0) + Object.values(u.offScheduleWorkData[tg.id] || {}).reduce((a, v) => a + v, 0), 0) / 60).toFixed(1)}h</div>
                     </div>
                   </div>
-                  {expandedUserId === u.userId && (
-                    <div
-                      className="col-span-full grid gap-0 border-b border-gray-200 bg-gray-50/80"
-                      style={{ gridTemplateColumns: `minmax(140px, 1fr) repeat(7, minmax(90px, 1fr)) minmax(70px, 1fr)` }}
-                    >
-                      <div className="px-3 py-2 text-xs font-medium text-gray-600 col-span-full">
-                        Desglose por tarea
-                      </div>
-                      {tasksLoading ? (
-                        <div className="col-span-full px-3 py-4 text-sm text-gray-500">Cargando...</div>
-                      ) : expandedTasks.length === 0 ? (
-                        <div className="col-span-full px-3 py-4 text-sm text-gray-500">Sin tareas en esta semana</div>
-                      ) : (
-                        expandedTasks.map((t, i) => {
-                          const dayCells = weekDays.map((d) => {
-                            const match = t.dateStr === d.dateStr;
-                            return (
-                              <div key={d.dateStr} className="px-2 py-1 border-r border-gray-100 text-center">
-                                {match ? (
-                                  <span className="text-xs text-gray-700" title={t.taskName}>
-                                    {fmtH(t.minutes)}h
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-300">-</span>
-                                )}
-                              </div>
-                            );
-                          });
-                          return (
-                            <React.Fragment key={i}>
-                              <div className="px-3 py-1 text-xs text-gray-700 truncate border-r border-gray-200" title={t.taskName}>
-                                {t.taskName}
-                              </div>
-                              {dayCells}
-                              <div className="px-2 py-1 text-center">
-                                <span className="text-xs font-medium">{fmtH(t.minutes)}h</span>
-                              </div>
-                            </React.Fragment>
-                          );
-                        })
-                      )}
-                    </div>
+
+                  {isExpanded && u.ganttData.length > 0 && (
+                    <>
+                      {u.ganttData.map((taskGroup) => {
+                        const totalTaskHours = weekDays.reduce((total, day) => {
+                          const sess = taskGroup.sessions[day.dateStr] || [];
+                          const dayTotal = sess.reduce((sum, s) => {
+                            if (s.start_time && s.end_time) return sum + Math.max(0, (new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 60000);
+                            return sum + (s.estimated_duration || 0);
+                          }, 0);
+                          return total + dayTotal;
+                        }, 0);
+                        const totalExecuted = weekDays.reduce((total, day) => {
+                          if (taskGroup.type === 'event') {
+                            const sess = taskGroup.sessions[day.dateStr] || [];
+                            return total + sess.reduce((a, x) => a + (x.actual_duration || 0), 0);
+                          }
+                          return total + (u.executedTimeData[taskGroup.id]?.[day.dateStr] || 0) + (u.offScheduleWorkData[taskGroup.id]?.[day.dateStr] || 0);
+                        }, 0);
+
+                        return (
+                          <div key={taskGroup.id} className="grid grid-cols-9 gap-2 border-t border-gray-100">
+                            <div className={`p-2 font-medium text-sm border-r border-gray-200 min-h-[50px] ${taskGroup.type === 'event' ? 'bg-purple-50 text-purple-800' : 'bg-gray-50 text-gray-800'}`}>
+                              <div className="font-medium">{taskGroup.type === 'event' ? '📅 ' : ''}{taskGroup.title}</div>
+                              <div className="text-xs text-gray-500">{taskGroup.type === 'subtask' ? 'Subtarea' : taskGroup.type === 'event' ? `Actividad (${taskGroup.event_type || 'extra'})` : 'Tarea'}</div>
+                              {taskGroup.parent_task_title && <div className="text-xs text-gray-500 mt-1">T.P: {taskGroup.parent_task_title}</div>}
+                            </div>
+                            {weekDays.map((day) => (
+                              <GanttDayCell
+                                key={day.dateStr}
+                                taskGroup={taskGroup}
+                                day={day}
+                                executedTimeData={u.executedTimeData}
+                                offScheduleWorkData={u.offScheduleWorkData}
+                                fmtH={fmtH}
+                              />
+                            ))}
+                            <div className="p-1 bg-gray-50 border-l border-gray-200 text-center text-xs min-h-[50px] flex flex-col justify-center">
+                              <div className="text-gray-700">P:{(totalTaskHours / 60).toFixed(1)}h</div>
+                              <div className="text-gray-700">E:{(totalExecuted / 60).toFixed(1)}h</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
                   )}
-                </React.Fragment>
+                </div>
               );
             })
           )}
@@ -1280,11 +1585,12 @@ function TeamWeekGantt({
       </div>
 
       <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-emerald-600 inline-block" /> Tareas</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-300 inline-block" /> Retrasos</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-purple-400 inline-block" /> Extras</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-orange-400 inline-block" /> Retrabajos</span>
-        <span className="text-blue-600">E = Ejecutado</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-blue-200 inline-block" /> Planificado</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-green-400 inline-block" /> Ejecutado</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-200 inline-block" /> Incumplimiento</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-orange-200 inline-block" /> Fuera de cronograma</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-purple-200 inline-block" /> Actividad adicional</span>
+        <span className="text-gray-600">P = Planificado | E = Ejecutado</span>
       </div>
     </div>
   );
