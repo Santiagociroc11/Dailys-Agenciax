@@ -624,7 +624,10 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
           .lte('date', endDate),
         supabase
           .from('work_sessions')
-          .select('id, assignment_id, duration_minutes, createdAt, created_at')
+          .select(`
+            id, assignment_id, duration_minutes, createdAt, created_at,
+            task_work_assignments!inner(id, user_id, task_id, subtask_id, task_type, date, project_id)
+          `)
           .gte('createdAt', startISO)
           .lte('createdAt', endISO),
       ]);
@@ -715,19 +718,11 @@ export default function DailyHoursControl({ embedded }: DailyHoursControlProps) 
         duration_minutes?: number;
         createdAt?: string;
         created_at?: string;
+        task_work_assignments?: { user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null };
       }>;
-      let assignMap = new Map<string, { user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null }>();
-      if (sessionList.length > 0) {
-        const assignmentIds = [...new Set(sessionList.map((s) => s.assignment_id))];
-        const { data: assignData } = await supabase
-          .from('task_work_assignments')
-          .select('id, user_id, task_id, subtask_id, task_type, date, project_id')
-          .in('id', assignmentIds);
-        assignMap = new Map((assignData || []).map((a: { id: string; user_id: string; task_id: string; subtask_id?: string; task_type: string; date: string; project_id?: string | null }) => [a.id, a]));
-      }
       const sessionsByUserTask: Record<string, Record<string, Record<string, Array<{ duration_minutes?: number }>>>> = {};
       sessionList.forEach((s) => {
-        const assign = assignMap.get(s.assignment_id);
+        const assign = s.task_work_assignments;
         if (!assign || !filterByProject(assign.project_id)) return;
         const taskKey = `${assign.task_type}-${assign.task_type === 'subtask' ? assign.subtask_id : assign.task_id}`;
         const sessionDate = (s.createdAt || s.created_at)
