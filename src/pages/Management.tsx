@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2, Search, UserMinus } from 'lucide-react';
+import { Calendar, Clock, Users, Filter, X, ChevronDown, ChevronUp, FolderOpen, CheckCircle, AlertTriangle, ArrowRight, ArrowLeft, Trash2, Search, UserMinus, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { statusTextMap } from '../components/TaskStatusDisplay';
@@ -104,6 +105,8 @@ const mainTaskColumns = [
   { id: 'main_completed', name: 'COMPLETADA' }
 ];
 
+type AlertaSolicitud = { tipo: string; descripcion: string; created_at?: string };
+
 // Helper function to parse notes and feedback
 const getItemDetails = (item: Task | Subtask | null): {
   description: string | null;
@@ -117,6 +120,7 @@ const getItemDetails = (item: Task | Subtask | null): {
     rework: Array<{ tiempo: number; fecha_devolucion: string; motivo?: string }>;
     total: number | null;
   } | null;
+  alertasSolicitudes: AlertaSolicitud[];
 } => {
   if (!item) {
     return {
@@ -126,7 +130,8 @@ const getItemDetails = (item: Task | Subtask | null): {
       returnedFeedback: null,
       approvedFeedback: null,
       realDuration: null,
-      timeBreakdown: null
+      timeBreakdown: null,
+      alertasSolicitudes: []
     };
   }
 
@@ -136,6 +141,7 @@ const getItemDetails = (item: Task | Subtask | null): {
   let returnedFeedback: TaskFeedback | null = null;
   let approvedFeedback: TaskFeedback | null = null;
   let realDuration: number | null = null;
+  let alertasSolicitudes: AlertaSolicitud[] = [];
   let timeBreakdown: {
     initial: number | null;
     rework: Array<{ tiempo: number; fecha_devolucion: string; motivo?: string }>;
@@ -195,6 +201,13 @@ const getItemDetails = (item: Task | Subtask | null): {
         total: parsedNotes.duracion_real
       };
     }
+    if (Array.isArray(parsedNotes.alertas_solicitudes)) {
+      alertasSolicitudes = parsedNotes.alertas_solicitudes.map((a: { tipo?: string; descripcion?: string; created_at?: string }) => ({
+        tipo: a.tipo || 'solicitud_nueva_tarea',
+        descripcion: a.descripcion || '',
+        created_at: a.created_at
+      }));
+    }
   }
 
   if (item.feedback) {
@@ -205,7 +218,7 @@ const getItemDetails = (item: Task | Subtask | null): {
     }
   }
 
-  return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration, timeBreakdown };
+  return { description, deliveryComments, blockReason, returnedFeedback, approvedFeedback, realDuration, timeBreakdown, alertasSolicitudes };
 };
 
 const determineMainTaskStatus = (task: Task, subtasksOfTask: Subtask[]): string => {
@@ -261,6 +274,7 @@ const determineMainTaskStatus = (task: Task, subtasksOfTask: Subtask[]): string 
 
 function Management() {
   const { isAdmin, user } = useAuth();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -4764,6 +4778,55 @@ function Management() {
                         </div>
                         <div className="p-4 text-green-900 text-sm whitespace-pre-wrap">
                           {deliveryComments}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Alertas y solicitudes (tareas de supervisión) */}
+                    {getItemDetails(taskDetails).alertasSolicitudes?.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg shadow-sm overflow-hidden">
+                        <div className="bg-amber-100 px-4 py-3 border-b border-amber-200 flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-amber-700" />
+                          <h4 className="text-base font-semibold text-amber-800">Alertas y solicitudes del supervisor</h4>
+                        </div>
+                        <div className="p-4 space-y-3">
+                          {getItemDetails(taskDetails).alertasSolicitudes.map((a, idx) => (
+                            <div key={idx} className="flex items-start gap-3 p-3 bg-white rounded border border-amber-100">
+                              <span className={`text-xs px-2 py-1 rounded flex-shrink-0 ${
+                                a.tipo === 'solicitud_nueva_tarea' ? 'bg-blue-100 text-blue-800' :
+                                a.tipo === 'problema' ? 'bg-red-100 text-red-800' :
+                                'bg-purple-100 text-purple-800'
+                              }`}>
+                                {a.tipo === 'solicitud_nueva_tarea' ? 'Nueva tarea' : a.tipo === 'problema' ? 'Problema' : 'Recurso'}
+                              </span>
+                              <p className="flex-1 text-sm text-gray-800">{a.descripcion}</p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parentTask = detailsItem?.type === 'subtask' ? taskDetails?.parent_task : taskDetails;
+                                  const projectId = parentTask?.project_id || taskDetails?.project_id || null;
+                                  const phaseId = parentTask?.phase_id || taskDetails?.phase_id || null;
+                                  navigate('/tasks', {
+                                    state: {
+                                      fromSolicitud: {
+                                        descripcion: a.descripcion,
+                                        tipo: a.tipo,
+                                        task_id: detailsItem?.type === 'task' ? taskDetails?.id : null,
+                                        subtask_id: detailsItem?.type === 'subtask' ? taskDetails?.id : null,
+                                        project_id: projectId,
+                                        phase_id: phaseId,
+                                      },
+                                    },
+                                  });
+                                  setShowTaskDetailsModal(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                              >
+                                <Plus className="w-4 h-4" />
+                                Crear tarea
+                              </button>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}

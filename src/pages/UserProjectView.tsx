@@ -440,6 +440,11 @@ export default function UserProjectView() {
    // Tarea de supervisión: exige reporte detallado
    const [isSupervisionTask, setIsSupervisionTask] = useState(false);
 
+   // Alertas/solicitudes para el admin (solo tareas de supervisión)
+   const [alertasSolicitudes, setAlertasSolicitudes] = useState<Array<{ tipo: string; descripcion: string }>>([]);
+   const [alertaTipo, setAlertaTipo] = useState<string>("solicitud_nueva_tarea");
+   const [alertaDescripcion, setAlertaDescripcion] = useState("");
+
    // Estado para guardar
    const [saving, setSaving] = useState(false);
    const [error, setError] = useState<string | null>(null);
@@ -2401,10 +2406,19 @@ export default function UserProjectView() {
       let durReason = "";
       let prefillDuration = 0;
 
+      let prefillAlertas: Array<{ tipo: string; descripcion: string }> = [];
       if (isEditing && selectedTask?.notes) {
-         const metadata = typeof selectedTask.notes === "object" ? selectedTask.notes : {};
-         details = metadata.entregables || metadata.notes || "";
-         durReason = metadata.razon_duracion || "";
+         let metadata: Record<string, unknown> = {};
+         if (typeof selectedTask.notes === "object" && selectedTask.notes !== null) {
+            metadata = selectedTask.notes as Record<string, unknown>;
+         } else if (typeof selectedTask.notes === "string") {
+            try { metadata = JSON.parse(selectedTask.notes) as Record<string, unknown>; } catch { /* ignore */ }
+         }
+         details = (metadata.entregables || metadata.notes || "") as string;
+         durReason = (metadata.razon_duracion || "") as string;
+         if (Array.isArray(metadata.alertas_solicitudes)) {
+            prefillAlertas = (metadata.alertas_solicitudes as Array<{ tipo?: string; descripcion?: string }>).map((a) => ({ tipo: a.tipo || "solicitud_nueva_tarea", descripcion: a.descripcion || "" }));
+         }
       }
 
       // Pre-llenar duración reportada para que el usuario pueda corregirla
@@ -2438,7 +2452,10 @@ export default function UserProjectView() {
       }
 
       setStatusDetails(details);
-      
+      setAlertasSolicitudes(prefillAlertas);
+      setAlertaDescripcion("");
+      setAlertaTipo("solicitud_nueva_tarea");
+
       // Para tareas entregadas: pre-llenar duración para permitir corrección. Para nuevas: en blanco
       setActualDuration(isEditing && prefillDuration > 0 ? prefillDuration : 0);
       setDurationUnit("minutes");
@@ -2586,6 +2603,12 @@ export default function UserProjectView() {
          metadata.duracion_real = durationMin;
          metadata.unidad_original = durationUnit;
          metadata.razon_duracion = durationReason;
+         if (alertasSolicitudes.length > 0) {
+            metadata.alertas_solicitudes = alertasSolicitudes.map((a) => ({
+               ...a,
+               created_at: new Date().toISOString(),
+            }));
+         }
       } else if (selectedStatus === "in_progress") {
          metadata.tiempo_sesion = durationMin; // Tiempo trabajado en esta sesión
          metadata.unidad_original = durationUnit;
@@ -2593,6 +2616,18 @@ export default function UserProjectView() {
          metadata.descripcion_avance = statusDetails; // Descripción del avance
       } else if (selectedStatus === "blocked") {
          metadata.razon_bloqueo = statusDetails;
+      }
+
+      // Merge con notes existentes para preservar campos como returned_feedback
+      let finalNotes = metadata;
+      if (taskForStatusUpdate?.notes) {
+         let existing: Record<string, unknown> = {};
+         if (typeof taskForStatusUpdate.notes === "object" && taskForStatusUpdate.notes !== null) {
+            existing = taskForStatusUpdate.notes as Record<string, unknown>;
+         } else if (typeof taskForStatusUpdate.notes === "string") {
+            try { existing = JSON.parse(taskForStatusUpdate.notes) as Record<string, unknown>; } catch { /* ignore */ }
+         }
+         finalNotes = { ...existing, ...metadata };
       }
 
       try {
@@ -2604,7 +2639,7 @@ export default function UserProjectView() {
                .from(table)
                .update({
                   status: selectedStatus,
-                  notes: typeof metadata === "string" ? metadata : JSON.stringify(metadata),
+                  notes: typeof finalNotes === "string" ? finalNotes : JSON.stringify(finalNotes),
                })
                .eq("id", originalId),
 
@@ -2614,7 +2649,7 @@ export default function UserProjectView() {
                .update({
                   status: selectedStatus,
                   updated_at: new Date().toISOString(),
-                  notes: metadata, // SIN JSON.stringify
+                  notes: finalNotes, // SIN JSON.stringify
                   // ❌ ELIMINADO: Ya no sobrescribimos end_time ni actual_duration aquí
                })
                .eq("user_id", user!.id)
@@ -2758,7 +2793,7 @@ export default function UserProjectView() {
                changed_by: user!.id,
                previous_status: taskForStatusUpdate.status,
                new_status: selectedStatus,
-               metadata: metadata,
+               metadata: finalNotes,
             };
 
             const { error: historyError } = await supabase.from("status_history").insert([historyRecord]);
@@ -2867,13 +2902,13 @@ export default function UserProjectView() {
          } else {
             // Si se marcó con otro estado, actualizar el estado en la lista correspondiente
             if (isInReturned) {
-               setReturnedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)));
+               setReturnedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: finalNotes } : t)));
             }
             if (isInAssigned) {
-               setAssignedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)));
+               setAssignedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: finalNotes } : t)));
             }
             if (isInDelayed) {
-               setDelayedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: metadata } : t)));
+               setDelayedTaskItems((prev) => prev.map((t) => (t.id === selectedTaskId ? { ...t, status: selectedStatus, notes: finalNotes } : t)));
             }
          }
 
@@ -6619,6 +6654,8 @@ export default function UserProjectView() {
                            setShowStatusModal(false);
                            setTaskForStatusUpdate(null);
                            setActionType(null);
+                           setAlertasSolicitudes([]);
+                           setAlertaDescripcion("");
                            // Resetear campos de programación
                            setNextWorkDate("");
                            setNextWorkStartTime("");
@@ -6732,6 +6769,72 @@ export default function UserProjectView() {
                                     : "Ejemplos: Terminé la implementación del módulo X, Corregí el error en Y, etc."}
                               />
                            </div>
+
+                           {/* Alertas/solicitudes para el admin (solo tareas de supervisión) */}
+                           {isSupervisionTask && (
+                              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                                 <label className="block text-sm font-medium text-amber-800 mb-2">
+                                    Alertas o solicitudes para el admin (opcional)
+                                 </label>
+                                 <p className="text-xs text-amber-700 mb-3">
+                                    Reporta problemas detectados, solicitudes de nuevas tareas o recursos que el admin deba crear.
+                                 </p>
+                                 <div className="flex gap-2 mb-2">
+                                    <select
+                                       className="flex-shrink-0 px-3 py-2 border border-amber-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
+                                       value={alertaTipo}
+                                       onChange={(e) => setAlertaTipo(e.target.value)}
+                                    >
+                                       <option value="solicitud_nueva_tarea">Solicitud de nueva tarea</option>
+                                       <option value="problema">Problema detectado</option>
+                                       <option value="recurso">Solicitud de recurso</option>
+                                    </select>
+                                    <textarea
+                                       className="flex-1 px-3 py-2 border border-amber-300 rounded-md text-sm focus:ring-amber-500 focus:border-amber-500"
+                                       rows={1}
+                                       placeholder="Ej: Falta crear tarea para corregir bug en login..."
+                                       value={alertaDescripcion}
+                                       onChange={(e) => setAlertaDescripcion(e.target.value)}
+                                    />
+                                    <button
+                                       type="button"
+                                       onClick={() => {
+                                          if (alertaDescripcion.trim()) {
+                                             setAlertasSolicitudes((prev) => [...prev, { tipo: alertaTipo, descripcion: alertaDescripcion.trim() }]);
+                                             setAlertaDescripcion("");
+                                          }
+                                       }}
+                                       className="px-3 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                    >
+                                       Agregar
+                                    </button>
+                                 </div>
+                                 {alertasSolicitudes.length > 0 && (
+                                    <ul className="space-y-2 mt-2">
+                                       {alertasSolicitudes.map((a, idx) => (
+                                          <li key={idx} className="flex items-start gap-2 p-2 bg-white rounded border border-amber-100">
+                                             <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${
+                                                a.tipo === "solicitud_nueva_tarea" ? "bg-blue-100 text-blue-800" :
+                                                a.tipo === "problema" ? "bg-red-100 text-red-800" :
+                                                "bg-purple-100 text-purple-800"
+                                             }`}>
+                                                {a.tipo === "solicitud_nueva_tarea" ? "Nueva tarea" : a.tipo === "problema" ? "Problema" : "Recurso"}
+                                             </span>
+                                             <span className="flex-1 text-sm">{a.descripcion}</span>
+                                             <button
+                                                type="button"
+                                                onClick={() => setAlertasSolicitudes((prev) => prev.filter((_, i) => i !== idx))}
+                                                className="text-amber-600 hover:text-amber-800 text-sm"
+                                                title="Eliminar"
+                                             >
+                                                ×
+                                             </button>
+                                          </li>
+                                       ))}
+                                    </ul>
+                                 )}
+                              </div>
+                           )}
 
                            <div className="mb-4">
                               <label className="block text-sm font-medium text-gray-700 mb-2">

@@ -1,24 +1,31 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ClipboardList, Calendar, User, FolderOpen, Filter, Download } from 'lucide-react';
+import { ClipboardList, Calendar, User, FolderOpen, Filter, Download, Plus } from 'lucide-react';
+
+type AlertaSolicitud = { tipo: string; descripcion: string };
 
 interface SupervisionEntry {
   id: string;
+  taskId: string;
   subtaskTitle: string;
   taskTitle: string;
   projectName: string;
   projectId: string;
+  phaseId?: string | null;
   userName: string;
   userEmail: string;
   date: string;
   status: string;
   report: string;
   durationMinutes?: number;
+  alertasSolicitudes: AlertaSolicitud[];
 }
 
 export default function SupervisionLog() {
+  const navigate = useNavigate();
   const [entries, setEntries] = useState<SupervisionEntry[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [projectId, setProjectId] = useState<string>('');
@@ -52,7 +59,7 @@ export default function SupervisionLog() {
       // Obtener tareas con is_supervision en notes
       const { data: tasksData } = await supabase
         .from('tasks')
-        .select('id, title, project_id, notes, projects!inner(id, name, is_archived)')
+        .select('id, title, project_id, phase_id, notes, projects!inner(id, name, is_archived)')
         .eq('projects.is_archived', false);
 
       const supervisionTasks = (tasksData || []).filter((t: { notes?: unknown; title?: string }) => {
@@ -75,9 +82,9 @@ export default function SupervisionLog() {
 
       const taskIds = filteredTasks.map((t: { id: string }) => t.id);
       const taskMap = new Map(
-        filteredTasks.map((t: { id: string; title?: string; project_id?: string; projects?: { name?: string } }) => [
+        filteredTasks.map((t: { id: string; title?: string; project_id?: string; phase_id?: string; projects?: { name?: string } }) => [
           t.id,
-          { title: t.title, projectId: t.project_id, projectName: (t.projects as { name?: string })?.name || 'Sin proyecto' },
+          { title: t.title, projectId: t.project_id, phaseId: t.phase_id, projectName: (t.projects as { name?: string })?.name || 'Sin proyecto' },
         ])
       );
 
@@ -113,30 +120,41 @@ export default function SupervisionLog() {
 
         let report = '';
         let durationMinutes: number | undefined;
+        let alertasSolicitudes: AlertaSolicitud[] = [];
         if (s.notes) {
           try {
             const notes = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes;
             report = notes.entregables || notes.notes || notes.descripcion_avance || '';
             durationMinutes = notes.duracion_real;
+            if (Array.isArray(notes.alertas_solicitudes)) {
+              alertasSolicitudes = notes.alertas_solicitudes.map((a: { tipo?: string; descripcion?: string }) => ({
+                tipo: a.tipo || 'solicitud_nueva_tarea',
+                descripcion: a.descripcion || '',
+              }));
+            }
           } catch {
             report = typeof s.notes === 'string' ? s.notes : '';
           }
         }
 
         const user = userMap.get(s.assigned_to);
+        const ti = taskInfo as { title?: string; projectId?: string; phaseId?: string; projectName?: string };
 
         result.push({
           id: s.id,
+          taskId: s.task_id,
           subtaskTitle: s.title,
-          taskTitle: taskInfo.title || '',
-          projectName: taskInfo.projectName || '',
-          projectId: taskInfo.projectId || '',
+          taskTitle: ti.title || '',
+          projectName: ti.projectName || '',
+          projectId: ti.projectId || '',
+          phaseId: ti.phaseId ?? null,
           userName: user?.name || 'Sin asignar',
           userEmail: user?.email || '',
           date: dateStr,
           status: s.status,
           report,
           durationMinutes,
+          alertasSolicitudes,
         });
       }
 
@@ -151,7 +169,7 @@ export default function SupervisionLog() {
   }
 
   function exportCSV() {
-    const headers = ['Fecha', 'Proyecto', 'Tarea', 'Checkpoint', 'Usuario', 'Estado', 'Reporte', 'Minutos'];
+    const headers = ['Fecha', 'Proyecto', 'Tarea', 'Checkpoint', 'Usuario', 'Estado', 'Reporte', 'Alertas/Solicitudes', 'Minutos'];
     const rows = entries.map((e) => [
       e.date,
       e.projectName,
@@ -160,6 +178,7 @@ export default function SupervisionLog() {
       e.userName,
       e.status,
       e.report.replace(/\n/g, ' ').replace(/,/g, ';'),
+      e.alertasSolicitudes.map((a) => `[${a.tipo}] ${a.descripcion}`).join(' | ').replace(/,/g, ';'),
       e.durationMinutes ?? '',
     ]);
     const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
@@ -323,6 +342,39 @@ export default function SupervisionLog() {
                         <span className="text-amber-600 text-xs italic">
                           {['completed', 'in_review', 'approved'].includes(e.status) ? 'Sin reporte' : 'Pendiente'}
                         </span>
+                      )}
+                      {e.alertasSolicitudes.length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          {e.alertasSolicitudes.map((a, idx) => (
+                            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50 rounded border border-amber-100 text-sm">
+                              <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-xs ${
+                                a.tipo === 'solicitud_nueva_tarea' ? 'bg-blue-100 text-blue-800' :
+                                a.tipo === 'problema' ? 'bg-red-100 text-red-800' :
+                                'bg-purple-100 text-purple-800'
+                              }`}>
+                                {a.tipo === 'solicitud_nueva_tarea' ? 'Nueva tarea' : a.tipo === 'problema' ? 'Problema' : 'Recurso'}
+                              </span>
+                              <span className="flex-1 text-gray-700">{a.descripcion}</span>
+                              <button
+                                type="button"
+                                onClick={() => navigate('/tasks', {
+                                  state: {
+                                    fromSolicitud: {
+                                      descripcion: a.descripcion,
+                                      tipo: a.tipo,
+                                      project_id: e.projectId || null,
+                                      phase_id: e.phaseId || null,
+                                    },
+                                  },
+                                })}
+                                className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700"
+                              >
+                                <Plus className="w-3 h-3" />
+                                Crear tarea
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </td>
                   </tr>

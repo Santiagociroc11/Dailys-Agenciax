@@ -1,5 +1,6 @@
 import React from 'react';
 import { useEffect, useState, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/audit';
@@ -105,6 +106,8 @@ interface Project {
 
 function Tasks() {
   const { isAdmin, user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [subtasks, setSubtasks] = useState<Record<string, Subtask[]>>({});
   const [users, setUsers] = useState<User[]>([]);
@@ -215,6 +218,30 @@ function Tasks() {
     fetchTasks();
     fetchProjects();
   }, []);
+
+  // Abrir modal de nueva tarea con datos prellenados desde solicitud de supervisión
+  useEffect(() => {
+    const fromSolicitud = (location.state as { fromSolicitud?: { descripcion: string; tipo: string; project_id: string | null; phase_id: string | null } })?.fromSolicitud;
+    if (!fromSolicitud) return;
+    const prefix = fromSolicitud.tipo === 'solicitud_nueva_tarea' ? '[Solicitud] ' : fromSolicitud.tipo === 'problema' ? '[Problema] ' : '[Recurso] ';
+    const title = prefix + (fromSolicitud.descripcion.length > 80 ? fromSolicitud.descripcion.slice(0, 80) + '...' : fromSolicitud.descripcion);
+    setSelectedProject(fromSolicitud.project_id || null);
+    setSelectedPhase(fromSolicitud.phase_id || null);
+    const proj = projects.find((p) => p.id === fromSolicitud.project_id);
+    if (proj?.start_date && proj?.deadline) {
+      setSelectedProjectDates({ start_date: proj.start_date, deadline: proj.deadline });
+    }
+    setNewTask((prev) => ({
+      ...prev,
+      title,
+      description: fromSolicitud.descripcion,
+      project_id: fromSolicitud.project_id,
+      phase_id: fromSolicitud.phase_id,
+    }));
+    setProjectSelected(!!fromSolicitud.project_id);
+    setShowModal(true);
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state, location.pathname, navigate, projects]);
 
   // Autoguardado local del borrador de nueva tarea (evita perder muchas subtareas por un error)
   useEffect(() => {
