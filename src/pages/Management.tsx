@@ -201,8 +201,9 @@ const getItemDetails = (item: Task | Subtask | null): {
         total: parsedNotes.duracion_real
       };
     }
-    if (Array.isArray(parsedNotes.alertas_solicitudes)) {
-      alertasSolicitudes = parsedNotes.alertas_solicitudes.map((a: { tipo?: string; descripcion?: string; created_at?: string }) => ({
+    const rawAlertas = parsedNotes.alertas_solicitudes;
+    if (Array.isArray(rawAlertas) && rawAlertas.length > 0) {
+      alertasSolicitudes = rawAlertas.map((a: { tipo?: string; descripcion?: string; created_at?: string }) => ({
         tipo: a.tipo || 'solicitud_nueva_tarea',
         descripcion: a.descripcion || '',
         created_at: a.created_at
@@ -3518,8 +3519,15 @@ function Management() {
                     {/* Actividad */}
                     <td className="px-4 py-4">
                       <div className="max-w-xs">
-                        <div className="text-sm font-medium text-gray-900 line-clamp-2" title={item.title}>
-                          {item.title}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 line-clamp-2" title={item.title}>
+                            {item.title}
+                          </span>
+                          {details.alertasSolicitudes?.length > 0 && (
+                            <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800" title={`${details.alertasSolicitudes.length} alerta(s)/solicitud(es)`}>
+                              ⚠ {details.alertasSolicitudes.length}
+                            </span>
+                          )}
                         </div>
                         {isSubtask && parentTask && (
                           <div className="text-xs text-gray-500 mt-1 flex items-center">

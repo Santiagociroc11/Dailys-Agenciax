@@ -2633,13 +2633,14 @@ export default function UserProjectView() {
       try {
          // 4️⃣ Actualizar tanto la tabla de tasks/subtasks como task_work_assignments
          // ✅ CORREGIDO: Ya no sobrescribimos end_time, solo actualizamos el estado
+         const notesToSave = typeof finalNotes === "string" ? finalNotes : JSON.stringify(finalNotes);
          const promises = [
             // Actualizar la tabla de tasks o subtasks
             supabase
                .from(table)
                .update({
                   status: selectedStatus,
-                  notes: typeof finalNotes === "string" ? finalNotes : JSON.stringify(finalNotes),
+                  notes: notesToSave,
                })
                .eq("id", originalId),
 
@@ -2933,6 +2934,9 @@ export default function UserProjectView() {
          
          if (actionType === "progress" && nextWorkDate && nextWorkStartTime) {
             successMessage += ` ⏰ Próxima sesión programada para ${format(new Date(nextWorkDate), "dd/MM/yyyy")} a las ${nextWorkStartTime}`;
+         }
+         if (selectedStatus === "completed" && alertasSolicitudes.length > 0) {
+            successMessage += ` ⚠ ${alertasSolicitudes.length} alerta(s) enviada(s) al admin.`;
          }
          
          toast.success(successMessage);
@@ -6777,7 +6781,7 @@ export default function UserProjectView() {
                                     Alertas o solicitudes para el admin (opcional)
                                  </label>
                                  <p className="text-xs text-amber-700 mb-3">
-                                    Reporta problemas detectados, solicitudes de nuevas tareas o recursos que el admin deba crear.
+                                    Reporta problemas detectados, solicitudes de nuevas tareas o recursos que el admin deba crear. El admin las verá en Gestión y Bitácora de supervisión.
                                  </p>
                                  <div className="flex gap-2 mb-2">
                                     <select
