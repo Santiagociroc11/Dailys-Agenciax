@@ -2634,35 +2634,33 @@ export default function UserProjectView() {
          // 4️⃣ Actualizar tanto la tabla de tasks/subtasks como task_work_assignments
          // ✅ CORREGIDO: Ya no sobrescribimos end_time, solo actualizamos el estado
          const notesToSave = typeof finalNotes === "string" ? finalNotes : JSON.stringify(finalNotes);
-         const promises = [
-            // Actualizar la tabla de tasks o subtasks
-            supabase
-               .from(table)
-               .update({
-                  status: selectedStatus,
-                  notes: notesToSave,
-               })
-               .eq("id", originalId),
 
-            // ✅ NUEVO: Solo actualizar estado en task_work_assignments, NO tocar horarios planificados
-            supabase
-               .from("task_work_assignments")
-               .update({
-                  status: selectedStatus,
-                  updated_at: new Date().toISOString(),
-                  notes: finalNotes, // SIN JSON.stringify
-                  // ❌ ELIMINADO: Ya no sobrescribimos end_time ni actual_duration aquí
-               })
-               .eq("user_id", user!.id)
-               .eq("task_type", taskType)
-               .eq(isSubtask ? "subtask_id" : "task_id", originalId),
-         ];
+         // 1) Actualizar tasks/subtasks PRIMERO (fuente de Bitácora y Management)
+         const { error: taskError } = await supabase
+            .from(table)
+            .update({
+               status: selectedStatus,
+               notes: notesToSave,
+            })
+            .eq("id", originalId);
 
-         // Ejecutar todas las actualizaciones en paralelo
-         const [taskRes, assignRes] = await Promise.all(promises);
+         if (taskError) throw taskError;
 
-         if (taskRes.error || assignRes.error) {
-            throw taskRes.error || assignRes.error;
+         // 2) Actualizar task_work_assignments (no bloquear si falla - el dato crítico ya está en tasks/subtasks)
+         const assignRes = await supabase
+            .from("task_work_assignments")
+            .update({
+               status: selectedStatus,
+               updated_at: new Date().toISOString(),
+               notes: finalNotes,
+            })
+            .eq("user_id", user!.id)
+            .eq("task_type", taskType)
+            .eq(isSubtask ? "subtask_id" : "task_id", originalId);
+
+         if (assignRes.error) {
+            console.warn("⚠ [STATUS] task_work_assignments update failed (notes saved in subtask):", assignRes.error);
+            // No lanzar - el dato crítico (notes con alertas) ya está guardado en subtasks
          }
 
          // ✅ Crear sesión de trabajo en work_sessions
