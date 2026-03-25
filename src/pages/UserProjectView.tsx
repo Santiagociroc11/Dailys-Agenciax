@@ -5657,7 +5657,13 @@ export default function UserProjectView() {
                                           })()}
                                           <PhaseBadge phaseName={phasesForProject.find(p => p.id === task.phase_id)?.name} />
                                        </div>
-                                       <div className="font-medium">{task.title}</div>
+                                       <div
+                                          className="font-medium text-green-900 cursor-pointer hover:text-indigo-600 hover:underline"
+                                          onClick={() => handleViewTaskDetails(task)}
+                                          title="Ver detalle de la tarea"
+                                       >
+                                          {task.title}
+                                       </div>
                                        <div className="text-sm text-gray-600">
                                           <RichTextSummary text={task.description || "-"} maxLength={80} />
                                        </div>
