@@ -349,6 +349,34 @@ export default function UserProjectView() {
    const filteredReturnedTaskItems = filterByProject(returnedTaskItems);
    const filteredBlockedTaskItems = filterByProject(blockedTaskItems);
 
+   const APPROVED_TASKS_PER_PAGE = 10;
+   const [approvedListPage, setApprovedListPage] = useState(1);
+
+   const sortedApprovedTaskItems = useMemo(() => {
+      return [...filteredApprovedTaskItems].sort((a, b) => {
+         const ta = a.deadline ? new Date(a.deadline).getTime() : 0;
+         const tb = b.deadline ? new Date(b.deadline).getTime() : 0;
+         return tb - ta;
+      });
+   }, [filteredApprovedTaskItems]);
+
+   const approvedTasksTotalPages = Math.max(1, Math.ceil(sortedApprovedTaskItems.length / APPROVED_TASKS_PER_PAGE));
+
+   const pagedApprovedTaskItems = useMemo(() => {
+      const start = (approvedListPage - 1) * APPROVED_TASKS_PER_PAGE;
+      return sortedApprovedTaskItems.slice(start, start + APPROVED_TASKS_PER_PAGE);
+   }, [sortedApprovedTaskItems, approvedListPage]);
+
+   useEffect(() => {
+      setApprovedListPage(1);
+   }, [selectedProjectFilter]);
+
+   useEffect(() => {
+      if (approvedListPage > approvedTasksTotalPages) {
+         setApprovedListPage(approvedTasksTotalPages);
+      }
+   }, [approvedListPage, approvedTasksTotalPages]);
+
    // Estados para carga
    const [loading, setLoading] = useState(true);
    const [isDataInitialized, setIsDataInitialized] = useState(false);
@@ -5631,9 +5659,10 @@ export default function UserProjectView() {
                         </div>
                      ) : filteredApprovedTaskItems.length > 0 ? (
                         <div className="mb-8">
-                           <div className="flex items-center mb-3">
+                           <div className="flex items-center mb-3 flex-wrap gap-2">
                               <div className="w-4 h-4 bg-green-500 rounded-full mr-3 flex-shrink-0"></div>
                               <h3 className="text-lg font-semibold text-green-700">Aprobadas ({filteredApprovedTaskItems.length})</h3>
+                              <span className="text-xs text-gray-500">Orden: fecha de fin de entrega, más reciente primero</span>
                            </div>
                            <div className="bg-green-50 rounded-md shadow-sm border border-green-200 overflow-hidden">
                               <div className="grid grid-cols-9 gap-4 p-3 border-b-2 border-green-300 font-medium text-green-800 bg-green-100">
@@ -5648,7 +5677,7 @@ export default function UserProjectView() {
                                  <div>ACCIONES</div>
                               </div>
                               <div className="divide-y divide-green-200">
-                                 {filteredApprovedTaskItems.map((task) => (
+                                 {pagedApprovedTaskItems.map((task) => (
                                     <div key={task.id} className="grid grid-cols-9 gap-4 py-3 items-center bg-white hover:bg-green-50 px-3">
                                        <div className="text-sm text-gray-700 py-1 flex flex-wrap items-center gap-1">
                                           {(() => {
@@ -5686,6 +5715,36 @@ export default function UserProjectView() {
                                     </div>
                                  ))}
                               </div>
+                              {sortedApprovedTaskItems.length > 0 && (
+                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2 bg-green-100/80 border-t border-green-200">
+                                    <p className="text-sm text-gray-600">
+                                       Mostrando {(approvedListPage - 1) * APPROVED_TASKS_PER_PAGE + 1}–
+                                       {Math.min(approvedListPage * APPROVED_TASKS_PER_PAGE, sortedApprovedTaskItems.length)} de{" "}
+                                       {sortedApprovedTaskItems.length}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                       <button
+                                          type="button"
+                                          disabled={approvedListPage <= 1}
+                                          onClick={() => setApprovedListPage((p) => Math.max(1, p - 1))}
+                                          className="text-sm px-3 py-1 rounded border border-green-300 bg-white text-green-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-green-50"
+                                       >
+                                          Anterior
+                                       </button>
+                                       <span className="text-sm text-gray-700 tabular-nums">
+                                          Página {approvedListPage} / {approvedTasksTotalPages}
+                                       </span>
+                                       <button
+                                          type="button"
+                                          disabled={approvedListPage >= approvedTasksTotalPages}
+                                          onClick={() => setApprovedListPage((p) => Math.min(approvedTasksTotalPages, p + 1))}
+                                          className="text-sm px-3 py-1 rounded border border-green-300 bg-white text-green-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-green-50"
+                                       >
+                                          Siguiente
+                                       </button>
+                                    </div>
+                                 </div>
+                              )}
                            </div>
                         </div>
                      ) : (
