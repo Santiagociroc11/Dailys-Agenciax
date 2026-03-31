@@ -96,7 +96,7 @@ export function MessageInput({
   };
 
   return (
-    <div className="border-t border-gray-200 p-3 bg-white shrink-0 relative">
+    <div className="border-t border-gray-100 p-3 bg-white shrink-0 relative">
       {mentionOpen && (
         <MentionSuggestions
           users={users}
@@ -107,7 +107,7 @@ export function MessageInput({
       )}
       <div className="flex gap-2 items-end">
         <textarea
-          className="flex-1 min-h-[44px] max-h-32 border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          className="flex-1 min-h-[44px] max-h-32 border border-gray-200 rounded-lg px-3 py-2 text-sm resize-y transition-shadow duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
           rows={2}
           value={value}
           disabled={disabled}
@@ -124,7 +124,7 @@ export function MessageInput({
           type="button"
           disabled={disabled || !value.trim()}
           onClick={submit}
-          className="p-2.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+          className="p-2.5 rounded-lg bg-indigo-600 text-white shadow-sm hover:shadow hover:bg-indigo-700 disabled:opacity-50 shrink-0 transition-all duration-150 active:scale-[0.97]"
           aria-label="Enviar"
         >
           <Send className="w-5 h-5" />

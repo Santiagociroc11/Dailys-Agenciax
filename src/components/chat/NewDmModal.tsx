@@ -50,11 +50,11 @@ export function NewDmModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative max-h-[80vh] flex flex-col">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-xl ring-1 ring-black/5 max-w-md w-full p-6 relative max-h-[80vh] flex flex-col">
         <button
           type="button"
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors duration-150"
           onClick={onClose}
           aria-label="Cerrar"
         >
@@ -62,7 +62,7 @@ export function NewDmModal({
         </button>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Mensaje directo</h2>
         <input
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 transition-shadow duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
           placeholder="Buscar usuario…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -73,7 +73,7 @@ export function NewDmModal({
               key={u.id}
               type="button"
               disabled={loading}
-              className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50 border-b border-gray-50 last:border-0"
+              className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50 border-b border-gray-50 last:border-0 transition-colors duration-100"
               onClick={() => pick(u.id)}
             >
               <OnlineStatus isOnline={onlineUserIds.has(u.id)} />

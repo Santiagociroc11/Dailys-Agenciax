@@ -179,14 +179,14 @@ export function ChannelSidebar({
         key={c.id}
         onClick={() => onSelect(c.id)}
         title={hasNew ? `${unread} mensaje(s) nuevo(s)` : total ? `${formatCount(total)} mensajes` : undefined}
-        className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 min-w-0 ${
+        className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 min-w-0 transition-colors duration-150 ${
           nested ? 'pl-2' : ''
         } ${
           selectedId === c.id
-            ? 'bg-indigo-100 text-indigo-900 font-medium ring-1 ring-indigo-200'
+            ? 'bg-indigo-100 text-indigo-900 font-medium shadow-sm ring-1 ring-indigo-200/80'
             : hasNew
-              ? 'text-gray-800 bg-emerald-50/70 border-l-[3px] border-emerald-500 hover:bg-emerald-50'
-              : 'text-gray-700 hover:bg-gray-100 border-l-[3px] border-transparent'
+              ? 'text-gray-800 bg-emerald-50/70 border-l-2 border-emerald-500 hover:bg-emerald-50'
+              : 'text-gray-700 hover:bg-gray-100 border-l-2 border-transparent'
         }`}
       >
         {hasNew && (
@@ -209,7 +209,7 @@ export function ChannelSidebar({
           </span>
         )}
         {unread > 0 && (
-          <span className="shrink-0 text-[10px] font-semibold bg-indigo-600 text-white px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center tabular-nums">
+          <span className="shrink-0 text-[10px] font-semibold bg-indigo-500 text-white px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center tabular-nums">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
@@ -239,7 +239,7 @@ export function ChannelSidebar({
       <div className="mb-2">
         <button
           type="button"
-          className="flex items-center gap-2 w-full px-3 py-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-700 min-w-0"
+          className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-700 min-w-0 transition-colors duration-150"
           onClick={() => setSectionCollapsed((s) => ({ ...s, [keyId]: !s[keyId] }))}
         >
           {hasSectionNew && (
@@ -262,7 +262,7 @@ export function ChannelSidebar({
               </span>
             )}
             {sectionUnread > 0 && (
-              <span className="text-[10px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded-full min-w-[1.1rem] text-center tabular-nums">
+              <span className="text-[10px] font-bold bg-indigo-500 text-white px-1.5 py-0.5 rounded-full min-w-[1.1rem] text-center tabular-nums">
                 {sectionUnread > 99 ? '99+' : sectionUnread}
               </span>
             )}
@@ -281,13 +281,13 @@ export function ChannelSidebar({
   const isProjectOpen = (projectId: string) => !projectFolded[projectId];
 
   return (
-    <aside className="w-[22rem] shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
+    <aside className="w-[22rem] shrink-0 border-r border-gray-200/80 bg-gray-50/80 flex flex-col h-full">
       <div className="p-3 border-b border-gray-100 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
-              className="w-full pl-8 pr-2 py-2 text-sm border border-gray-200 rounded-lg"
+              className="w-full pl-8 pr-2 py-2 text-sm border border-gray-200 rounded-lg bg-white/80 placeholder:text-gray-400 transition-shadow focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
               placeholder="Buscar canales…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -296,7 +296,7 @@ export function ChannelSidebar({
           <button
             type="button"
             title="Nuevo canal"
-            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600"
+            className="p-2 rounded-lg border border-gray-200 bg-white/80 hover:bg-gray-50 text-gray-600 transition-colors duration-150"
             onClick={onCreateChannel}
           >
             <Plus className="w-4 h-4" />
@@ -304,7 +304,7 @@ export function ChannelSidebar({
           <button
             type="button"
             title="Mensaje directo"
-            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-emerald-700"
+            className="p-2 rounded-lg border border-gray-200 bg-white/80 hover:bg-gray-50 text-emerald-700 transition-colors duration-150"
             onClick={onNewDm}
           >
             <MessageCircle className="w-4 h-4" />
@@ -331,16 +331,16 @@ export function ChannelSidebar({
                   <div className="flex items-center gap-0.5 min-w-0 group/proj">
                     <button
                       type="button"
-                      className={`flex items-center gap-1 flex-1 min-w-0 px-2 py-2 text-sm font-medium rounded-lg text-left ${
+                      className={`flex items-center gap-1 flex-1 min-w-0 px-2 py-2 text-sm font-medium rounded-lg text-left transition-colors duration-150 ${
                         folderNew
-                          ? 'text-gray-900 bg-emerald-50/50 border-l-[3px] border-emerald-500'
-                          : 'text-gray-800 hover:bg-gray-50 border-l-[3px] border-transparent'
+                          ? 'text-gray-900 bg-emerald-50/50 border-l-2 border-emerald-500'
+                          : 'text-gray-800 hover:bg-gray-100/80 border-l-2 border-transparent'
                       }`}
                       onClick={() => toggleProject(bundle.id)}
                       title={folderNew ? `${unread} nuevo(s) en este proyecto` : msgTotal ? `${formatCount(msgTotal)} mensajes` : undefined}
                     >
                       <ChevronRight
-                        className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
+                        className={`w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
                         aria-hidden
                       />
                       {folderNew && (
@@ -358,7 +358,7 @@ export function ChannelSidebar({
                         </span>
                       )}
                       {unread > 0 && (
-                        <span className="shrink-0 text-[10px] font-semibold bg-indigo-600 text-white px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center tabular-nums">
+                        <span className="shrink-0 text-[10px] font-semibold bg-indigo-500 text-white px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center tabular-nums">
                           {unread > 99 ? '99+' : unread}
                         </span>
                       )}
@@ -366,7 +366,7 @@ export function ChannelSidebar({
                     <button
                       type="button"
                       title="Canal en este proyecto"
-                      className="p-2 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 shrink-0 opacity-100 md:opacity-0 md:group-hover/proj:opacity-100 focus:opacity-100"
+                      className="p-2 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 shrink-0 opacity-100 md:opacity-0 md:group-hover/proj:opacity-100 focus:opacity-100 transition-colors duration-150"
                       onClick={(e) => {
                         e.stopPropagation();
                         onCreateChannelInProject(bundle.id);

@@ -100,11 +100,11 @@ export function MessageList({
         if (row.type === 'date' && row.date) {
           return (
             <div key={row.key} className="flex items-center gap-3 my-4 px-4">
-              <div className="flex-1 h-px bg-gray-200" />
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <div className="flex-1 h-px bg-gray-200/60" />
+              <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">
                 {dateLabel(row.date)}
               </span>
-              <div className="flex-1 h-px bg-gray-200" />
+              <div className="flex-1 h-px bg-gray-200/60" />
             </div>
           );
         }

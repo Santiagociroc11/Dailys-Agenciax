@@ -399,7 +399,7 @@ export default function Chat() {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-[calc(100vh-10rem)] -mx-6 -mb-6 -mt-2 bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+    <div className="flex min-h-[calc(100vh-10rem)] -mx-6 -mb-6 -mt-2 bg-gray-100 rounded-lg overflow-hidden border border-gray-200/60 shadow-sm">
       <ChannelSidebar
         channels={channels}
         projectsList={projectsList}
@@ -414,16 +414,11 @@ export default function Chat() {
 
       <div className="flex-1 flex min-w-0 min-h-0">
         <div className="flex-1 flex flex-col min-w-0 bg-white border-r border-gray-200">
-          <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-between text-xs text-gray-500">
-            <span>
-              {isConnected ? (
-                <span className="text-emerald-600">● En vivo</span>
-              ) : (
-                <span className="text-amber-600">○ Reconectando…</span>
-              )}
-            </span>
-          </div>
-          <ChannelHeader channel={selectedChannel} memberCount={selectedChannel?.members?.length ?? 0} />
+          <ChannelHeader
+            channel={selectedChannel}
+            memberCount={selectedChannel?.members?.length ?? 0}
+            isConnected={isConnected}
+          />
           {loadingChannel ? (
             <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">Cargando…</div>
           ) : selectedId ? (

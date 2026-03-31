@@ -48,10 +48,15 @@ export function ThreadPanel({
   );
 
   return (
-    <aside className="w-full max-w-md border-l border-gray-200 bg-gray-50 flex flex-col h-full shrink-0 shadow-inner">
-      <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white shrink-0">
-        <h2 className="font-semibold text-gray-900 text-sm">Hilo</h2>
-        <button type="button" className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" onClick={onClose} aria-label="Cerrar hilo">
+    <aside className="w-full max-w-md border-l border-gray-200 bg-white flex flex-col h-full shrink-0">
+      <div className="h-14 border-b border-gray-100 shadow-[0_1px_3px_0_rgba(0,0,0,0.04)] flex items-center justify-between px-4 bg-white shrink-0">
+        <h2 className="font-semibold text-gray-900 text-sm tracking-tight">Hilo</h2>
+        <button
+          type="button"
+          className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors duration-150"
+          onClick={onClose}
+          aria-label="Cerrar hilo"
+        >
           <X className="w-5 h-5" />
         </button>
       </div>

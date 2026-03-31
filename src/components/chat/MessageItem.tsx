@@ -61,7 +61,7 @@ export function MessageItem({
 
   return (
     <div
-      className="group px-4 py-2 hover:bg-gray-50/80 rounded-lg relative"
+      className="group px-4 py-2 hover:bg-gray-50/60 rounded-lg relative transition-colors duration-150"
       onMouseLeave={() => {
         setMenu(false);
         setPicker(false);
@@ -69,15 +69,15 @@ export function MessageItem({
     >
       <div className="flex gap-3">
         <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-semibold text-white shrink-0"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
           style={{ backgroundColor: `hsl(${hue}, 55%, 48%)` }}
         >
           {label.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="font-semibold text-gray-900 text-sm">{label}</span>
-            <span className="text-xs text-gray-400">
+            <span className="font-semibold text-gray-900 text-sm tracking-tight">{label}</span>
+            <span className="text-xs text-gray-400 font-light">
               {format(new Date(message.created_at), "d MMM yyyy, HH:mm", { locale: es })}
               {message.is_edited && <span className="ml-1">(editado)</span>}
             </span>
@@ -85,7 +85,7 @@ export function MessageItem({
           {editing ? (
             <div className="mt-1 flex gap-2">
               <input
-                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-shadow duration-150"
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
@@ -109,7 +109,7 @@ export function MessageItem({
                   key={r.emoji}
                   type="button"
                   onClick={() => onToggleReaction(r.emoji)}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors duration-150 hover:shadow-sm ${
                     r.user_ids?.includes(currentUserId)
                       ? 'border-indigo-300 bg-indigo-50'
                       : 'border-gray-200 bg-white'
@@ -122,10 +122,10 @@ export function MessageItem({
             </div>
           )}
         </div>
-        <div className="shrink-0 opacity-0 group-hover:opacity-100 flex items-start gap-1 relative">
+        <div className="shrink-0 opacity-0 group-hover:opacity-100 flex items-start gap-1 relative transition-opacity duration-150">
           <button
             type="button"
-            className="p-1 rounded hover:bg-gray-200 text-gray-500"
+            className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-all duration-150"
             title="Reaccionar"
             onClick={() => setPicker((p) => !p)}
           >
@@ -136,22 +136,27 @@ export function MessageItem({
               <ReactionPicker onPick={(em) => onToggleReaction(em)} onClose={() => setPicker(false)} />
             </div>
           )}
-          <button type="button" className="p-1 rounded hover:bg-gray-200 text-gray-500" title="Hilo" onClick={onReply}>
+          <button
+            type="button"
+            className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-all duration-150"
+            title="Hilo"
+            onClick={onReply}
+          >
             <MessageSquare className="w-4 h-4" />
           </button>
           <button
             type="button"
-            className="p-1 rounded hover:bg-gray-200 text-gray-500"
+            className="p-1 rounded hover:bg-gray-100 text-gray-500 transition-all duration-150"
             onClick={() => setMenu((m) => !m)}
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
           {menu && (
-            <div className="absolute right-0 top-8 z-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[120px]">
+            <div className="absolute right-0 top-8 z-40 bg-white border border-gray-200 rounded-lg shadow-lg ring-1 ring-black/5 py-1 min-w-[120px]">
               {isOwn && (
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2 transition-colors duration-100"
                   onClick={() => {
                     setEditing(true);
                     setEditText(message.content);
@@ -164,7 +169,7 @@ export function MessageItem({
               {canDelete && (
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors duration-100"
                   onClick={() => {
                     onDelete();
                     setMenu(false);
@@ -180,7 +185,7 @@ export function MessageItem({
       {message.reply_count > 0 && (
         <button
           type="button"
-          className="ml-12 mt-1 text-xs text-indigo-600 hover:underline"
+          className="ml-11 mt-1 text-xs text-indigo-500 font-medium hover:underline transition-colors duration-150"
           onClick={onReply}
         >
           {message.reply_count} {message.reply_count === 1 ? 'respuesta' : 'respuestas'}

@@ -30,7 +30,7 @@ export function MentionSuggestions({ users, query, onSelect, onClose }: MentionS
   return (
     <div
       ref={ref}
-      className="absolute left-0 bottom-full mb-1 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50"
+      className="absolute left-0 bottom-full mb-1 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg ring-1 ring-black/5 z-50"
       role="listbox"
     >
       {filtered.map((u) => (
@@ -38,7 +38,7 @@ export function MentionSuggestions({ users, query, onSelect, onClose }: MentionS
           key={u.id}
           type="button"
           role="option"
-          className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center gap-2"
+          className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 flex items-center gap-2 transition-colors duration-100"
           onClick={() => onSelect(u)}
         >
           <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-medium">
