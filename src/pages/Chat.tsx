@@ -6,6 +6,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { supabase } from '../lib/supabase';
 import { chatFetch } from '../lib/chatApi';
 import { notifyChatUnreadTitleRefresh } from '../lib/chatUnreadEvents';
+import { playChatMessageSound } from '../lib/chatMessageSound';
 import { resolveMentionIds } from '../components/chat/messageMentions';
 import type { ChatChannel, ChatMessage, ChatUser } from '../types/chat';
 import { ChannelSidebar, type ChatProjectRef } from '../components/chat/ChannelSidebar';
@@ -225,7 +226,19 @@ export default function Chat() {
   useEffect(() => {
     if (!socket || !user?.id) return;
 
+    const shouldPlayIncomingChatSound = (msg: ChatMessage): boolean => {
+      if (msg.user_id === user.id || msg.is_deleted) return false;
+      if (typeof document !== 'undefined' && document.hidden) return true;
+      if (msg.channel_id !== selectedIdRef.current) return true;
+      if (!msg.thread_id) return false;
+      return msg.thread_id !== threadRootRef.current;
+    };
+
     const onNew = (msg: ChatMessage) => {
+      if (shouldPlayIncomingChatSound(msg)) {
+        playChatMessageSound();
+      }
+
       if (msg.thread_id) {
         if (msg.thread_id === threadRootRef.current) {
           setThreadReplies((prev) => {
@@ -302,7 +315,7 @@ export default function Chat() {
       socket.off('user_typing', onTyping);
       socket.off('user_stopped_typing', onStopTyping);
     };
-  }, [socket, user?.id, fetchChannels]);
+  }, [socket, user, fetchChannels]);
 
   const selectedChannel = channels.find((c) => c.id === selectedId) ?? null;
 
