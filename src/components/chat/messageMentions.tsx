@@ -25,10 +25,13 @@ export function resolveMentionIds(content: string, users: ChatUser[]): string[] 
   return [...ids];
 }
 
+export type MentionBubbleVariant = 'incoming' | 'outgoing';
+
 export function renderContentWithMentions(
   content: string,
   mentionUserIds: string[],
-  usersById: Map<string, ChatUser>
+  usersById: Map<string, ChatUser>,
+  bubbleVariant: MentionBubbleVariant = 'incoming'
 ): React.ReactNode {
   if (!content) return null;
   const parts: React.ReactNode[] = [];
@@ -56,13 +59,21 @@ export function renderContentWithMentions(
       );
     }
     if (matched) {
+      const mentionCls =
+        bubbleVariant === 'outgoing'
+          ? 'font-semibold text-indigo-100 bg-white/20 px-0.5 rounded'
+          : 'text-indigo-600 font-medium bg-indigo-50 px-0.5 rounded';
       parts.push(
-        <span key={`m-${key++}`} className="text-indigo-600 font-medium bg-indigo-50 px-0.5 rounded">
+        <span key={`m-${key++}`} className={mentionCls}>
           @{matched.name || matched.email}
         </span>
       );
     } else {
-      parts.push(<span key={`u-${key++}`}>@{token}</span>);
+      parts.push(
+        <span key={`u-${key++}`} className={bubbleVariant === 'outgoing' ? 'text-indigo-100/90' : undefined}>
+          @{token}
+        </span>
+      );
     }
     last = m.index + m[0].length;
   }
