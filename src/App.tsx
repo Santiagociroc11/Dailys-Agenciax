@@ -10,6 +10,7 @@ import VersionUpdateChecker from './components/VersionUpdateChecker';
 import { ChatDocumentTitleUnread } from './components/ChatDocumentTitleUnread';
 import { ChatBrowserNotifications } from './components/ChatBrowserNotifications';
 import { ChatUnreadProvider } from './contexts/ChatUnreadContext';
+import { ChatInAppAlertsProvider } from './contexts/ChatInAppAlertsContext';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tasks = lazy(() => import('./pages/Tasks'));
@@ -58,6 +59,7 @@ function App() {
       <AuthProvider>
         <SocketProvider>
         <ChatUnreadProvider>
+        <ChatInAppAlertsProvider>
         {/* 1️⃣ Monta el contenedor de toasts aquí, una sola vez */}
         <Toaster
           position="top-right"
@@ -138,6 +140,7 @@ function App() {
               <Route path="chat" element={<Chat />} />
             </Route>
         </Routes>
+        </ChatInAppAlertsProvider>
         </ChatUnreadProvider>
         </SocketProvider>
       </AuthProvider>

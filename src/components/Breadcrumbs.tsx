@@ -72,7 +72,7 @@ export default function Breadcrumbs({ routeLabels = {} }: BreadcrumbsProps) {
   if (items.length <= 1) return null;
 
   return (
-    <nav className="flex items-center gap-1 text-sm text-gray-600 mb-4" aria-label="Breadcrumb">
+    <nav className="flex items-center gap-1 text-sm text-gray-600" aria-label="Breadcrumb">
       {items.map((item, idx) => (
         <React.Fragment key={idx}>
           {idx > 0 && <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}

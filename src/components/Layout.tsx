@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Breadcrumbs from './Breadcrumbs';
+import { ChatNotificationBell } from './ChatNotificationBell';
 import { useAuth } from '../contexts/AuthContext';
 import { AlertTriangle, Home } from 'lucide-react';
 import { SkeletonPageWithCards } from './Skeleton';
@@ -27,7 +28,12 @@ export default function Layout() {
           </div>
         )}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6">
-          <Breadcrumbs />
+          <div className="mb-4 flex w-full items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <Breadcrumbs />
+            </div>
+            <ChatNotificationBell className="shrink-0" />
+          </div>
           <Suspense fallback={<SkeletonPageWithCards cardCount={6} />}>
             <Outlet />
           </Suspense>

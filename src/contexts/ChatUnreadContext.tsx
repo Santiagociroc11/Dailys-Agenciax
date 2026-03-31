@@ -11,9 +11,12 @@ import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
 import { chatFetch } from '../lib/chatApi';
 import { CHAT_UNREAD_TITLE_REFRESH } from '../lib/chatUnreadEvents';
+import type { ChatChannel } from '../types/chat';
 
 interface ChatUnreadContextValue {
   totalUnread: number;
+  /** Última lista de canales del chat (para alertas in-app, salas socket, etc.) */
+  channels: ChatChannel[];
   refresh: () => Promise<void>;
 }
 
@@ -23,6 +26,7 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
   const { user, loading } = useAuth();
   const { socket, joinChannel, leaveChannel } = useSocket();
   const [totalUnread, setTotalUnread] = useState(0);
+  const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [channelRoomIds, setChannelRoomIds] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -38,20 +42,20 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
   const refresh = useCallback(async () => {
     if (!user?.id) {
       setTotalUnread(0);
+      setChannels([]);
       setChannelRoomIds([]);
       return;
     }
     try {
-      const data = await chatFetch<{ channels: { id: string; unread_count?: number }[] }>(
-        user.id,
-        '/api/chat/channels'
-      );
+      const data = await chatFetch<{ channels: ChatChannel[] }>(user.id, '/api/chat/channels');
       const list = data.channels ?? [];
+      setChannels(list);
       setChannelRoomIds(list.map((c) => c.id).filter(Boolean));
       const t = list.reduce((sum, c) => sum + (c.unread_count ?? 0), 0);
       setTotalUnread(t);
     } catch {
       setTotalUnread(0);
+      setChannels([]);
       setChannelRoomIds([]);
     }
   }, [user?.id]);
@@ -60,6 +64,7 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
     if (loading) return;
     if (!user?.id) {
       setTotalUnread(0);
+      setChannels([]);
       return;
     }
     void refresh();
@@ -123,8 +128,8 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
   }, [user?.id, refresh]);
 
   const value = useMemo(
-    () => ({ totalUnread, refresh }),
-    [totalUnread, refresh]
+    () => ({ totalUnread, channels, refresh }),
+    [totalUnread, channels, refresh]
   );
 
   return <ChatUnreadContext.Provider value={value}>{children}</ChatUnreadContext.Provider>;
@@ -133,7 +138,7 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
 export function useChatUnread(): ChatUnreadContextValue {
   const ctx = useContext(ChatUnreadContext);
   if (!ctx) {
-    return { totalUnread: 0, refresh: async () => {} };
+    return { totalUnread: 0, channels: [], refresh: async () => {} };
   }
   return ctx;
 }
