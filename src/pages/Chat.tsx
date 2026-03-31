@@ -31,6 +31,7 @@ export default function Chat() {
   const [threadReplies, setThreadReplies] = useState<ChatMessage[]>([]);
   const [typingUserIds, setTypingUserIds] = useState<Set<string>>(new Set());
   const [modalCreate, setModalCreate] = useState(false);
+  const [createChannelProjectId, setCreateChannelProjectId] = useState<string | null>(null);
   const [modalDm, setModalDm] = useState(false);
   const [projectsList, setProjectsList] = useState<ChatProjectRef[]>([]);
 
@@ -336,14 +337,33 @@ export default function Chat() {
     });
   };
 
-  const createChannel = async (name: string, description: string) => {
+  const openCreateChannel = useCallback(() => {
+    setCreateChannelProjectId(null);
+    setModalCreate(true);
+  }, []);
+
+  const openCreateChannelInProject = useCallback((projectId: string) => {
+    setCreateChannelProjectId(projectId);
+    setModalCreate(true);
+  }, []);
+
+  const closeCreateChannelModal = useCallback(() => {
+    setModalCreate(false);
+    setCreateChannelProjectId(null);
+  }, []);
+
+  const createChannel = async (name: string, description: string, projectId: string | null) => {
     if (!user?.id) return;
     await chatFetch(user.id, '/api/chat/channels', {
       method: 'POST',
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify({
+        name,
+        description,
+        ...(projectId ? { project_id: projectId } : {}),
+      }),
     });
     await fetchChannels();
-    toast.success('Canal creado');
+    toast.success(projectId ? 'Canal creado en el proyecto' : 'Canal creado');
   };
 
   const startDm = async (otherUserId: string) => {
@@ -368,7 +388,8 @@ export default function Chat() {
         currentUserId={user.id}
         onSelect={(id) => void selectChannel(id)}
         onlineUserIds={onlineUserIds}
-        onCreateChannel={() => setModalCreate(true)}
+        onCreateChannel={openCreateChannel}
+        onCreateChannelInProject={openCreateChannelInProject}
         onNewDm={() => setModalDm(true)}
       />
 
@@ -450,7 +471,13 @@ export default function Chat() {
         )}
       </div>
 
-      <CreateChannelModal open={modalCreate} onClose={() => setModalCreate(false)} onCreate={createChannel} />
+      <CreateChannelModal
+        open={modalCreate}
+        initialProjectId={createChannelProjectId}
+        projectsList={projectsList}
+        onClose={closeCreateChannelModal}
+        onCreate={createChannel}
+      />
       <NewDmModal
         open={modalDm}
         onClose={() => setModalDm(false)}

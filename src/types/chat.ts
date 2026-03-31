@@ -7,6 +7,8 @@ export interface ChatChannel {
   members?: string[];
   created_by?: string;
   last_message_at?: string | null;
+  /** Total de mensajes (no eliminados) en el canal */
+  message_count?: number;
   unread_count?: number;
 }
 

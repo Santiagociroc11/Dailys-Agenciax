@@ -33,10 +33,20 @@ async function loadUser(userId: string) {
   return User.findOne({ id: userId, is_active: { $ne: false } }).lean().exec();
 }
 
-async function ensureProjectChannel(projectId: string, projectName: string, actingUserId: string) {
+/** Miembros de chat de un proyecto: admins activos + usuarios asignados al proyecto */
+async function getProjectChatMemberIds(projectId: string): Promise<string[]> {
   const admins = (await User.find({ role: 'admin', is_active: { $ne: false } }).distinct('id').exec()) as string[];
   const assigned = (await User.find({ assigned_projects: projectId, is_active: { $ne: false } }).distinct('id').exec()) as string[];
-  const members = [...new Set([...admins, ...assigned])];
+  return [...new Set([...admins, ...assigned])];
+}
+
+async function syncCustomChannelsMembersForProject(projectId: string) {
+  const members = await getProjectChatMemberIds(projectId);
+  await Channel.updateMany({ type: 'custom', project_id: projectId }, { $set: { members } }).exec();
+}
+
+async function ensureProjectChannel(projectId: string, projectName: string, actingUserId: string) {
+  const members = await getProjectChatMemberIds(projectId);
 
   let ch = await Channel.findOne({ type: 'project', project_id: projectId }).exec();
   if (!ch) {
@@ -66,12 +76,16 @@ async function syncProjectChannelsForUser(userId: string) {
     const projects = await Project.find({ is_archived: { $ne: true } }).select('id name').lean().exec();
     for (const p of projects) {
       await ensureProjectChannel(p.id, p.name, userId);
+      await syncCustomChannelsMembersForProject(p.id);
     }
   } else {
     const assigned = (user.assigned_projects as string[]) || [];
     for (const pid of assigned) {
       const proj = await Project.findOne({ id: pid, is_archived: { $ne: true } }).select('id name').lean().exec();
-      if (proj) await ensureProjectChannel(proj.id, proj.name, userId);
+      if (proj) {
+        await ensureProjectChannel(proj.id, proj.name, userId);
+        await syncCustomChannelsMembersForProject(pid);
+      }
     }
   }
 }
@@ -85,6 +99,19 @@ async function unreadCountForChannel(userId: string, channelId: string): Promise
     user_id: { $ne: userId },
     createdAt: { $gt: since },
   }).exec();
+}
+
+async function messageTotalsByChannelIds(channelIds: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (!channelIds.length) return map;
+  const rows = await Message.aggregate<{ _id: string; total: number }>([
+    { $match: { channel_id: { $in: channelIds }, is_deleted: { $ne: true } } },
+    { $group: { _id: '$channel_id', total: { $sum: 1 } } },
+  ]).exec();
+  for (const r of rows) {
+    map.set(r._id, r.total);
+  }
+  return map;
 }
 
 /** GET /channels */
@@ -110,6 +137,9 @@ router.get('/channels', async (req: Request, res: Response) => {
       .lean()
       .exec();
 
+    const ids = channels.map((c) => c.id);
+    const totalsMap = await messageTotalsByChannelIds(ids);
+
     const withUnread = await Promise.all(
       channels.map(async (c) => ({
         id: c.id,
@@ -120,6 +150,7 @@ router.get('/channels', async (req: Request, res: Response) => {
         members: c.members,
         created_by: c.created_by,
         last_message_at: c.last_message_at,
+        message_count: totalsMap.get(c.id) ?? 0,
         unread_count: await unreadCountForChannel(userId, c.id),
       }))
     );
@@ -144,20 +175,46 @@ router.post('/channels', async (req: Request, res: Response) => {
       res.status(401).json({ error: 'Usuario no válido' });
       return;
     }
-    const { name, description, member_ids } = req.body as {
+    const { name, description, member_ids, project_id } = req.body as {
       name?: string;
       description?: string;
       member_ids?: string[];
+      project_id?: string | null;
     };
     const trimmed = (name || '').trim();
     if (!trimmed) {
       res.status(400).json({ error: 'Nombre requerido' });
       return;
     }
-    const members = [...new Set([userId, ...((member_ids as string[]) || [])])];
+
+    let members: string[];
+    let pid: string | null = null;
+
+    if (project_id && String(project_id).trim()) {
+      pid = String(project_id).trim();
+      const proj = await Project.findOne({ id: pid, is_archived: { $ne: true } }).select('id').lean().exec();
+      if (!proj) {
+        res.status(404).json({ error: 'Proyecto no encontrado' });
+        return;
+      }
+      const isAdmin = user.role === 'admin';
+      const assigned = ((user.assigned_projects as string[]) || []).includes(pid);
+      if (!isAdmin && !assigned) {
+        res.status(403).json({ error: 'No tienes acceso a este proyecto' });
+        return;
+      }
+      members = await getProjectChatMemberIds(pid);
+      if (!members.includes(userId)) {
+        members = [...members, userId];
+      }
+    } else {
+      members = [...new Set([userId, ...((member_ids as string[]) || [])])];
+    }
+
     const ch = await Channel.create({
       name: trimmed,
       type: 'custom',
+      project_id: pid,
       description: description?.trim() || null,
       members,
       created_by: userId,
@@ -167,6 +224,7 @@ router.post('/channels', async (req: Request, res: Response) => {
         id: ch.id,
         name: ch.name,
         type: ch.type,
+        project_id: ch.project_id,
         description: ch.description,
         members: ch.members,
         created_by: ch.created_by,
@@ -254,7 +312,7 @@ router.put('/channels/:id', async (req: Request, res: Response) => {
     };
     if (name != null && String(name).trim()) ch.name = String(name).trim();
     if (description !== undefined) ch.description = description?.trim() || null;
-    if (Array.isArray(member_ids)) {
+    if (Array.isArray(member_ids) && !ch.project_id) {
       ch.members = [...new Set([userId, ...member_ids])];
     }
     await ch.save();

@@ -1,16 +1,32 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import type { ChatProjectRef } from './ChannelSidebar';
 
 interface CreateChannelModalProps {
   open: boolean;
+  /** Si se indica, el canal quedará dentro de ese proyecto (miembros = equipo del proyecto) */
+  initialProjectId: string | null;
+  projectsList: ChatProjectRef[];
   onClose: () => void;
-  onCreate: (name: string, description: string) => Promise<void>;
+  onCreate: (name: string, description: string, projectId: string | null) => Promise<void>;
 }
 
-export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelModalProps) {
+export function CreateChannelModal({
+  open,
+  initialProjectId,
+  projectsList,
+  onClose,
+  onCreate,
+}: CreateChannelModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [projectId, setProjectId] = useState<string>('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setProjectId(initialProjectId || '');
+  }, [open, initialProjectId]);
 
   if (!open) return null;
 
@@ -19,7 +35,8 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
     if (!n || saving) return;
     setSaving(true);
     try {
-      await onCreate(n, description.trim());
+      const pid = projectId.trim() || null;
+      await onCreate(n, description.trim(), pid);
       setName('');
       setDescription('');
       onClose();
@@ -39,15 +56,34 @@ export function CreateChannelModal({ open, onClose, onCreate }: CreateChannelMod
         >
           <X className="w-5 h-5" />
         </button>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Nuevo canal</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">Nuevo canal</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Elige un proyecto para que el canal aparezca ahí y lo vean las mismas personas asignadas al proyecto
+          (y los administradores). Si lo dejas en “Ninguno”, será un canal global.
+        </p>
         <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Proyecto</label>
+            <select
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
+              <option value="">Ninguno (canal global)</option>
+              {projectsList.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
             <input
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="ej. diseño-general"
+              placeholder="ej. diseño, revisiones"
               maxLength={80}
             />
           </div>
