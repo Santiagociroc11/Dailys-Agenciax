@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { enUS, es } from 'date-fns/locale';
 import { MessageSquare, MoreHorizontal, Pencil, Smile, Trash2 } from 'lucide-react';
 import type { ChatMessage } from '../../types/chat';
 import type { ChatUser } from '../../types/chat';
@@ -46,6 +46,8 @@ export function MessageItem({
   const isOwn = message.user_id === currentUserId;
   const canDelete = isOwn || isAdmin;
   const bubbleVariant = isOwn ? ('outgoing' as const) : ('incoming' as const);
+  const createdAt = new Date(message.created_at);
+  const dateTimeLabel = `${format(createdAt, 'd MMM yyyy', { locale: es })}, ${format(createdAt, 'h:mm a', { locale: enUS })}`;
 
   if (message.is_deleted) {
     return (
@@ -89,7 +91,7 @@ export function MessageItem({
             >
               <span className="font-semibold text-gray-900 text-sm tracking-tight">{label}</span>
               <span className="text-xs text-gray-400 font-light">
-                {format(new Date(message.created_at), "d MMM yyyy, HH:mm", { locale: es })}
+                {dateTimeLabel}
                 {message.is_edited && <span className="ml-1">(editado)</span>}
               </span>
             </div>
