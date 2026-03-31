@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { Channel, Message, ChannelRead, User, Project } from '../models/index.js';
 import { generateUUID } from '../lib/uuid.js';
 import { emitToChannel, getOnlineUserIds } from '../lib/chatSocket.js';
+import { notifyChatMessagePush } from '../lib/chatWebPush.js';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -535,6 +537,22 @@ router.post('/channels/:id/messages', async (req: Request, res: Response) => {
     if (thread_id) {
       emitToChannel(ch.id, 'thread_update', { parent_id: thread_id, message: payload });
     }
+
+    const authorLean = await loadUser(userId);
+    const authorName = (authorLean?.name && String(authorLean.name).trim()) || authorLean?.email || 'Alguien';
+    void notifyChatMessagePush({
+      channel: {
+        id: ch.id,
+        type: ch.type,
+        name: ch.name,
+        members: ch.members || [],
+      },
+      senderUserId: userId,
+      authorName,
+      textPreview: text,
+      isThread: Boolean(thread_id),
+      messageId: msg.id,
+    }).catch((err) => logger.server.warn('notifyChatMessagePush', err instanceof Error ? err.message : String(err)));
 
     res.status(201).json({ message: payload });
   } catch (e) {

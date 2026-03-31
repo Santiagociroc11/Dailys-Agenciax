@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
@@ -15,9 +16,11 @@ import { ThreadPanel } from '../components/chat/ThreadPanel';
 import { CreateChannelModal } from '../components/chat/CreateChannelModal';
 import { NewDmModal } from '../components/chat/NewDmModal';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
+import { ChatNotificationBanner } from '../components/chat/ChatNotificationBanner';
 
 export default function Chat() {
   const { user, isAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { socket, joinChannel, leaveChannel, onlineUserIds, isConnected } = useSocket();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -171,6 +174,33 @@ export default function Chat() {
     fetchAllUsers();
     fetchProjectsList();
   }, [fetchChannels, fetchAllUsers, fetchProjectsList]);
+
+  const channelFromUrl = searchParams.get('channel');
+  useEffect(() => {
+    if (!channelFromUrl || channels.length === 0) return;
+    const exists = channels.some((c) => c.id === channelFromUrl);
+    if (!exists) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('channel');
+          return next;
+        },
+        { replace: true }
+      );
+      toast.error('Canal no disponible');
+      return;
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('channel');
+        return next;
+      },
+      { replace: true }
+    );
+    void selectChannel(channelFromUrl);
+  }, [channelFromUrl, channels, selectChannel, setSearchParams]);
 
   /**
    * Salas Socket.io por canal: el servidor emite `new_message` a `channel:<id>`.
@@ -422,6 +452,7 @@ export default function Chat() {
             memberCount={selectedChannel?.members?.length ?? 0}
             isConnected={isConnected}
           />
+          <ChatNotificationBanner />
           {loadingChannel ? (
             <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">Cargando…</div>
           ) : selectedId ? (

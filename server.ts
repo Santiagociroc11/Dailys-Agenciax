@@ -35,6 +35,7 @@ import {
 } from './lib/telegramLog.js';
 import { logger } from './lib/logger.js';
 import { chatRouter } from './api/chat.js';
+import { pushRouter } from './api/push.js';
 import { setChatIo } from './lib/chatSocket.js';
 import { attachChatSocket } from './lib/chatSocketHandlers.js';
 
@@ -54,6 +55,9 @@ app.post('/api/db/rpc', handleDbRpc);
 
 // Chat (REST)
 app.use('/api/chat', chatRouter);
+
+// Web Push (suscripciones y clave VAPID pública)
+app.use('/api/push', pushRouter);
 
 // API de contabilidad (standalone)
 app.use('/api/contabilidad', contabilidadRouter);

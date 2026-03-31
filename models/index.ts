@@ -18,6 +18,7 @@ export { PayrollPayment } from './PayrollPayment.js';
 export { Channel } from './Channel.js';
 export { Message } from './Message.js';
 export { ChannelRead } from './ChannelRead.js';
+export { PushSubscription } from './PushSubscription.js';
 export { TelegramNotificationLog } from './TelegramNotificationLog.js';
 export { AcctClient } from './AcctClient.js';
 export { AcctEntity } from './AcctEntity.js';

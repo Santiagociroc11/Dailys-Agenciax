@@ -8,6 +8,7 @@ import UserLayout from './components/UserLayout';
 import Loading from './components/Loading';
 import VersionUpdateChecker from './components/VersionUpdateChecker';
 import { ChatDocumentTitleUnread } from './components/ChatDocumentTitleUnread';
+import { ChatBrowserNotifications } from './components/ChatBrowserNotifications';
 import { ChatUnreadProvider } from './contexts/ChatUnreadContext';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -72,6 +73,7 @@ function App() {
         />
         <VersionUpdateChecker />
         <ChatDocumentTitleUnread />
+        <ChatBrowserNotifications />
 
         <Routes>
           <Route path="/" element={

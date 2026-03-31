@@ -20,6 +20,7 @@ import {
   Channel,
   Message,
   ChannelRead,
+  PushSubscription,
 } from '../../models/index.js';
 
 export const MODEL_MAP: Record<string, Model<unknown>> = {
@@ -43,6 +44,7 @@ export const MODEL_MAP: Record<string, Model<unknown>> = {
   channels: Channel as Model<unknown>,
   messages: Message as Model<unknown>,
   channel_reads: ChannelRead as Model<unknown>,
+  push_subscriptions: PushSubscription as Model<unknown>,
 };
 
 export function getModel(table: string): Model<unknown> | null {
