@@ -35,7 +35,6 @@ export default function Chat() {
   const [modalDm, setModalDm] = useState(false);
   const [projectsList, setProjectsList] = useState<ChatProjectRef[]>([]);
 
-  const prevChannelRef = useRef<string | null>(null);
   const oldestIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   const threadRootRef = useRef<string | null>(null);
@@ -48,6 +47,16 @@ export default function Chat() {
   }, [threadParent?.id]);
 
   const usersById = useMemo(() => new Map(allUsers.map((u) => [u.id, u])), [allUsers]);
+
+  /** Clave estable de IDs para suscripción socket: mismo conjunto → no re-suscribir en vano. */
+  const channelIdsKey = useMemo(
+    () =>
+      channels
+        .map((c) => c.id)
+        .sort()
+        .join('\0'),
+    [channels]
+  );
 
   const mentionUsers = useMemo(() => {
     const ch = channels.find((c) => c.id === selectedId);
@@ -135,11 +144,6 @@ export default function Chat() {
 
   const selectChannel = useCallback(
     async (id: string) => {
-      if (prevChannelRef.current) {
-        leaveChannel(prevChannelRef.current);
-      }
-      prevChannelRef.current = id;
-      joinChannel(id);
       setSelectedId(id);
       setThreadOpen(false);
       setThreadParent(null);
@@ -156,7 +160,7 @@ export default function Chat() {
         setLoadingChannel(false);
       }
     },
-    [joinChannel, leaveChannel, loadMessages, markRead]
+    [loadMessages, markRead]
   );
 
   useEffect(() => {
@@ -164,6 +168,26 @@ export default function Chat() {
     fetchAllUsers();
     fetchProjectsList();
   }, [fetchChannels, fetchAllUsers, fetchProjectsList]);
+
+  /**
+   * Salas Socket.io por canal: el servidor emite `new_message` a `channel:<id>`.
+   * Patrón tipo Slack / Discord (equipos pequeños–medianos): el cliente entra en **todas** las salas
+   * de los canales donde es miembro, no solo en el abierto. Así llegan eventos para no leídos y
+   * el título sin polling. Tras reconexión hay que volver a unirse (rooms no persisten en el socket nuevo).
+   */
+  useEffect(() => {
+    if (!socket || !user?.id || !channelIdsKey) return;
+    const ids = channelIdsKey.split('\0');
+    const joinAll = () => {
+      for (const id of ids) joinChannel(id);
+    };
+    joinAll();
+    socket.on('connect', joinAll);
+    return () => {
+      socket.off('connect', joinAll);
+      for (const id of ids) leaveChannel(id);
+    };
+  }, [socket, user?.id, channelIdsKey, joinChannel, leaveChannel]);
 
   useEffect(() => {
     if (!socket || !user?.id) return;
@@ -181,6 +205,7 @@ export default function Chat() {
             m.id === msg.thread_id ? { ...m, reply_count: (m.reply_count || 0) + 1 } : m
           )
         );
+        void fetchChannels();
         return;
       }
       if (msg.channel_id !== selectedIdRef.current) {
@@ -245,12 +270,6 @@ export default function Chat() {
       socket.off('user_stopped_typing', onStopTyping);
     };
   }, [socket, user?.id, fetchChannels]);
-
-  useEffect(() => {
-    return () => {
-      if (prevChannelRef.current) leaveChannel(prevChannelRef.current);
-    };
-  }, [leaveChannel]);
 
   const selectedChannel = channels.find((c) => c.id === selectedId) ?? null;
 

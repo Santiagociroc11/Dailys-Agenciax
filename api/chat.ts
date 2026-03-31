@@ -114,6 +114,42 @@ async function messageTotalsByChannelIds(channelIds: string[]): Promise<Map<stri
   return map;
 }
 
+/** IDs del otro miembro en cada DM (para armar nombres por vista). */
+async function dmPeerLabelMap(
+  userId: string,
+  channelRows: Array<{ type?: string; members?: string[] }>
+): Promise<Map<string, { name?: string | null; email?: string | null }>> {
+  const peerIds: string[] = [];
+  for (const c of channelRows) {
+    if (c.type !== 'dm' || !Array.isArray(c.members)) continue;
+    const peer = c.members.find((m) => m !== userId);
+    if (peer) peerIds.push(peer);
+  }
+  const unique = [...new Set(peerIds)];
+  if (!unique.length) return new Map();
+  const rows = await User.find({ id: { $in: unique } })
+    .select('id name email')
+    .lean()
+    .exec();
+  return new Map(
+    rows.map((u) => [String(u.id), { name: u.name as string | null, email: u.email as string | null }])
+  );
+}
+
+/** Nombre de canal para quien consulta: en DM siempre el interlocutor, no el guardado al crear. */
+function channelDisplayNameForUser(
+  userId: string,
+  c: { type?: string; members?: string[]; name?: string },
+  dmPeers: Map<string, { name?: string | null; email?: string | null }>
+): string {
+  if (c.type !== 'dm' || !c.members?.length) return c.name || '';
+  const peerId = c.members.find((m) => m !== userId);
+  if (!peerId) return c.name || '';
+  const peer = dmPeers.get(peerId);
+  const label = (peer?.name && String(peer.name).trim()) || peer?.email || peerId;
+  return `💬 ${label}`;
+}
+
 /** GET /channels */
 router.get('/channels', async (req: Request, res: Response) => {
   try {
@@ -139,11 +175,12 @@ router.get('/channels', async (req: Request, res: Response) => {
 
     const ids = channels.map((c) => c.id);
     const totalsMap = await messageTotalsByChannelIds(ids);
+    const dmPeers = await dmPeerLabelMap(userId, channels);
 
     const withUnread = await Promise.all(
       channels.map(async (c) => ({
         id: c.id,
-        name: c.name,
+        name: channelDisplayNameForUser(userId, c, dmPeers),
         type: c.type,
         project_id: c.project_id,
         description: c.description,
@@ -272,10 +309,16 @@ router.post('/channels/dm', async (req: Request, res: Response) => {
         created_by: userId,
       });
     }
+    const dmPeers = await dmPeerLabelMap(userId, [{ type: 'dm', members: ch.members || [] }]);
+    const displayName = channelDisplayNameForUser(
+      userId,
+      { type: ch.type, members: ch.members || [], name: ch.name },
+      dmPeers
+    );
     res.json({
       channel: {
         id: ch.id,
-        name: ch.name,
+        name: displayName,
         type: ch.type,
         members: ch.members,
         created_by: ch.created_by,

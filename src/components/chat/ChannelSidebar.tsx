@@ -281,7 +281,7 @@ export function ChannelSidebar({
   const isProjectOpen = (projectId: string) => !projectFolded[projectId];
 
   return (
-    <aside className="w-64 border-r border-gray-200 bg-white flex flex-col h-full shrink-0">
+    <aside className="w-[22rem] shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
       <div className="p-3 border-b border-gray-100 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
