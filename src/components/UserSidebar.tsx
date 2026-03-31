@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { FolderOpen, LogOut, CalendarDays, User, SwitchCamera, Settings } from 'lucide-react';
+import { FolderOpen, LogOut, CalendarDays, User, SwitchCamera, Settings, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -59,6 +59,22 @@ export default function UserSidebar() {
           >
             <FolderOpen className="w-4 h-4 flex-shrink-0" />
             Gestión de tareas
+          </NavLink>
+        </div>
+
+        <div className="mb-4">
+          <NavLink
+            to="/user/chat"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`
+            }
+          >
+            <MessageSquare className="w-4 h-4 flex-shrink-0" />
+            Chat
           </NavLink>
         </div>
 

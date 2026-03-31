@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer, GitBranch, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer, GitBranch, ClipboardList, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
 
@@ -83,6 +83,7 @@ export default function Sidebar() {
       if (['/users', '/areas'].includes(path)) next.equipo = true;
       if (['/reports', '/audits', '/activity', '/capacity', '/bottlenecks', '/supervision-log'].includes(path)) next.reportes = true;
       if (['/payroll', '/timeline'].includes(path)) next.finanzas = true;
+      if (path === '/chat') next.operativo = true;
       return next;
     });
   }, [location.pathname]);
@@ -141,6 +142,18 @@ export default function Sidebar() {
         >
           <LayoutDashboard className="w-5 h-5 mr-3" />
           Panel Principal
+        </NavLink>
+
+        <NavLink
+          to="/chat"
+          className={({ isActive }) =>
+            `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+              isActive ? 'bg-gray-100 font-medium' : ''
+            }`
+          }
+        >
+          <MessageSquare className="w-5 h-5 mr-3" />
+          Chat
         </NavLink>
 
         <CollapsibleSection

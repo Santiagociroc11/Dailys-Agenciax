@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SocketProvider } from './contexts/SocketContext';
 import Layout from './components/Layout';
 import UserLayout from './components/UserLayout';
 import Loading from './components/Loading';
@@ -31,6 +32,7 @@ const Register = lazy(() => import('./pages/Register'));
 const Home = lazy(() => import('./pages/Home'));
 const Settings = lazy(() => import('./pages/Settings'));
 const UserSettings = lazy(() => import('./pages/UserSettings'));
+const Chat = lazy(() => import('./pages/Chat'));
 
 // Route guard for admin routes
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
@@ -51,6 +53,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <SocketProvider>
         {/* 1️⃣ Monta el contenedor de toasts aquí, una sola vez */}
         <Toaster
           position="top-right"
@@ -107,6 +110,7 @@ function App() {
               <Route path="timeline" element={<Timeline />} />
               <Route path="contabilidad" element={<Contabilidad />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="chat" element={<Chat />} />
             </Route>
 
             {/* User routes */}
@@ -119,8 +123,10 @@ function App() {
               <Route path="mi-dia" element={<MiDiaView />} />
               <Route path="projects/:projectId" element={<UserProjectView />} />
               <Route path="settings" element={<UserSettings />} />
+              <Route path="chat" element={<Chat />} />
             </Route>
         </Routes>
+        </SocketProvider>
       </AuthProvider>
     </Router>
   );

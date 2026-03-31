@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
+import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { Server as SocketIOServer } from 'socket.io';
 import { connectDB } from './lib/mongoose.js';
 import { handleDbQuery, handleDbRpc } from './api/db.js';
 import { contabilidadRouter } from './api/contabilidad.js';
@@ -32,6 +34,9 @@ import {
   type TelegramLogStatus,
 } from './lib/telegramLog.js';
 import { logger } from './lib/logger.js';
+import { chatRouter } from './api/chat.js';
+import { setChatIo } from './lib/chatSocket.js';
+import { attachChatSocket } from './lib/chatSocketHandlers.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -46,6 +51,9 @@ const __dirname = path.dirname(__filename);
 // API de base de datos (MongoDB)
 app.post('/api/db/query', handleDbQuery);
 app.post('/api/db/rpc', handleDbRpc);
+
+// Chat (REST)
+app.use('/api/chat', chatRouter);
 
 // API de contabilidad (standalone)
 app.use('/api/contabilidad', contabilidadRouter);
@@ -791,6 +799,16 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
+const httpServer = createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  path: '/socket.io',
+  cors: { origin: true, credentials: true },
+});
+
+setChatIo(io);
+attachChatSocket(io);
+
 connectDB()
   .then(() => {
     if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -798,7 +816,7 @@ connectDB()
     } else {
       logger.telegram.success('Token configurado');
     }
-    app.listen(port, () => {
+    httpServer.listen(port, () => {
       logger.server.success(`Servidor corriendo en http://localhost:${port}`);
     });
   })

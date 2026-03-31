@@ -17,6 +17,9 @@ import {
   WorkSession,
   AuditLog,
   PayrollPayment,
+  Channel,
+  Message,
+  ChannelRead,
 } from '../../models/index.js';
 
 export const MODEL_MAP: Record<string, Model<unknown>> = {
@@ -37,6 +40,9 @@ export const MODEL_MAP: Record<string, Model<unknown>> = {
   work_sessions: WorkSession as Model<unknown>,
   audit_log: AuditLog as Model<unknown>,
   payroll_payments: PayrollPayment as Model<unknown>,
+  channels: Channel as Model<unknown>,
+  messages: Message as Model<unknown>,
+  channel_reads: ChannelRead as Model<unknown>,
 };
 
 export function getModel(table: string): Model<unknown> | null {

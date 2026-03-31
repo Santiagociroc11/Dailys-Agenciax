@@ -14,6 +14,7 @@ interface BreadcrumbsProps {
 
 const DEFAULT_LABELS: Record<string, string> = {
   '/dashboard': 'Panel Principal',
+  '/chat': 'Chat',
   '/management': 'Gestión',
   '/projects': 'Proyectos',
   '/clients': 'Clientes',
@@ -35,6 +36,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   '/user/projects': 'Proyectos',
   '/user/projects/all': 'Gestión de tareas',
   '/user/settings': 'Ajustes',
+  '/user/chat': 'Chat',
 };
 
 export default function Breadcrumbs({ routeLabels = {} }: BreadcrumbsProps) {
