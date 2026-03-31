@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { supabase } from '../lib/supabase';
 import { chatFetch } from '../lib/chatApi';
+import { notifyChatUnreadTitleRefresh } from '../lib/chatUnreadEvents';
 import { resolveMentionIds } from '../components/chat/messageMentions';
 import type { ChatChannel, ChatMessage, ChatUser } from '../types/chat';
-import { ChannelSidebar } from '../components/chat/ChannelSidebar';
+import { ChannelSidebar, type ChatProjectRef } from '../components/chat/ChannelSidebar';
 import { ChannelHeader } from '../components/chat/ChannelHeader';
 import { MessageList } from '../components/chat/MessageList';
 import { MessageInput } from '../components/chat/MessageInput';
@@ -30,6 +32,7 @@ export default function Chat() {
   const [typingUserIds, setTypingUserIds] = useState<Set<string>>(new Set());
   const [modalCreate, setModalCreate] = useState(false);
   const [modalDm, setModalDm] = useState(false);
+  const [projectsList, setProjectsList] = useState<ChatProjectRef[]>([]);
 
   const prevChannelRef = useRef<string | null>(null);
   const oldestIdRef = useRef<string | null>(null);
@@ -57,6 +60,7 @@ export default function Chat() {
     try {
       const data = await chatFetch<{ channels: ChatChannel[] }>(user.id, '/api/chat/channels');
       setChannels(data.channels);
+      notifyChatUnreadTitleRefresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al cargar canales');
     }
@@ -71,6 +75,22 @@ export default function Chat() {
       /* optional */
     }
   }, [user?.id]);
+
+  const fetchProjectsList = useCallback(async () => {
+    if (!user?.id) return;
+    let q = supabase.from('projects').select('id,name').eq('is_archived', false).order('name');
+    if (!isAdmin) {
+      const ids = user.assigned_projects || [];
+      if (ids.length === 0) {
+        setProjectsList([]);
+        return;
+      }
+      q = q.in('id', ids);
+    }
+    const { data, error } = await q;
+    if (error) return;
+    setProjectsList((data as ChatProjectRef[]) || []);
+  }, [user?.id, isAdmin, user?.assigned_projects]);
 
   const loadMessages = useCallback(
     async (channelId: string, append: boolean) => {
@@ -104,6 +124,7 @@ export default function Chat() {
         setChannels((prev) =>
           prev.map((c) => (c.id === channelId ? { ...c, unread_count: 0 } : c))
         );
+        notifyChatUnreadTitleRefresh();
       } catch {
         /* ignore */
       }
@@ -140,7 +161,8 @@ export default function Chat() {
   useEffect(() => {
     fetchChannels();
     fetchAllUsers();
-  }, [fetchChannels, fetchAllUsers]);
+    fetchProjectsList();
+  }, [fetchChannels, fetchAllUsers, fetchProjectsList]);
 
   useEffect(() => {
     if (!socket || !user?.id) return;
@@ -341,6 +363,7 @@ export default function Chat() {
     <div className="flex min-h-[calc(100vh-10rem)] -mx-6 -mb-6 -mt-2 bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
       <ChannelSidebar
         channels={channels}
+        projectsList={projectsList}
         selectedId={selectedId}
         currentUserId={user.id}
         onSelect={(id) => void selectChannel(id)}

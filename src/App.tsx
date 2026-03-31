@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import UserLayout from './components/UserLayout';
 import Loading from './components/Loading';
 import VersionUpdateChecker from './components/VersionUpdateChecker';
+import { ChatDocumentTitleUnread } from './components/ChatDocumentTitleUnread';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tasks = lazy(() => import('./pages/Tasks'));
@@ -68,6 +69,7 @@ function App() {
           }}
         />
         <VersionUpdateChecker />
+        <ChatDocumentTitleUnread />
 
         <Routes>
           <Route path="/" element={
