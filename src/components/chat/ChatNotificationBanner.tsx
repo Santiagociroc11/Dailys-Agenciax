@@ -76,7 +76,7 @@ export function ChatNotificationBanner() {
 
   if (!browserNotificationsSupported() && !isWebPushClientSupported()) {
     return (
-      <div className="px-4 py-2 text-xs text-amber-800 border-b border-amber-100 bg-amber-50/60">
+      <div className="shrink-0 border-b border-amber-100 bg-amber-50/60 px-4 py-2 text-xs text-amber-800">
         Tu navegador no permite notificaciones de escritorio ni push web en esta vista.
       </div>
     );
@@ -158,7 +158,7 @@ export function ChatNotificationBanner() {
   const pushConfigured = pushServerReady === true;
 
   return (
-    <div className="border-b border-gray-100 bg-gray-50/90">
+    <div className="shrink-0 border-b border-gray-100 bg-gray-50/90">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2.5 text-xs">
         <div className="text-gray-600 leading-snug space-y-1">
           {pushServerReady === null && (

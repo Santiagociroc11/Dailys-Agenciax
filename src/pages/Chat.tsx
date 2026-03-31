@@ -417,7 +417,7 @@ export default function Chat() {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-[calc(100vh-10rem)] -mx-6 -mb-6 -mt-2 bg-gray-100 rounded-lg overflow-hidden border border-gray-200/60 shadow-sm">
+    <div className="flex h-[calc(100dvh-10rem)] max-h-[calc(100dvh-10rem)] min-h-[16rem] -mx-6 -mb-6 -mt-2 overflow-hidden rounded-lg border border-gray-200/60 bg-gray-100 shadow-sm">
       <ChannelSidebar
         channels={channels}
         projectsList={projectsList}
@@ -430,8 +430,8 @@ export default function Chat() {
         onNewDm={() => setModalDm(true)}
       />
 
-      <div className="flex-1 flex min-w-0 min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 bg-white border-r border-gray-200">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white border-r border-gray-200">
           <ChannelHeader
             channel={selectedChannel}
             memberCount={selectedChannel?.members?.length ?? 0}
@@ -439,9 +439,9 @@ export default function Chat() {
           />
           <ChatNotificationBanner />
           {loadingChannel ? (
-            <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">Cargando…</div>
+            <div className="flex flex-1 items-center justify-center text-gray-500 text-sm">Cargando…</div>
           ) : selectedId ? (
-            <>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <MessageList
                 channelId={selectedId}
                 messages={messages}
@@ -463,9 +463,9 @@ export default function Chat() {
                 users={mentionUsers.length ? mentionUsers : allUsers}
                 onSend={sendMessage}
               />
-            </>
+            </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-500 text-sm px-6 text-center">
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-gray-500 text-sm">
               Elige un canal a la izquierda para comenzar a chatear.
             </div>
           )}
