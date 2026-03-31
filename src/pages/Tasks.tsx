@@ -205,6 +205,9 @@ function Tasks() {
   const [currentPage, setCurrentPage] = useState(1);
   const [tasksPerPage, setTasksPerPage] = useState(10);
   const [totalTasks, setTotalTasks] = useState(0);
+  /** Totales por pestaña (mismos filtros proyecto/fase/búsqueda), no solo la página actual */
+  const [tabCountActive, setTabCountActive] = useState(0);
+  const [tabCountApproved, setTabCountApproved] = useState(0);
   const [activeTab, setActiveTab] = useState<'active' | 'approved'>('active');
 
   // Función auxiliar para determinar si una tarea está aprobada
@@ -434,6 +437,10 @@ function Tasks() {
     fetchSubtasks();
   }, [isAdmin]);
 
+  useEffect(() => {
+    fetchTasks();
+  }, [subtasks]);
+
   async function fetchProjects() {
     try {
       const { data, error } = await supabase
@@ -502,8 +509,12 @@ function Tasks() {
       const { data: allTasks, error: allTasksError } = await allTasksQuery;
       if (allTasksError) throw allTasksError;
 
-      // Aplicar filtro de pestañas para el conteo
-      let filteredForCount = allTasks || [];
+      const list = allTasks || [];
+      setTabCountActive(list.filter(task => !isTaskApproved(task.id)).length);
+      setTabCountApproved(list.filter(task => isTaskApproved(task.id)).length);
+
+      // Aplicar filtro de pestañas para la lista paginada
+      let filteredForCount = list;
       if (activeTab === 'approved') {
         filteredForCount = filteredForCount.filter(task => isTaskApproved(task.id));
       } else if (activeTab === 'active') {
@@ -2110,7 +2121,7 @@ function Tasks() {
             >
               Tareas Activas
               <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
-                {tasks.filter(task => !isTaskApproved(task.id)).length}
+                {tabCountActive}
               </span>
             </button>
             <button
@@ -2122,7 +2133,7 @@ function Tasks() {
             >
               Tareas Aprobadas
               <span className="ml-2 bg-green-100 text-green-600 py-0.5 px-2 rounded-full text-xs">
-                {tasks.filter(task => isTaskApproved(task.id)).length}
+                {tabCountApproved}
               </span>
             </button>
           </nav>
