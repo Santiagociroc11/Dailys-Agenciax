@@ -19,7 +19,6 @@ import {
   getWebPushLocalEnabled,
   isWebPushClientSupported,
   subscribeWebPush,
-  unsubscribeWebPush,
 } from '../../lib/webPushClient';
 
 function notificationsActuallyOn(): boolean {
@@ -41,8 +40,6 @@ export function ChatNotificationBanner() {
   const { user, isAdmin } = useAuth();
   const [setupComplete, setSetupComplete] = useState(resolveInitialSetupComplete);
   const [deferred, setDeferred] = useState(getChatNotifBannerDeferred);
-  const [enabledLocal, setEnabledLocal] = useState(getChatBrowserNotificationsEnabled);
-  const [pushOn, setPushOn] = useState(getWebPushLocalEnabled);
   const [busy, setBusy] = useState(false);
   const [pushServerReady, setPushServerReady] = useState<boolean | null>(null);
 
@@ -85,9 +82,6 @@ export function ChatNotificationBanner() {
     );
   }
 
-  const activeLocal = enabledLocal && Notification.permission === 'granted';
-  const notificationsOn = pushOn || activeLocal;
-
   const hidePromoForever = () => {
     setDeferred(true);
     setChatNotifBannerDeferred();
@@ -110,8 +104,6 @@ export function ChatNotificationBanner() {
         }
         if (r.ok) {
           setChatBrowserNotificationsEnabled(true);
-          setEnabledLocal(true);
-          setPushOn(true);
           markSetupDone();
           toast.success('Notificaciones activadas: también cuando cierres la pestaña');
           return;
@@ -122,7 +114,6 @@ export function ChatNotificationBanner() {
         }
         if (Notification.permission === 'granted') {
           setChatBrowserNotificationsEnabled(true);
-          setEnabledLocal(true);
           markSetupDone();
           toast.success(
             r.error
@@ -132,7 +123,6 @@ export function ChatNotificationBanner() {
           return;
         }
         const ok = await requestChatBrowserNotificationPermission();
-        setEnabledLocal(ok);
         if (ok) {
           markSetupDone();
           toast.success('Notificaciones activadas mientras tengas la app abierta');
@@ -148,7 +138,6 @@ export function ChatNotificationBanner() {
     setBusy(true);
     try {
       const ok = await requestChatBrowserNotificationPermission();
-      setEnabledLocal(ok);
       if (ok) {
         markSetupDone();
         toast.success('Notificaciones activadas mientras tengas la app abierta');
@@ -160,27 +149,9 @@ export function ChatNotificationBanner() {
     }
   };
 
-  const turnOffAll = async () => {
-    if (!user?.id) return;
-    setBusy(true);
-    try {
-      await unsubscribeWebPush(user.id);
-      setChatBrowserNotificationsEnabled(false);
-      setPushOn(false);
-      setEnabledLocal(false);
-      clearChatNotifBannerPreference();
-      setSetupComplete(false);
-      setDeferred(false);
-      toast.message('Notificaciones del chat desactivadas en este equipo');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const showPromo = !deferred && !setupComplete;
-  const showManage = setupComplete && notificationsOn;
 
-  if (!showPromo && !showManage) {
+  if (!showPromo) {
     return null;
   }
 
@@ -188,65 +159,45 @@ export function ChatNotificationBanner() {
 
   return (
     <div className="border-b border-gray-100 bg-gray-50/90">
-      {showPromo && (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2.5 text-xs">
-          <div className="text-gray-600 leading-snug space-y-1">
-            {pushServerReady === null && (
-              <p className="text-gray-500">Comprobando notificaciones…</p>
-            )}
-            {pushServerReady === false && (
-              <p>
-                <span className="font-medium text-gray-800">Notificaciones del chat.</span> Te avisamos con la app
-                abierta (pestaña en segundo plano u otra página). En el servidor no hay push con pestaña cerrada: configura{' '}
-                <code className="text-[10px] bg-gray-200/80 px-1 rounded">VAPID_*</code> en <code className="text-[10px] bg-gray-200/80 px-1 rounded">.env</code>.
-              </p>
-            )}
-            {pushConfigured && (
-              <p>
-                <span className="font-medium text-gray-800">Un solo permiso.</span> Avisos del chat con la app abierta y,
-                si el navegador lo permite, también cuando cierres esta pestaña (HTTPS en producción).
-              </p>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              disabled={busy || pushServerReady === null || !user}
-              onClick={activateNotifications}
-              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-150 disabled:opacity-50"
-            >
-              {busy ? '…' : 'Activar notificaciones'}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={hidePromoForever}
-              className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors duration-150 text-[11px]"
-            >
-              Más tarde
-            </button>
-          </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2.5 text-xs">
+        <div className="text-gray-600 leading-snug space-y-1">
+          {pushServerReady === null && (
+            <p className="text-gray-500">Comprobando notificaciones…</p>
+          )}
+          {pushServerReady === false && (
+            <p>
+              <span className="font-medium text-gray-800">Notificaciones del chat.</span> Te avisamos con la app abierta
+              (pestaña en segundo plano u otra página). En el servidor no hay push con pestaña cerrada: configura{' '}
+              <code className="text-[10px] bg-gray-200/80 px-1 rounded">VAPID_*</code> en{' '}
+              <code className="text-[10px] bg-gray-200/80 px-1 rounded">.env</code>.
+            </p>
+          )}
+          {pushConfigured && (
+            <p>
+              <span className="font-medium text-gray-800">Un solo permiso.</span> Avisos del chat con la app abierta y,
+              si el navegador lo permite, también cuando cierres esta pestaña (HTTPS en producción).
+            </p>
+          )}
         </div>
-      )}
-
-      {showManage && (
-        <div
-          className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2 text-xs ${showPromo ? 'border-t border-gray-100/80' : ''}`}
-        >
-          <p className="text-gray-600">
-            <span className="font-medium text-gray-800">Notificaciones del chat activas.</span>
-            {pushOn ? ' Incluye avisos con la pestaña cerrada.' : ' Solo mientras la app sigue abierta en el navegador.'}
-          </p>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            disabled={busy || !user}
-            onClick={turnOffAll}
-            className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors duration-150 shrink-0 disabled:opacity-50"
+            disabled={busy || pushServerReady === null || !user}
+            onClick={activateNotifications}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-150 disabled:opacity-50"
           >
-            Quitar en este equipo
+            {busy ? '…' : 'Activar notificaciones'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={hidePromoForever}
+            className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors duration-150 text-[11px]"
+          >
+            Más tarde
           </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
