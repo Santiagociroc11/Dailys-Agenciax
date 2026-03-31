@@ -8,6 +8,7 @@ import UserLayout from './components/UserLayout';
 import Loading from './components/Loading';
 import VersionUpdateChecker from './components/VersionUpdateChecker';
 import { ChatDocumentTitleUnread } from './components/ChatDocumentTitleUnread';
+import { ChatUnreadProvider } from './contexts/ChatUnreadContext';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tasks = lazy(() => import('./pages/Tasks'));
@@ -55,6 +56,7 @@ function App() {
     <Router>
       <AuthProvider>
         <SocketProvider>
+        <ChatUnreadProvider>
         {/* 1️⃣ Monta el contenedor de toasts aquí, una sola vez */}
         <Toaster
           position="top-right"
@@ -128,6 +130,7 @@ function App() {
               <Route path="chat" element={<Chat />} />
             </Route>
         </Routes>
+        </ChatUnreadProvider>
         </SocketProvider>
       </AuthProvider>
     </Router>

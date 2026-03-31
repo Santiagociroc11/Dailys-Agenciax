@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { FolderOpen, LogOut, CalendarDays, User, SwitchCamera, Settings, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
+import { ChatNavUnreadBadge } from './ChatNavUnreadBadge';
 
 export default function UserSidebar() {
   const { user, signOut, isAdmin } = useAuth();
@@ -74,7 +75,8 @@ export default function UserSidebar() {
             }
           >
             <MessageSquare className="w-4 h-4 flex-shrink-0" />
-            Chat
+            <span className="flex-1 min-w-0">Chat</span>
+            <ChatNavUnreadBadge />
           </NavLink>
         </div>
 

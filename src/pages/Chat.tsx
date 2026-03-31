@@ -69,8 +69,9 @@ export default function Chat() {
     if (!user?.id) return;
     try {
       const data = await chatFetch<{ channels: ChatChannel[] }>(user.id, '/api/chat/channels');
+      const totalUnread = data.channels.reduce((s, c) => s + (c.unread_count ?? 0), 0);
       setChannels(data.channels);
-      notifyChatUnreadTitleRefresh();
+      notifyChatUnreadTitleRefresh({ totalUnread });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al cargar canales');
     }
@@ -131,10 +132,12 @@ export default function Chat() {
       try {
         await chatFetch(user.id, `/api/chat/channels/${channelId}/read`, { method: 'POST', body: '{}' });
         socket?.emit('mark_read', { channelId });
-        setChannels((prev) =>
-          prev.map((c) => (c.id === channelId ? { ...c, unread_count: 0 } : c))
-        );
-        notifyChatUnreadTitleRefresh();
+        setChannels((prev) => {
+          const next = prev.map((c) => (c.id === channelId ? { ...c, unread_count: 0 } : c));
+          const totalUnread = next.reduce((s, c) => s + (c.unread_count ?? 0), 0);
+          queueMicrotask(() => notifyChatUnreadTitleRefresh({ totalUnread }));
+          return next;
+        });
       } catch {
         /* ignore */
       }

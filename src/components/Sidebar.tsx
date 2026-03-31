@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, CheckSquare, LogOut, Users, FolderOpen, KanbanSquare, User, SwitchCamera, Layers, BarChart3, Building2, PieChart, History, Activity, DollarSign, ChevronDown, ChevronRight, Settings, Calendar, Calculator, Timer, GitBranch, ClipboardList, MessageSquare } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import VersionInfo from './VersionInfo';
+import { ChatNavUnreadBadge } from './ChatNavUnreadBadge';
 
 type NavItem = { to: string; label: string; icon: React.ElementType };
 
@@ -147,13 +148,14 @@ export default function Sidebar() {
         <NavLink
           to="/chat"
           className={({ isActive }) =>
-            `flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 ${
+            `flex items-center gap-0 px-6 py-3 text-gray-700 hover:bg-gray-100 ${
               isActive ? 'bg-gray-100 font-medium' : ''
             }`
           }
         >
-          <MessageSquare className="w-5 h-5 mr-3" />
-          Chat
+          <MessageSquare className="w-5 h-5 mr-3 shrink-0" />
+          <span className="flex-1 min-w-0">Chat</span>
+          <ChatNavUnreadBadge />
         </NavLink>
 
         <CollapsibleSection
