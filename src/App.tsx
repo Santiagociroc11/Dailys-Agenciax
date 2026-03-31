@@ -64,9 +64,15 @@ function App() {
           reverseOrder={false}
           toastOptions={{
             duration: 3000,
-            // opcional: styling global
+            classNames: {
+              toast: 'rounded-xl border border-gray-200/90 bg-white text-gray-900 shadow-lg font-sans',
+              title: 'font-semibold',
+              description: 'text-gray-600',
+              success: 'border-emerald-200/80',
+              error: 'border-red-200/80',
+            },
             style: {
-              padding: '8px 16px',
+              padding: '12px 16px',
               fontSize: '14px',
             },
           }}

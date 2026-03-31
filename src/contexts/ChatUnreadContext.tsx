@@ -10,7 +10,7 @@ import React, {
 import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
 import { chatFetch } from '../lib/chatApi';
-import { CHAT_UNREAD_TITLE_REFRESH, type ChatUnreadRefreshDetail } from '../lib/chatUnreadEvents';
+import { CHAT_UNREAD_TITLE_REFRESH } from '../lib/chatUnreadEvents';
 
 interface ChatUnreadContextValue {
   totalUnread: number;
@@ -21,21 +21,38 @@ const ChatUnreadContext = createContext<ChatUnreadContextValue | null>(null);
 
 export function ChatUnreadProvider({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  const { socket } = useSocket();
+  const { socket, joinChannel, leaveChannel } = useSocket();
   const [totalUnread, setTotalUnread] = useState(0);
+  const [channelRoomIds, setChannelRoomIds] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const channelRoomKey = useMemo(
+    () =>
+      [...channelRoomIds]
+        .filter(Boolean)
+        .sort()
+        .join('\0'),
+    [channelRoomIds]
+  );
 
   const refresh = useCallback(async () => {
     if (!user?.id) {
       setTotalUnread(0);
+      setChannelRoomIds([]);
       return;
     }
     try {
-      const data = await chatFetch<{ channels: { unread_count?: number }[] }>(user.id, '/api/chat/channels');
-      const t = (data.channels ?? []).reduce((sum, c) => sum + (c.unread_count ?? 0), 0);
+      const data = await chatFetch<{ channels: { id: string; unread_count?: number }[] }>(
+        user.id,
+        '/api/chat/channels'
+      );
+      const list = data.channels ?? [];
+      setChannelRoomIds(list.map((c) => c.id).filter(Boolean));
+      const t = list.reduce((sum, c) => sum + (c.unread_count ?? 0), 0);
       setTotalUnread(t);
     } catch {
       setTotalUnread(0);
+      setChannelRoomIds([]);
     }
   }, [user?.id]);
 
@@ -49,12 +66,8 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
   }, [loading, user?.id, refresh]);
 
   useEffect(() => {
-    const onCustom = (e: Event) => {
-      const d = (e as CustomEvent<ChatUnreadRefreshDetail>).detail;
-      if (typeof d?.totalUnread === 'number') {
-        setTotalUnread(d.totalUnread);
-        return;
-      }
+    const onCustom = (_e: Event) => {
+      /* Siempre refrescar lista de canales: así se actualizan las salas socket al crear canal / cambiar membresía. */
       void refresh();
     };
     window.addEventListener(CHAT_UNREAD_TITLE_REFRESH, onCustom);
@@ -75,6 +88,25 @@ export function ChatUnreadProvider({ children }: { children: React.ReactNode }) 
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
   }, [socket, user?.id, refresh]);
+
+  /**
+   * Unirse a todas las salas `channel:<id>` mientras la sesión esté activa (no solo en la página Chat).
+   * Si solo se unía desde Chat y al salir se hacía leave, dejaban de llegar `new_message` y no había
+   * notificaciones de escritorio ni actualización fiable de no leídos fuera del chat.
+   */
+  useEffect(() => {
+    if (!socket || !user?.id) return;
+    const ids = channelRoomKey ? channelRoomKey.split('\0').filter(Boolean) : [];
+    const joinAll = () => {
+      for (const id of ids) joinChannel(id);
+    };
+    joinAll();
+    socket.on('connect', joinAll);
+    return () => {
+      socket.off('connect', joinAll);
+      for (const id of ids) leaveChannel(id);
+    };
+  }, [socket, user?.id, channelRoomKey, joinChannel, leaveChannel]);
 
   useEffect(() => {
     if (!user?.id) return;

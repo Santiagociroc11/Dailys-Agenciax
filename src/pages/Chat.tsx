@@ -22,7 +22,7 @@ import { ChatNotificationBanner } from '../components/chat/ChatNotificationBanne
 export default function Chat() {
   const { user, isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { socket, joinChannel, leaveChannel, onlineUserIds, isConnected } = useSocket();
+  const { socket, onlineUserIds, isConnected } = useSocket();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -51,16 +51,6 @@ export default function Chat() {
   }, [threadParent?.id]);
 
   const usersById = useMemo(() => new Map(allUsers.map((u) => [u.id, u])), [allUsers]);
-
-  /** Clave estable de IDs para suscripción socket: mismo conjunto → no re-suscribir en vano. */
-  const channelIdsKey = useMemo(
-    () =>
-      channels
-        .map((c) => c.id)
-        .sort()
-        .join('\0'),
-    [channels]
-  );
 
   const mentionUsers = useMemo(() => {
     const ch = channels.find((c) => c.id === selectedId);
@@ -203,25 +193,7 @@ export default function Chat() {
     void selectChannel(channelFromUrl);
   }, [channelFromUrl, channels, selectChannel, setSearchParams]);
 
-  /**
-   * Salas Socket.io por canal: el servidor emite `new_message` a `channel:<id>`.
-   * Patrón tipo Slack / Discord (equipos pequeños–medianos): el cliente entra en **todas** las salas
-   * de los canales donde es miembro, no solo en el abierto. Así llegan eventos para no leídos y
-   * el título sin polling. Tras reconexión hay que volver a unirse (rooms no persisten en el socket nuevo).
-   */
-  useEffect(() => {
-    if (!socket || !user?.id || !channelIdsKey) return;
-    const ids = channelIdsKey.split('\0');
-    const joinAll = () => {
-      for (const id of ids) joinChannel(id);
-    };
-    joinAll();
-    socket.on('connect', joinAll);
-    return () => {
-      socket.off('connect', joinAll);
-      for (const id of ids) leaveChannel(id);
-    };
-  }, [socket, user?.id, channelIdsKey, joinChannel, leaveChannel]);
+  /** Las salas `channel:<id>` se unen en `ChatUnreadProvider` para todo el tiempo de sesión. */
 
   useEffect(() => {
     if (!socket || !user?.id) return;

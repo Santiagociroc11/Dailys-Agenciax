@@ -128,9 +128,9 @@ export default function Sidebar() {
   ];
 
   return (
-    <div className="w-64 bg-white shadow-lg h-full flex flex-col min-h-0">
-      <div className="p-6 shrink-0">
-        <h1 className="text-2xl font-bold text-gray-800">Seguimiento de Actividades</h1>
+    <div className="w-64 bg-white border-r border-gray-200/90 shadow-sm h-full flex flex-col min-h-0">
+      <div className="p-6 shrink-0 border-b border-gray-100">
+        <h1 className="text-xl font-bold text-gray-900 tracking-tight">Seguimiento de Actividades</h1>
       </div>
       <nav className="flex-1 overflow-y-auto min-h-0 py-2">
         <NavLink

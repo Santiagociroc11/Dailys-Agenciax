@@ -5,6 +5,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { chatFetch } from '../lib/chatApi';
 import {
   browserNotificationsSupported,
+  CHAT_BROWSER_NOTIF_PREF_EVENT,
   CHAT_NOTIFICATION_ICON_URL,
   getChatBrowserNotificationsEnabled,
   shouldShowChatDesktopNotification,
@@ -51,8 +52,63 @@ export function ChatBrowserNotifications() {
   }, [loading, user?.id, refreshMeta]);
 
   useEffect(() => {
+    const onPref = () => {
+      if (!getChatBrowserNotificationsEnabled()) return;
+      if (Notification.permission !== 'granted') return;
+      void refreshMeta();
+    };
+    window.addEventListener(CHAT_BROWSER_NOTIF_PREF_EVENT, onPref);
+    return () => window.removeEventListener(CHAT_BROWSER_NOTIF_PREF_EVENT, onPref);
+  }, [refreshMeta]);
+
+  useEffect(() => {
+    if (loading || !user?.id) return;
+    let status: PermissionStatus | null = null;
+    const hook = async () => {
+      try {
+        status = await navigator.permissions.query({ name: 'notifications' as PermissionName });
+        status.onchange = () => {
+          if (Notification.permission === 'granted' && getChatBrowserNotificationsEnabled()) {
+            void refreshMeta();
+          }
+        };
+      } catch {
+        /* Safari / algunos entornos no soportan query(notifications) */
+      }
+    };
+    void hook();
+    return () => {
+      if (status) status.onchange = null;
+    };
+  }, [loading, user?.id, refreshMeta]);
+
+  useEffect(() => {
     if (!socket || !user?.id) return;
     if (!browserNotificationsSupported()) return;
+
+    const showNotification = (title: string, body: string, tag: string, onClick: () => void) => {
+      const base: NotificationOptions = { body, tag, silent: false };
+      try {
+        const n = new Notification(title, { ...base, icon: CHAT_NOTIFICATION_ICON_URL });
+        n.onclick = () => {
+          onClick();
+          n.close();
+        };
+        return;
+      } catch (first) {
+        try {
+          const n = new Notification(title, base);
+          n.onclick = () => {
+            onClick();
+            n.close();
+          };
+        } catch (second) {
+          if (import.meta.env.DEV) {
+            console.warn('[ChatBrowserNotifications] No se pudo mostrar la notificación:', first, second);
+          }
+        }
+      }
+    };
 
     const onNew = (msg: ChatMessage) => {
       if (!getChatBrowserNotificationsEnabled()) return;
@@ -69,27 +125,17 @@ export function ChatBrowserNotifications() {
       const chatPath = isAdmin ? '/chat' : '/user/chat';
       const channelId = msg.channel_id;
 
-      try {
-        const n = new Notification(title, {
-          body,
-          icon: CHAT_NOTIFICATION_ICON_URL,
-          tag: `dailys-chat-${msg.id}`,
-        });
-        n.onclick = () => {
-          window.focus();
-          n.close();
-          navigate(`${chatPath}?channel=${encodeURIComponent(channelId)}`);
-        };
-      } catch {
-        /* ignore */
-      }
+      showNotification(title, body, `dailys-chat-${msg.id}`, () => {
+        window.focus();
+        navigate(`${chatPath}?channel=${encodeURIComponent(channelId)}`);
+      });
     };
 
     socket.on('new_message', onNew);
     return () => {
       socket.off('new_message', onNew);
     };
-  }, [socket, user?.id, isAdmin, navigate]);
+  }, [socket, user, isAdmin, navigate]);
 
   return null;
 }

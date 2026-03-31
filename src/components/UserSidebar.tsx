@@ -20,10 +20,10 @@ export default function UserSidebar() {
   };
 
   return (
-    <div className="w-64 bg-white border-r border-gray-200 flex flex-col h-full">
+    <div className="w-64 bg-white border-r border-gray-200/90 shadow-sm flex flex-col h-full">
       {/* Header */}
       <div className="p-5 border-b border-gray-100">
-        <h1 className="text-lg font-semibold text-gray-800 tracking-tight">Mi espacio</h1>
+        <h1 className="text-lg font-bold text-gray-900 tracking-tight">Mi espacio</h1>
         <p className="text-xs text-gray-500 mt-0.5">Tareas y proyectos</p>
       </div>
 
